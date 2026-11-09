@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.26100.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <RootNamespace>Screen.App</RootNamespace>
+    <AssemblyName>Screen</AssemblyName>
+    <Version>1.0.9</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Screen.ico</ApplicationIcon>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\Screen.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="3.0.0" />
+    <ProjectReference Include="../Screen.Core/Screen.Core.csproj" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
+    <PackageReference Include="Lucide.NET.Core" Version="0.1.2" />
+    <PackageReference Include="RapidOcrNet" Version="3.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Models\Ocr\PP-OCRv6_det_small.onnx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>models\v6\PP-OCRv6_det_small.onnx</TargetPath>
+    </Content>
+    <Content Include="Models\Ocr\PP-OCRv6_rec_small.onnx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>models\v6\PP-OCRv6_rec_small.onnx</TargetPath>
+    </Content>
+    <Content Include="Models\Ocr\ppocrv6_small_dict.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>models\v6\ppocrv6_small_dict.txt</TargetPath>
+    </Content>
+    <Content Include="THIRD-PARTY-NOTICES.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="ffmpeg\bin\ffmpeg.exe">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>ffmpeg\bin\ffmpeg.exe</TargetPath>
+    </Content>
+  </ItemGroup>
+  <Target Name="RemoveUnusedRapidOcrBuildModels" AfterTargets="CopyModelsBuild">
+    <Delete Files="$(TargetDir)models\v5\ch_PP-OCRv5_mobile_det.onnx;$(TargetDir)models\v5\latin_PP-OCRv5_rec_mobile_infer.onnx;$(TargetDir)models\v5\ppocrv5_latin_dict.txt" />
+  </Target>
+  <Target Name="RemoveUnusedRapidOcrPublishModels" AfterTargets="CopyModelsPublish">
+    <Delete Files="$(PublishDir)models\v5\ch_PP-OCRv5_mobile_det.onnx;$(PublishDir)models\v5\latin_PP-OCRv5_rec_mobile_infer.onnx;$(PublishDir)models\v5\ppocrv5_latin_dict.txt" />
+  </Target>
+</Project>

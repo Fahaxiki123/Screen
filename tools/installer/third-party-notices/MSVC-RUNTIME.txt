@@ -1,0 +1,30 @@
+Microsoft Visual C++ v14 x64 runtime
+
+Copyright Microsoft Corporation. All rights reserved.
+Actual DLL file/product version: 14.51.36247.0
+Source package directory version: 14.51.36231
+
+The ten unmodified x64 CRT DLLs were copied from the Visual Studio Community
+2026 redist directory, not from Windows system directories:
+  [VisualStudioFolder]\VC\Redist\MSVC\14.51.36231\x64\Microsoft.VC145.CRT
+
+They are installed beside Screen.exe for application-local use.
+MSVC-FILE-HASHES.txt records names, actual file versions, SHA256 hashes, and
+the valid Microsoft Authenticode signature checks made on 2026-10-03.
+
+License texts included:
+  licenses/Microsoft-Visual-C-V14-2026-License.txt
+  licenses/Microsoft-Visual-Studio-2026-Community-License.txt
+
+Official license sources:
+https://visualstudio.microsoft.com/license-terms/vs2026-ga-visualcpp-v14-redist-runtime/
+https://visualstudio.microsoft.com/license-terms/vs2026-ga-community/
+
+Official Visual Studio 2026 Distributable Code list:
+https://learn.microsoft.com/en-us/visualstudio/releases/2026/redistribution
+
+Redistribution of these files is governed by the applicable licensed Visual
+Studio edition's Distributable Code terms together with its Distributable
+Code list. The separate runtime end-user license is also included. Microsoft
+runtime terms apply only to the Microsoft components, not to the other
+independently licensed components in this package.

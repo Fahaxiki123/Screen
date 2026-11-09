@@ -1,0 +1,22 @@
+Screen includes the following third-party software and model files:
+
+RapidOcrNet
+Copyright its contributors.
+Licensed under the Apache License 2.0.
+https://github.com/BobLd/RapidOcrNet
+
+RapidOCR and PaddleOCR PP-OCRv6 models
+Copyright their contributors.
+Licensed under the Apache License 2.0.
+https://github.com/RapidAI/RapidOCR
+https://github.com/PaddlePaddle/PaddleOCR
+
+FFmpeg (GPL build, distributed as a separate ffmpeg.exe executable)
+Copyright the FFmpeg Project contributors.
+Licensed under the GNU General Public License version 3 (or later).
+The full license text and corresponding source code are available at
+https://www.ffmpeg.org/legal.html and https://github.com/FFmpeg/FFmpeg.
+Screen invokes ffmpeg.exe as an external process for screen-recording
+encode/decode and does not link against its libraries.
+
+The complete license texts and source information are available at the links above.

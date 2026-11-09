@@ -1,0 +1,434 @@
+[
+  {
+    "component": "Clipper2/2.0.0",
+    "authors": "Angus Johnson",
+    "copyright": "Copyright 漏 2010-2025",
+    "declaredLicense": "License.txt",
+    "licenseType": "file",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/AngusJohnson/Clipper2"
+    },
+    "notices": [
+      {
+        "file": "licenses/Clipper2-2.0.0-License.txt",
+        "source": "NuGet Clipper2/2.0.0 / License.txt",
+        "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951"
+      }
+    ]
+  },
+  {
+    "component": "Lucide.NET.Core/0.1.2",
+    "authors": "Lucide.NET Contributors",
+    "copyright": null,
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/your-org/lucide-csharp",
+      "commit": "902ce75f1ee3d5ce89ba003c59e1ec27b2515fc1"
+    },
+    "notices": [
+      {
+        "file": "licenses/MIT-license-text.html",
+        "sha256": "0ff20ddac3d7ee3c94cd6b60bef6537b4c4f6815063ab28228ab8ca563b1fe8e"
+      },
+      {
+        "file": "licenses/Lucide-icons-LICENSE.txt",
+        "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57"
+      }
+    ],
+    "provenanceNote": "Package declares MIT, authors Lucide.NET Contributors, and contains no standalone LICENSE. Its project/repository URL is a your-org placeholder. MIT text is the NuGet SPDX reference; an original wrapper copyright notice and upstream repository were not independently recovered. Lucide/Feather icon notices are included separately."
+  },
+  {
+    "component": "Microsoft.ML.OnnxRuntime/1.27.0",
+    "authors": "Microsoft",
+    "copyright": "漏 Microsoft Corporation. All rights reserved.",
+    "declaredLicense": "LICENSE",
+    "licenseType": "file",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/Microsoft/onnxruntime.git",
+      "commit": "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5"
+    },
+    "notices": [
+      {
+        "file": "licenses/Microsoft.ML.OnnxRuntime-1.27.0-LICENSE.txt",
+        "source": "NuGet Microsoft.ML.OnnxRuntime/1.27.0 / LICENSE",
+        "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+      },
+      {
+        "file": "licenses/Microsoft.ML.OnnxRuntime-1.27.0-ThirdPartyNotices.txt",
+        "source": "NuGet Microsoft.ML.OnnxRuntime/1.27.0 / ThirdPartyNotices.txt",
+        "sha256": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866"
+      }
+    ]
+  },
+  {
+    "component": "Microsoft.ML.OnnxRuntime.Managed/1.27.0",
+    "authors": "Microsoft",
+    "copyright": "漏 Microsoft Corporation. All rights reserved.",
+    "declaredLicense": "LICENSE.txt",
+    "licenseType": "file",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/microsoft/onnxruntime",
+      "commit": "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5"
+    },
+    "notices": [
+      {
+        "file": "licenses/Microsoft.ML.OnnxRuntime.Managed-1.27.0-LICENSE.txt",
+        "source": "NuGet Microsoft.ML.OnnxRuntime.Managed/1.27.0 / LICENSE.txt",
+        "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+      },
+      {
+        "file": "licenses/Microsoft.ML.OnnxRuntime.Managed-1.27.0-ThirdPartyNotices.txt",
+        "source": "NuGet Microsoft.ML.OnnxRuntime.Managed/1.27.0 / ThirdPartyNotices.txt",
+        "sha256": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866"
+      }
+    ]
+  },
+  {
+    "component": "NAudio/3.0.0",
+    "authors": "Mark Heath & Contributors",
+    "copyright": "漏 Mark Heath 2026",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/naudio/NAudio",
+      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
+    },
+    "notices": [
+      {
+        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
+      }
+    ]
+  },
+  {
+    "component": "NAudio.Asio/3.0.0",
+    "authors": "Mark Heath",
+    "copyright": "漏 Mark Heath 2026",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/naudio/NAudio",
+      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
+    },
+    "notices": [
+      {
+        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
+      }
+    ]
+  },
+  {
+    "component": "NAudio.Core/3.0.0",
+    "authors": "Mark Heath",
+    "copyright": "漏 Mark Heath 2026",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/naudio/NAudio",
+      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
+    },
+    "notices": [
+      {
+        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
+      }
+    ]
+  },
+  {
+    "component": "NAudio.Dmo/3.0.0",
+    "authors": "Mark Heath",
+    "copyright": "漏 Mark Heath 2026",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/naudio/NAudio",
+      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
+    },
+    "notices": [
+      {
+        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
+      }
+    ]
+  },
+  {
+    "component": "NAudio.Midi/3.0.0",
+    "authors": "Mark Heath",
+    "copyright": "漏 Mark Heath 2026",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/naudio/NAudio",
+      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
+    },
+    "notices": [
+      {
+        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
+      }
+    ]
+  },
+  {
+    "component": "NAudio.Wasapi/3.0.0",
+    "authors": "Mark Heath",
+    "copyright": "漏 Mark Heath 2026",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/naudio/NAudio",
+      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
+    },
+    "notices": [
+      {
+        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
+      }
+    ]
+  },
+  {
+    "component": "NAudio.WinForms/3.0.0",
+    "authors": "Mark Heath",
+    "copyright": "漏 Mark Heath 2026",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/naudio/NAudio",
+      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
+    },
+    "notices": [
+      {
+        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
+      }
+    ]
+  },
+  {
+    "component": "NAudio.WinMM/3.0.0",
+    "authors": "Mark Heath",
+    "copyright": "漏 Mark Heath 2026",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/naudio/NAudio",
+      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
+    },
+    "notices": [
+      {
+        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
+      }
+    ]
+  },
+  {
+    "component": "RapidOcrNet/3.0.0",
+    "authors": "BobLd,RapidOCR",
+    "copyright": null,
+    "declaredLicense": "Apache-2.0",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/BobLd/RapidOcrNet",
+      "branch": "refs/heads/master",
+      "commit": "590d44b2efc7ecbef446c36bb6359ebbfcffeb50"
+    },
+    "notices": [
+      {
+        "file": "licenses/RapidOcrNet-3.0.0-LICENSE.txt",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      }
+    ]
+  },
+  {
+    "component": "SharpGen.Runtime/2.4.2-beta",
+    "authors": "jkoritzinsky",
+    "copyright": "(c) 2010-2017 Alexandre Mutel, 2017-2023 Jeremy Koritzinsky, 2023-2024 Amer Koleci",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/SharpGenTools/SharpGenTools",
+      "branch": "refs/heads/main",
+      "commit": "6990bcafe124a4c22515ad19cee5a081da8db67b"
+    },
+    "notices": [
+      {
+        "file": "licenses/SharpGen-2.4.2-beta-LICENSE.txt",
+        "sha256": "1cc7abd1e97575838535484bef6e4ab14e81681ddf7837672acede5fca1d4e30"
+      }
+    ]
+  },
+  {
+    "component": "SharpGen.Runtime.COM/2.4.2-beta",
+    "authors": "jkoritzinsky",
+    "copyright": "(c) 2010-2017 Alexandre Mutel, 2017-2023 Jeremy Koritzinsky, 2023-2024 Amer Koleci",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/SharpGenTools/SharpGenTools",
+      "branch": "refs/heads/main",
+      "commit": "6990bcafe124a4c22515ad19cee5a081da8db67b"
+    },
+    "notices": [
+      {
+        "file": "licenses/SharpGen-2.4.2-beta-LICENSE.txt",
+        "sha256": "1cc7abd1e97575838535484bef6e4ab14e81681ddf7837672acede5fca1d4e30"
+      }
+    ]
+  },
+  {
+    "component": "SkiaSharp/3.119.1",
+    "authors": "Microsoft",
+    "copyright": "漏 Microsoft Corporation. All rights reserved.",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://go.microsoft.com/fwlink/?linkid=868515",
+      "branch": "release/3.119.1",
+      "commit": "cc78b5933d23e6383db5d246e70db915770d55d6"
+    },
+    "notices": [
+      {
+        "file": "licenses/SkiaSharp-3.119.1-LICENSE.txt",
+        "source": "NuGet SkiaSharp/3.119.1 / LICENSE.txt",
+        "sha256": "89101e35a8c66fd4d6dffc1763259161d35cb564c169714ec227a768c89f2938"
+      }
+    ]
+  },
+  {
+    "component": "SkiaSharp.NativeAssets.Win32/3.119.1",
+    "authors": "Microsoft",
+    "copyright": "漏 Microsoft Corporation. All rights reserved.",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://go.microsoft.com/fwlink/?linkid=868515",
+      "branch": "release/3.119.1",
+      "commit": "cc78b5933d23e6383db5d246e70db915770d55d6"
+    },
+    "notices": [
+      {
+        "file": "licenses/SkiaSharp.NativeAssets.Win32-3.119.1-LICENSE.txt",
+        "source": "NuGet SkiaSharp.NativeAssets.Win32/3.119.1 / LICENSE.txt",
+        "sha256": "89101e35a8c66fd4d6dffc1763259161d35cb564c169714ec227a768c89f2938"
+      },
+      {
+        "file": "licenses/SkiaSharp.NativeAssets.Win32-3.119.1-THIRD-PARTY-NOTICES.txt",
+        "source": "NuGet SkiaSharp.NativeAssets.Win32/3.119.1 / THIRD-PARTY-NOTICES.txt",
+        "sha256": "21504c46c4c58aa64c1055bd2dcbc5f9a136b4b8c412ed3cc6740e22c5b127f5"
+      }
+    ]
+  },
+  {
+    "component": "System.Numerics.Tensors/9.0.0",
+    "authors": "Microsoft",
+    "copyright": "漏 Microsoft Corporation. All rights reserved.",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/dotnet/runtime",
+      "commit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+    },
+    "notices": [
+      {
+        "file": "licenses/System.Numerics.Tensors-9.0.0-LICENSE.TXT",
+        "source": "NuGet System.Numerics.Tensors/9.0.0 / LICENSE.TXT",
+        "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+      },
+      {
+        "file": "licenses/System.Numerics.Tensors-9.0.0-THIRD-PARTY-NOTICES.TXT",
+        "source": "NuGet System.Numerics.Tensors/9.0.0 / THIRD-PARTY-NOTICES.TXT",
+        "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5"
+      }
+    ]
+  },
+  {
+    "component": "Vortice.Direct3D11/3.8.3",
+    "authors": "Amer Koleci",
+    "copyright": "Copyright (c) Amer Koleci and Contributors",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/amerkoleci/Vortice.Windows",
+      "commit": "9e609cb9439c9872aa1b339f177e40ec96f77239"
+    },
+    "notices": [
+      {
+        "file": "licenses/Vortice.Windows-3.8.3-LICENSE.txt",
+        "sha256": "82bd4e84d144bebbb519ed05899f0ceaeaf2e0f95160ac32fd8cc388710c76d0"
+      }
+    ]
+  },
+  {
+    "component": "Vortice.DirectX/3.8.3",
+    "authors": "Amer Koleci",
+    "copyright": "Copyright (c) Amer Koleci and Contributors",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/amerkoleci/Vortice.Windows",
+      "commit": "9e609cb9439c9872aa1b339f177e40ec96f77239"
+    },
+    "notices": [
+      {
+        "file": "licenses/Vortice.Windows-3.8.3-LICENSE.txt",
+        "sha256": "82bd4e84d144bebbb519ed05899f0ceaeaf2e0f95160ac32fd8cc388710c76d0"
+      }
+    ]
+  },
+  {
+    "component": "Vortice.DXGI/3.8.3",
+    "authors": "Amer Koleci",
+    "copyright": "Copyright (c) Amer Koleci and Contributors",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/amerkoleci/Vortice.Windows",
+      "commit": "9e609cb9439c9872aa1b339f177e40ec96f77239"
+    },
+    "notices": [
+      {
+        "file": "licenses/Vortice.Windows-3.8.3-LICENSE.txt",
+        "sha256": "82bd4e84d144bebbb519ed05899f0ceaeaf2e0f95160ac32fd8cc388710c76d0"
+      }
+    ]
+  },
+  {
+    "component": "Vortice.Mathematics/2.1.0",
+    "authors": "Amer Koleci",
+    "copyright": "Copyright (c) Amer Koleci and Contributors",
+    "declaredLicense": "MIT",
+    "licenseType": "expression",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/amerkoleci/Vortice.Mathematics",
+      "branch": "refs/heads/main",
+      "commit": "fa05ec6dcba48f3f7331791da6dc7f3d866b2ad6"
+    },
+    "notices": [
+      {
+        "file": "licenses/Vortice.Mathematics-2.1.0-LICENSE.txt",
+        "sha256": "cf72351fa2e9f2eb181af7fd508dd73da1d84ba43575cb98f7af22f26a81af5e"
+      }
+    ]
+  }
+]

@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/Screen.Core/Screen.Core.csproj" />
+  <Project Path="src/Screen.App/Screen.App.csproj" />
+  <Project Path="tests/Screen.Core.Tests/Screen.Core.Tests.csproj" />
+  <Project Path="tests/Screen.App.Tests/Screen.App.Tests.csproj" />
+</Solution>

@@ -1,0 +1,72 @@
+[
+  {
+    "Name": "concrt140.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "54716F0738AF891F283D213B5C8D11B25896BB8EE3097D301EAE718560CF974E",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "msvcp140_1.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "206C931BF90FDAD8816DE3B5E2EF80B2BCAA9406C89ECC05FE6FDDFFE251E982",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "msvcp140_2.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "D50D7883F20D1DC6191768D3746F52DD9CAC89C346FFAED5BE1F110C2F34A838",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "msvcp140_atomic_wait.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "3D0CBFAA1BF3EECF5A3F4491D2960EE803CB994F30292C6ADC4A07C498F60E2B",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "msvcp140_codecvt_ids.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "8A65C7596EF2E6938731F5A1058E7E40145B6D97967CC649231A076B9A608D78",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "msvcp140.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "7C26614E1D733892C2DEAC7E245CE115504B1D80592DD0A01B08E3E5A55F89CA",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "vccorlib140.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "09F93D5FF96AE09767F3E1AF3CDD43A5A58F2598654FC63089429BB6F9F4737F",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "vcruntime140_1.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "A7146C08F89FE5B04541AB507CDB59FF7B44534D4BA3C668A426C6450A03434E",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "vcruntime140_threads.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "40F39E8CEE5F5A531B4010E18B807E8FE265B908DC58F959ECB7EBC6EA6CB11A",
+    "SignatureStatus": "Valid"
+  },
+  {
+    "Name": "vcruntime140.dll",
+    "FileVersion": "14.51.36247.0",
+    "ProductVersion": "14.51.36247.0",
+    "SHA256": "D1F4225DF2CD877DBF130D5668A021DCE3F94118455FF5EC952061C30AFC9CE7",
+    "SignatureStatus": "Valid"
+  }
+]

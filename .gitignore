@@ -1,0 +1,35 @@
+# Local version-control and assistant metadata
+.svn/
+.claude/
+
+# Reproducible build, test, packaging and audit output
+/artifacts/
+/src/*/bin/
+/src/*/obj/
+/tests/*/bin/
+/tests/*/obj/
+TestResults/
+/.vs/
+/.idea/
+/tools/.publish-flow-fixtures-*/
+/design-qa.md
+
+# Per-user IDE settings and temporary files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.tmp
+*.bak
+Thumbs.db
+Desktop.ini
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+settings.local.json
+*.pfx
+*.p12
+*.key
+*.pem

@@ -1,0 +1,162 @@
+FFmpeg build identity and source information
+Recorded for Screen 1.0.7 on 2026-10-03
+
+Distributed file: ffmpeg/bin/ffmpeg.exe
+SHA256: b1ffb6da18a899cdee965ea7315a2cb26c2f55632e63ee888bab9794ffa36b37
+License reported by ffmpeg -L: GNU General Public License version 3 or later.
+Full GPLv3 text: licenses/FFmpeg-0056dd32fd-COPYING.GPLv3.txt
+FFmpeg licensing notes: licenses/FFmpeg-0056dd32fd-LICENSE.txt
+Screen starts FFmpeg as a separate process for recording and media processing.
+This software is based in part on the work of the Independent JPEG Group.
+
+FFmpeg core revision identified from the executable:
+0056dd32fd94e739e14bb3c463c68ebe806dfd1d
+Browse that revision:
+https://github.com/FFmpeg/FFmpeg/tree/0056dd32fd94e739e14bb3c463c68ebe806dfd1d
+Download FFmpeg core source for that revision:
+https://github.com/FFmpeg/FFmpeg/archive/0056dd32fd94e739e14bb3c463c68ebe806dfd1d.tar.gz
+Official license/source guidance: https://ffmpeg.org/legal.html
+
+Source status:
+The archive above contains the FFmpeg core revision, not the complete
+corresponding source for this statically linked executable. The executable
+also enables many external libraries, as listed in the exact configure
+output below. Their exact revisions, patches, complete build environment
+and complete corresponding source bundle were not present in this project
+and were not recovered in this audit. The original binary download archive
+and vendor source offer were also not available in this checkout.
+
+The build flags resemble BtbN FFmpeg-Builds, but this has not been established
+by an original archive or checksum match. The following is a build-recipe
+reference only; it is not represented as complete matching binary source:
+https://github.com/BtbN/FFmpeg-Builds
+That project's moving latest release must not be treated as this binary's
+source. A verified corresponding-source delivery for all incorporated code
+is still required before declaring redistribution requirements complete.
+
+----- Actual ffmpeg -version output -----
+ffmpeg version N-126175-g0056dd32fd-20260816 Copyright (c) 2000-2026 the FFmpeg developers
+built with gcc 15.2.0 (crosstool-NG 1.28.0.23_185f348)
+configuration: --prefix=/ffbuild/prefix --pkg-config-flags=--static --pkg-config=pkg-config --cross-prefix=x86_64-w64-mingw32- --arch=x86_64 --target-os=mingw32 --enable-gpl --enable-version3 --disable-debug --disable-w32threads --enable-pthreads --enable-iconv --enable-zlib --enable-libxml2 --enable-libvmaf --enable-fontconfig --enable-libharfbuzz --enable-libfreetype --enable-libfribidi --enable-vulkan --enable-libvorbis --disable-libxcb --disable-xlib --disable-libpulse --enable-gmp --enable-lzma --enable-liblcevc-dec --enable-opencl --enable-amf --enable-libaom --enable-libaribb24 --enable-avisynth --enable-chromaprint --enable-libdav1d --enable-libdavs2 --enable-libdvdread --enable-libdvdnav --disable-libfdk-aac --enable-ffnvcodec --enable-cuda-llvm --enable-frei0r --enable-libgme --enable-libkvazaar --enable-libaribcaption --enable-libass --enable-libbluray --enable-libjxl --enable-libmp3lame --enable-libopus --enable-libplacebo --enable-librist --enable-libssh --enable-libtheora --enable-libvpx --enable-libwebp --enable-libzmq --enable-lv2 --enable-libvpl --enable-openal --enable-liboapv --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenh264 --enable-libopenjpeg --enable-libopenmpt --enable-librav1e --enable-librubberband --enable-schannel --enable-sdl2 --enable-libsnappy --enable-libsoxr --enable-libsrt --enable-libsvtav1 --enable-libtwolame --enable-libuavs3d --disable-libdrm --enable-vaapi --enable-libvidstab --enable-libvvenc --disable-whisper --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxvid --enable-libzimg --enable-libzvbi --extra-cflags=-DLIBTWOLAME_STATIC --extra-cxxflags= --extra-libs=-lgomp --extra-ldflags=-pthread --extra-ldexeflags= --cc=x86_64-w64-mingw32-gcc --cxx=x86_64-w64-mingw32-g++ --ar=x86_64-w64-mingw32-gcc-ar --ranlib=x86_64-w64-mingw32-gcc-ranlib --nm=x86_64-w64-mingw32-gcc-nm --extra-version=20260816
+libavutil      61.  5.100 / 61.  5.100
+libavcodec     63.  8.101 / 63.  8.101
+libavformat    63.  6.100 / 63.  6.100
+libavdevice    63.  2.100 / 63.  2.100
+libavfilter    12.  3.101 / 12.  3.101
+libswscale     10.  2.100 / 10.  2.100
+libswresample   7.  2.100 /  7.  2.100
+
+Exiting with exit code 0
+
+----- Actual ffmpeg -buildconf output -----
+
+  configuration:
+    --prefix=/ffbuild/prefix
+    --pkg-config-flags=--static
+    --pkg-config=pkg-config --cross-prefix=x86_64-w64-mingw32-
+    --arch=x86_64
+    --target-os=mingw32
+    --enable-gpl
+    --enable-version3
+    --disable-debug
+    --disable-w32threads
+    --enable-pthreads
+    --enable-iconv
+    --enable-zlib
+    --enable-libxml2
+    --enable-libvmaf
+    --enable-fontconfig
+    --enable-libharfbuzz
+    --enable-libfreetype
+    --enable-libfribidi
+    --enable-vulkan
+    --enable-libvorbis
+    --disable-libxcb
+    --disable-xlib
+    --disable-libpulse
+    --enable-gmp
+    --enable-lzma
+    --enable-liblcevc-dec
+    --enable-opencl
+    --enable-amf
+    --enable-libaom
+    --enable-libaribb24
+    --enable-avisynth
+    --enable-chromaprint
+    --enable-libdav1d
+    --enable-libdavs2
+    --enable-libdvdread
+    --enable-libdvdnav
+    --disable-libfdk-aac
+    --enable-ffnvcodec
+    --enable-cuda-llvm
+    --enable-frei0r
+    --enable-libgme
+    --enable-libkvazaar
+    --enable-libaribcaption
+    --enable-libass
+    --enable-libbluray
+    --enable-libjxl
+    --enable-libmp3lame
+    --enable-libopus
+    --enable-libplacebo
+    --enable-librist
+    --enable-libssh
+    --enable-libtheora
+    --enable-libvpx
+    --enable-libwebp
+    --enable-libzmq
+    --enable-lv2
+    --enable-libvpl
+    --enable-openal
+    --enable-liboapv
+    --enable-libopencore-amrnb
+    --enable-libopencore-amrwb
+    --enable-libopenh264
+    --enable-libopenjpeg
+    --enable-libopenmpt
+    --enable-librav1e
+    --enable-librubberband
+    --enable-schannel
+    --enable-sdl2
+    --enable-libsnappy
+    --enable-libsoxr
+    --enable-libsrt
+    --enable-libsvtav1
+    --enable-libtwolame
+    --enable-libuavs3d
+    --disable-libdrm
+    --enable-vaapi
+    --enable-libvidstab
+    --enable-libvvenc
+    --disable-whisper
+    --enable-libx264
+    --enable-libx265
+    --enable-libxavs2
+    --enable-libxvid
+    --enable-libzimg
+    --enable-libzvbi
+    --extra-cflags=-DLIBTWOLAME_STATIC
+    --extra-cxxflags=
+    --extra-libs=-lgomp
+    --extra-ldflags=-pthread
+    --extra-ldexeflags=
+    --cc=x86_64-w64-mingw32-gcc
+    --cxx=x86_64-w64-mingw32-g++
+    --ar=x86_64-w64-mingw32-gcc-ar
+    --ranlib=x86_64-w64-mingw32-gcc-ranlib
+    --nm=x86_64-w64-mingw32-gcc-nm
+    --extra-version=20260816
+
+Exiting with exit code 0
+ffmpeg version N-126175-g0056dd32fd-20260816 Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (crosstool-NG 1.28.0.23_185f348)
+  configuration: --prefix=/ffbuild/prefix --pkg-config-flags=--static --pkg-config=pkg-config --cross-prefix=x86_64-w64-mingw32- --arch=x86_64 --target-os=mingw32 --enable-gpl --enable-version3 --disable-debug --disable-w32threads --enable-pthreads --enable-iconv --enable-zlib --enable-libxml2 --enable-libvmaf --enable-fontconfig --enable-libharfbuzz --enable-libfreetype --enable-libfribidi --enable-vulkan --enable-libvorbis --disable-libxcb --disable-xlib --disable-libpulse --enable-gmp --enable-lzma --enable-liblcevc-dec --enable-opencl --enable-amf --enable-libaom --enable-libaribb24 --enable-avisynth --enable-chromaprint --enable-libdav1d --enable-libdavs2 --enable-libdvdread --enable-libdvdnav --disable-libfdk-aac --enable-ffnvcodec --enable-cuda-llvm --enable-frei0r --enable-libgme --enable-libkvazaar --enable-libaribcaption --enable-libass --enable-libbluray --enable-libjxl --enable-libmp3lame --enable-libopus --enable-libplacebo --enable-librist --enable-libssh --enable-libtheora --enable-libvpx --enable-libwebp --enable-libzmq --enable-lv2 --enable-libvpl --enable-openal --enable-liboapv --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenh264 --enable-libopenjpeg --enable-libopenmpt --enable-librav1e --enable-librubberband --enable-schannel --enable-sdl2 --enable-libsnappy --enable-libsoxr --enable-libsrt --enable-libsvtav1 --enable-libtwolame --enable-libuavs3d --disable-libdrm --enable-vaapi --enable-libvidstab --enable-libvvenc --disable-whisper --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxvid --enable-libzimg --enable-libzvbi --extra-cflags=-DLIBTWOLAME_STATIC --extra-cxxflags= --extra-libs=-lgomp --extra-ldflags=-pthread --extra-ldexeflags= --cc=x86_64-w64-mingw32-gcc --cxx=x86_64-w64-mingw32-g++ --ar=x86_64-w64-mingw32-gcc-ar --ranlib=x86_64-w64-mingw32-gcc-ranlib --nm=x86_64-w64-mingw32-gcc-nm --extra-version=20260816
+  libavutil      61.  5.100 / 61.  5.100
+  libavcodec     63.  8.101 / 63.  8.101
+  libavformat    63.  6.100 / 63.  6.100
+  libavdevice    63.  2.100 / 63.  2.100
+  libavfilter    12.  3.101 / 12.  3.101
+  libswscale     10.  2.100 / 10.  2.100
+  libswresample   7.  2.100 /  7.  2.100
+

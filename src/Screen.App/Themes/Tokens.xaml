@@ -1,0 +1,126 @@
+<!--
+  Night blue / moon blue design tokens, based on #15223A and #D8E2EC.
+  Single source of truth for color, type, radius, and elevation.
+  Rules:
+  - All app chrome shares navy surfaces. Captured image/video pixels and
+    annotation colors are independent from these UI resources.
+  - Moon-blue actions use navy text. Gradients belong to chrome, not reading surfaces.
+  - Type scale 12/14/14/16/20, radius scale 4/8/12/16.
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Existing neutral keys remain compatible with existing controls. -->
+    <Color x:Key="Color.NightBlue">#15223A</Color>
+    <Color x:Key="Color.MoonBlue">#D8E2EC</Color>
+    <Color x:Key="Color.Neutral50">#1B3049</Color>
+    <Color x:Key="Color.Neutral100">#243D57</Color>
+    <Color x:Key="Color.Neutral150">#304E69</Color>
+    <Color x:Key="Color.Neutral200">#39556F</Color>
+    <Color x:Key="Color.Neutral300">#64839B</Color>
+    <Color x:Key="Color.Neutral400">#96B1C5</Color>
+    <Color x:Key="Color.Neutral500">#B5C9D9</Color>
+    <Color x:Key="Color.Neutral600">#C8D9E5</Color>
+    <Color x:Key="Color.Neutral700">#D8E2EC</Color>
+    <Color x:Key="Color.Neutral800">#DFEAF2</Color>
+    <Color x:Key="Color.Neutral900">#E8F1F7</Color>
+    <SolidColorBrush x:Key="Brush.WindowBackground" Color="{StaticResource Color.NightBlue}" />
+    <SolidColorBrush x:Key="Brush.Surface" Color="{StaticResource Color.Neutral50}" />
+    <SolidColorBrush x:Key="Brush.SurfaceRaised" Color="{StaticResource Color.Neutral100}" />
+    <SolidColorBrush x:Key="Brush.SurfaceHover" Color="{StaticResource Color.Neutral150}" />
+    <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.Neutral200}" />
+    <SolidColorBrush x:Key="Brush.OnAccent" Color="{StaticResource Color.NightBlue}" />
+    <SolidColorBrush x:Key="Brush.AccentText" Color="#C5E5F0" />
+
+    <!-- Keep the solid aliases above compatible with color bindings and native menus. -->
+    <LinearGradientBrush x:Key="Brush.WindowBackdrop" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#15223A" Offset="0" />
+        <GradientStop Color="#1B3049" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.BrandGradient" StartPoint="0,0" EndPoint="0.8,1">
+        <GradientStop Color="#15223A" Offset="0" />
+        <GradientStop Color="#20445E" Offset="0.62" />
+        <GradientStop Color="#315C75" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.ChromeGradient" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#192B43" Offset="0" />
+        <GradientStop Color="#284F68" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.PrimaryAction" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#B8DCE8" Offset="0" />
+        <GradientStop Color="#D8E2EC" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- ****** Semantic palette ****** -->
+    <Color x:Key="Color.Accent">#A7CFDF</Color>
+    <Color x:Key="Color.AccentHover">#C0DEEA</Color>
+    <Color x:Key="Color.AccentSubtle">#294960</Color>
+    <Color x:Key="Color.AccentSubtleHover">#365D75</Color>
+    <Color x:Key="Color.AccentOnDark">#A7CFDF</Color>
+    <Color x:Key="Color.AccentSubtleDark">#294960</Color>
+    <Color x:Key="Color.AccentSubtleDarkHover">#365D75</Color>
+    <Color x:Key="Color.Success">#83CDB5</Color>
+    <Color x:Key="Color.SuccessOnDark">#83CDB5</Color>
+    <Color x:Key="Color.Danger">#EE969C</Color>
+    <Color x:Key="Color.DangerOnDark">#EE969C</Color>
+    <Color x:Key="Color.Warning">#DFC296</Color>
+
+    <SolidColorBrush x:Key="Brush.TextPrimary" Color="{StaticResource Color.Neutral900}" />
+    <SolidColorBrush x:Key="Brush.TextSecondary" Color="{StaticResource Color.Neutral500}" />
+    <SolidColorBrush x:Key="Brush.TextTertiary" Color="{StaticResource Color.Neutral400}" />
+
+    <!-- ****** Night-blue overlay chrome ******
+         Solid (not translucent): the capture toolbar composites over an opaque
+         window while scroll-capture capsules composite over the live screen;
+         alpha here made the same color read differently in the two places. -->
+    <SolidColorBrush x:Key="Brush.OverlayBase" Color="{StaticResource Color.Neutral50}" />
+    <SolidColorBrush x:Key="Brush.OverlayElevated" Color="{StaticResource Color.Neutral100}" />
+    <SolidColorBrush x:Key="Brush.OverlayHover" Color="#244FC1DB" />
+    <SolidColorBrush x:Key="Brush.OverlayPressed" Color="#385FC5DE" />
+    <SolidColorBrush x:Key="Brush.OverlayBorder" Color="#527E9AB3" />
+    <SolidColorBrush x:Key="Brush.OverlayText" Color="{StaticResource Color.Neutral900}" />
+    <SolidColorBrush x:Key="Brush.OverlayTextDim" Color="{StaticResource Color.Neutral500}" />
+    <SolidColorBrush x:Key="Brush.OverlayIcon" Color="{StaticResource Color.MoonBlue}" />
+
+    <!-- ****** Brushes (named colors) ****** -->
+    <SolidColorBrush x:Key="Brush.Accent" Color="{StaticResource Color.Accent}" />
+    <SolidColorBrush x:Key="Brush.AccentHover" Color="{StaticResource Color.AccentHover}" />
+    <SolidColorBrush x:Key="Brush.AccentSubtle" Color="{StaticResource Color.AccentSubtle}" />
+    <SolidColorBrush x:Key="Brush.AccentSubtleHover" Color="{StaticResource Color.AccentSubtleHover}" />
+    <SolidColorBrush x:Key="Brush.AccentOnDark" Color="{StaticResource Color.AccentOnDark}" />
+    <SolidColorBrush x:Key="Brush.AccentSubtleDark" Color="{StaticResource Color.AccentSubtleDark}" />
+    <SolidColorBrush x:Key="Brush.AccentSubtleDarkHover" Color="{StaticResource Color.AccentSubtleDarkHover}" />
+    <SolidColorBrush x:Key="Brush.Success" Color="{StaticResource Color.Success}" />
+    <SolidColorBrush x:Key="Brush.SuccessOnDark" Color="{StaticResource Color.SuccessOnDark}" />
+    <SolidColorBrush x:Key="Brush.Danger" Color="{StaticResource Color.Danger}" />
+    <SolidColorBrush x:Key="Brush.DangerOnDark" Color="{StaticResource Color.DangerOnDark}" />
+    <SolidColorBrush x:Key="Brush.Warning" Color="{StaticResource Color.Warning}" />
+    <SolidColorBrush x:Key="Brush.Neutral50" Color="{StaticResource Color.Neutral50}" />
+    <SolidColorBrush x:Key="Brush.Neutral100" Color="{StaticResource Color.Neutral100}" />
+    <SolidColorBrush x:Key="Brush.Neutral150" Color="{StaticResource Color.Neutral150}" />
+    <SolidColorBrush x:Key="Brush.Neutral200" Color="{StaticResource Color.Neutral200}" />
+    <SolidColorBrush x:Key="Brush.Neutral300" Color="{StaticResource Color.Neutral300}" />
+    <SolidColorBrush x:Key="Brush.Neutral400" Color="{StaticResource Color.Neutral400}" />
+    <SolidColorBrush x:Key="Brush.Neutral500" Color="{StaticResource Color.Neutral500}" />
+    <SolidColorBrush x:Key="Brush.Neutral600" Color="{StaticResource Color.Neutral600}" />
+    <SolidColorBrush x:Key="Brush.Neutral700" Color="{StaticResource Color.Neutral700}" />
+
+    <!-- ****** Type scale (Segoe UI Variable + Microsoft YaHei UI fallback) ****** -->
+    <system:Double x:Key="Font.Caption" xmlns:system="clr-namespace:System;assembly=mscorlib">12</system:Double>
+    <system:Double x:Key="Font.Body" xmlns:system="clr-namespace:System;assembly=mscorlib">14</system:Double>
+    <system:Double x:Key="Font.Subtitle" xmlns:system="clr-namespace:System;assembly=mscorlib">14</system:Double>
+    <system:Double x:Key="Font.Title" xmlns:system="clr-namespace:System;assembly=mscorlib">16</system:Double>
+    <system:Double x:Key="Font.Display" xmlns:system="clr-namespace:System;assembly=mscorlib">20</system:Double>
+
+    <!-- ****** Radius scale ****** -->
+    <CornerRadius x:Key="Radius.Small">4</CornerRadius>
+    <CornerRadius x:Key="Radius.Medium">8</CornerRadius>
+    <CornerRadius x:Key="Radius.Large">12</CornerRadius>
+    <CornerRadius x:Key="Radius.XLarge">16</CornerRadius>
+
+    <!-- ****** Elevation (exactly three) ****** -->
+    <DropShadowEffect x:Key="Shadow.Hover" BlurRadius="8" ShadowDepth="0" Opacity="0.06" Color="Black" />
+    <DropShadowEffect x:Key="Shadow.Floating" BlurRadius="18" ShadowDepth="3" Opacity="0.14" Color="Black" />
+    <DropShadowEffect x:Key="Shadow.Modal" BlurRadius="32" ShadowDepth="6" Opacity="0.18" Color="Black" />
+</ResourceDictionary>

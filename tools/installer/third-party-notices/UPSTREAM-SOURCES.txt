@@ -1,0 +1,139 @@
+[
+  {
+    "file": "licenses/NAudio-3.0.0-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/naudio/NAudio/23922d2a87cf9508883a939af8b1495a0d35cb5a/LICENSE",
+    "resolvedUrl": "https://raw.githubusercontent.com/naudio/NAudio/23922d2a87cf9508883a939af8b1495a0d35cb5a/LICENSE",
+    "bytes": 1064,
+    "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/Vortice.Windows-3.8.3-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/amerkoleci/Vortice.Windows/9e609cb9439c9872aa1b339f177e40ec96f77239/LICENSE",
+    "resolvedUrl": "https://raw.githubusercontent.com/amerkoleci/Vortice.Windows/9e609cb9439c9872aa1b339f177e40ec96f77239/LICENSE",
+    "bytes": 1090,
+    "sha256": "82bd4e84d144bebbb519ed05899f0ceaeaf2e0f95160ac32fd8cc388710c76d0",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/Vortice.Mathematics-2.1.0-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/amerkoleci/Vortice.Mathematics/fa05ec6dcba48f3f7331791da6dc7f3d866b2ad6/LICENSE",
+    "resolvedUrl": "https://raw.githubusercontent.com/amerkoleci/Vortice.Mathematics/fa05ec6dcba48f3f7331791da6dc7f3d866b2ad6/LICENSE",
+    "bytes": 1090,
+    "sha256": "cf72351fa2e9f2eb181af7fd508dd73da1d84ba43575cb98f7af22f26a81af5e",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/Lucide-icons-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/lucide-icons/lucide/main/LICENSE",
+    "resolvedUrl": "https://raw.githubusercontent.com/lucide-icons/lucide/main/LICENSE",
+    "bytes": 3208,
+    "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/PaddleOCR-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE",
+    "resolvedUrl": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/LICENSE",
+    "bytes": 11376,
+    "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/RapidOCR-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/RapidAI/RapidOCR/main/LICENSE",
+    "resolvedUrl": "https://raw.githubusercontent.com/RapidAI/RapidOCR/main/LICENSE",
+    "bytes": 11422,
+    "sha256": "3e0af25fdd06aa9586ae97adb00ea927ebe5a3805ac77d2d3a81ce5f55693333",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/FFmpeg-0056dd32fd-COPYING.GPLv3.txt",
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0056dd32fd/COPYING.GPLv3",
+    "resolvedUrl": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0056dd32fd/COPYING.GPLv3",
+    "bytes": 35147,
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/FFmpeg-0056dd32fd-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0056dd32fd/LICENSE.md",
+    "resolvedUrl": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0056dd32fd/LICENSE.md",
+    "bytes": 4346,
+    "sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/WPF-10.0.12-THIRD-PARTY-NOTICES.txt",
+    "url": "https://raw.githubusercontent.com/dotnet/wpf/v10.0.12/THIRD-PARTY-NOTICES.TXT",
+    "resolvedUrl": "https://raw.githubusercontent.com/dotnet/wpf/v10.0.12/THIRD-PARTY-NOTICES.TXT",
+    "bytes": 2703,
+    "sha256": "d23dba2fee20c6b59d8f7088ee9ed372459c952a319b7ca90f3eec370cc76eb9",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/WindowsForms-10.0.12-THIRD-PARTY-NOTICES.txt",
+    "url": "https://raw.githubusercontent.com/dotnet/winforms/v10.0.12/THIRD-PARTY-NOTICES.TXT",
+    "resolvedUrl": "https://raw.githubusercontent.com/dotnet/winforms/v10.0.12/THIRD-PARTY-NOTICES.TXT",
+    "bytes": 1966,
+    "sha256": "5a412b38efae0b162dc0893b319023f4cd14a8985a0f9f9ae01ac052b37a36eb",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/Windows-SDK-NET-Ref-LICENSE.txt",
+    "url": "https://aka.ms/WinSDKLicenseURL",
+    "resolvedUrl": "https://download.microsoft.com/download/0/F/F/0FF2B061-47DD-4F55-89B6-FD1D8C44F14D/sdk_license.rtf",
+    "bytes": 28095,
+    "status": "ok",
+    "downloadedFile": "licenses/Windows-SDK-NET-Ref-LICENSE.rtf",
+    "downloadedSha256": "dd07eb178e00c6bba4148457fc00ff77cd4887eb521d504186fe59c9ec8bbe62",
+    "conversion": "Plain text extracted from the original license; paragraph text retained, formatting removed.",
+    "sha256": "aba32b705ea9716ba8b6e1cb464016e1709256214022fc132d49bb0572c33406"
+  },
+  {
+    "file": "licenses/RapidOcrNet-3.0.0-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/BobLd/RapidOcrNet/590d44b2efc7ecbef446c36bb6359ebbfcffeb50/LICENSE.txt",
+    "resolvedUrl": "https://raw.githubusercontent.com/BobLd/RapidOcrNet/590d44b2efc7ecbef446c36bb6359ebbfcffeb50/LICENSE.txt",
+    "bytes": 11357,
+    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/SharpGen-2.4.2-beta-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/SharpGenTools/SharpGenTools/6990bcafe124a4c22515ad19cee5a081da8db67b/LICENSE.txt",
+    "resolvedUrl": "https://raw.githubusercontent.com/SharpGenTools/SharpGenTools/6990bcafe124a4c22515ad19cee5a081da8db67b/LICENSE.txt",
+    "bytes": 1101,
+    "sha256": "1cc7abd1e97575838535484bef6e4ab14e81681ddf7837672acede5fca1d4e30",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/Microsoft-Visual-C-V14-2026-License.txt",
+    "url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx",
+    "resolvedUrl": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx",
+    "bytes": 11943,
+    "status": "ok",
+    "downloadedFile": "licenses/Microsoft-Visual-C-V14-2026-License.docx",
+    "downloadedSha256": "08651651a7602fc7c0e2763de0fde1ff9f868df2780597cd1775ee9d6441c783",
+    "conversion": "Plain text extracted from the original license; paragraph text retained, formatting removed.",
+    "sha256": "fcd3649a1ea1ed04d849521aca4950ca3db98b3a69f542b51d94cf71f4f17b64"
+  },
+  {
+    "file": "licenses/Microsoft-Visual-Studio-2026-Community-License.txt",
+    "url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual_Studio_2026-License-Community_ENU.docx",
+    "resolvedUrl": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual_Studio_2026-License-Community_ENU.docx",
+    "bytes": 27312,
+    "status": "ok",
+    "downloadedFile": "licenses/Microsoft-Visual-Studio-2026-Community-License.docx",
+    "downloadedSha256": "02ac07637f4a513a807cd3721c7620433fc483bc049d25784b0c10c54b05e1fb",
+    "conversion": "Plain text extracted from the original license; paragraph text retained, formatting removed.",
+    "sha256": "ef616cae10d627cdc97238749de23ba1fcae68c329879c7b63ec65bfadc89c0b"
+  },
+  {
+    "file": "licenses/MIT-license-text.html",
+    "url": "https://licenses.nuget.org/MIT",
+    "resolvedUrl": "https://licenses.nuget.org/MIT",
+    "bytes": 2442,
+    "sha256": "0ff20ddac3d7ee3c94cd6b60bef6537b4c4f6815063ab28228ab8ca563b1fe8e",
+    "status": "ok"
+  }
+]

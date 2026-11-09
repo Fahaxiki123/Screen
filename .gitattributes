@@ -1,0 +1,4 @@
+*.cs text eol=crlf
+tools/installer/third-party-notices/** -text -whitespace
+src/Screen.App/Models/Ocr/ppocrv6_small_dict.txt -text
+src/Screen.App/ffmpeg/bin/ffmpeg.exe filter=lfs diff=lfs merge=lfs -text

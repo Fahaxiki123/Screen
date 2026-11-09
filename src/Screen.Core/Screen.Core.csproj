@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Screen.Core</RootNamespace>
+    <AssemblyName>Screen.Core</AssemblyName>
+  </PropertyGroup>
+</Project>
