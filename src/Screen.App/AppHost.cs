@@ -180,10 +180,7 @@ internal sealed class AppHost : IDisposable
         }
         try
         {
-            if (!NativeMethods.TryGetPhysicalCursorPosition(out var cursor))
-            {
-                throw new InvalidOperationException("无法读取鼠标位置。");
-            }
+            NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
             var frame = await _captureService.CaptureAtAsync(new PixelPoint(cursor.X, cursor.Y));
             var overlay = new CaptureOverlayWindow(
                 frame,

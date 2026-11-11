@@ -17,6 +17,7 @@ internal sealed class RecordingAudioTrack : IDisposable
     private readonly object _gate = new();
     private readonly RecordingStopSignal _stopSignal;
     private volatile bool _paused;
+    private volatile float _peakLevel;
     private long _bytesWritten;
     private bool _stopped;
     private int _disposed;
@@ -34,6 +35,7 @@ internal sealed class RecordingAudioTrack : IDisposable
         {
             if (_paused || e.BytesRecorded <= 0)
             {
+                _peakLevel = 0;
                 return;
             }
             lock (_gate)
@@ -45,6 +47,7 @@ internal sealed class RecordingAudioTrack : IDisposable
                 _stream.Write(e.Buffer, 0, e.BytesRecorded);
                 _bytesWritten += e.BytesRecorded;
             }
+            _peakLevel = MeasurePeak(e.Buffer, e.BytesRecorded, ffmpegFormat);
         };
     }
 
@@ -53,7 +56,38 @@ internal sealed class RecordingAudioTrack : IDisposable
     public int SampleRate { get; }
     public int Channels { get; }
     public long BytesWritten => Interlocked.Read(ref _bytesWritten);
+    public float PeakLevel => _paused ? 0 : _peakLevel;
     public bool Paused { set => _paused = value; }
+
+    private static float MeasurePeak(byte[] buffer, int bytesRecorded, string format)
+    {
+        var peak = 0f;
+        if (format == "f32le")
+        {
+            var step = Math.Max(4, (bytesRecorded / 4 / 64) * 4);
+            for (var i = 0; i + 3 < bytesRecorded; i += step)
+            {
+                var sample = Math.Abs(BitConverter.ToSingle(buffer, i));
+                if (sample > peak)
+                {
+                    peak = sample;
+                }
+            }
+        }
+        else if (format == "s16le")
+        {
+            var step = Math.Max(2, (bytesRecorded / 2 / 64) * 2);
+            for (var i = 0; i + 1 < bytesRecorded; i += step)
+            {
+                var sample = Math.Abs(BitConverter.ToInt16(buffer, i) / 32768f);
+                if (sample > peak)
+                {
+                    peak = sample;
+                }
+            }
+        }
+        return Math.Clamp(peak, 0f, 1f);
+    }
 
     /// <summary>Attempts to capture the default render device (system audio loopback).</summary>
     public static RecordingAudioTrack? TryCreateSystemLoopback(string tempDir, RecordingStopSignal stopSignal)
@@ -206,6 +240,23 @@ internal sealed class RecordingAudioService : IDisposable
     }
 
     public IReadOnlyList<RecordingAudioTrack> Tracks => _tracks;
+
+    public float CurrentPeakLevel
+    {
+        get
+        {
+            var max = 0f;
+            foreach (var track in _tracks)
+            {
+                var level = track.PeakLevel;
+                if (level > max)
+                {
+                    max = level;
+                }
+            }
+            return max;
+        }
+    }
 
     public bool Paused
     {

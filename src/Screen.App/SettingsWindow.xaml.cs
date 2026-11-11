@@ -128,11 +128,22 @@ public partial class SettingsWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         };
 
+        var indicator = new Border
+        {
+            Width = 3,
+            Height = 18,
+            CornerRadius = new CornerRadius(1.5),
+            Margin = new Thickness(-8, 0, 8, 0),
+            Background = Brushes.Transparent,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
         var content = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center
         };
+        content.Children.Add(indicator);
         content.Children.Add(iconElement);
         content.Children.Add(new Border { Width = 11 });
         content.Children.Add(label);
@@ -171,25 +182,28 @@ public partial class SettingsWindow : Window
         foreach (var (key, button) in _navigation)
         {
             var isActive = key == id;
-            // The selected page keeps a quiet raised fill and a moon-blue edge.
             button.Background = isActive
-                ? (Brush)FindResource("Settings.Brush.AccentSelectedBackground")
+                ? new SolidColorBrush(Color.FromArgb(0x22, 0x38, 0xBD, 0xF8))
                 : Brushes.Transparent;
             button.BorderBrush = isActive
-                ? (Brush)FindResource("Settings.Brush.ControlBorder")
+                ? new SolidColorBrush(Color.FromArgb(0x40, 0x7D, 0xD3, 0xFC))
                 : Brushes.Transparent;
 
             if (button.Content is StackPanel content
-                && content.Children.Count == 3
-                && content.Children[0] is LucideIconElement icon
-                && content.Children[2] is TextBlock label)
+                && content.Children.Count == 4
+                && content.Children[0] is Border indicator
+                && content.Children[1] is LucideIconElement icon
+                && content.Children[3] is TextBlock label)
             {
+                indicator.Background = isActive
+                    ? (Brush)FindResource("Settings.Brush.AccentText")
+                    : Brushes.Transparent;
                 icon.Stroke = isActive
                     ? (Brush)FindResource("Settings.Brush.AccentText")
                     : (Brush)FindResource("Settings.Brush.TextSecondary");
                 label.Foreground = (Brush)FindResource(isActive
-                    ? "Settings.Brush.AccentText"
-                    : "Settings.Brush.TextPrimary");
+                    ? "Settings.Brush.TextPrimary"
+                    : "Settings.Brush.TextSecondary");
             }
         }
 

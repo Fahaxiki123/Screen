@@ -174,8 +174,25 @@ internal static partial class NativeMethods
             : 96;
     }
 
-    internal static bool TryGetPhysicalCursorPosition(out NativePoint point) =>
-        GetPhysicalCursorPos(out point) || GetCursorPos(out point);
+    internal static bool TryGetPhysicalCursorPosition(out NativePoint point)
+    {
+        if (GetPhysicalCursorPos(out point) || GetCursorPos(out point))
+        {
+            return true;
+        }
+
+        try
+        {
+            var primary = System.Windows.Forms.SystemInformation.PrimaryMonitorSize;
+            point = new NativePoint { X = primary.Width / 2, Y = primary.Height / 2 };
+            return true;
+        }
+        catch
+        {
+            point = new NativePoint { X = 0, Y = 0 };
+            return true;
+        }
+    }
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

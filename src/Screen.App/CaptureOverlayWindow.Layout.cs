@@ -69,11 +69,28 @@ internal sealed partial class CaptureOverlayWindow
         if (_stylePanel.Visibility == Visibility.Visible)
         {
             _stylePanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            Canvas.SetLeft(_stylePanel, left);
-            var belowToolbar = top + _toolbar.DesiredSize.Height + 6;
-            Canvas.SetTop(_stylePanel, belowToolbar + _stylePanel.DesiredSize.Height <= ActualHeight - 6
-                ? belowToolbar
-                : Math.Max(6, top - _stylePanel.DesiredSize.Height - 6));
+
+            // Contextual callout: align horizontally with the active tool button
+            var targetX = left;
+            if (_toolButtons.TryGetValue(_surface.Tool, out var activeBtn) && activeBtn.IsVisible)
+            {
+                var btnPos = activeBtn.TranslatePoint(new Point(0, 0), _toolbar);
+                targetX = left + btnPos.X + (activeBtn.ActualWidth > 0 ? activeBtn.ActualWidth / 2 : 18) - (_stylePanel.DesiredSize.Width / 2);
+            }
+            targetX = Math.Clamp(targetX, 8, Math.Max(8, ActualWidth - _stylePanel.DesiredSize.Width - 8));
+            Canvas.SetLeft(_stylePanel, targetX);
+
+            // Prefer docking 8px ABOVE the toolbar. If touching the screen top ceiling, dock below.
+            var aboveToolbar = top - _stylePanel.DesiredSize.Height - 8;
+            if (aboveToolbar >= 8)
+            {
+                Canvas.SetTop(_stylePanel, aboveToolbar);
+            }
+            else
+            {
+                var belowToolbar = top + _toolbar.DesiredSize.Height + 8;
+                Canvas.SetTop(_stylePanel, Math.Min(belowToolbar, ActualHeight - _stylePanel.DesiredSize.Height - 8));
+            }
         }
 
         if (_ocrCard.Visibility == Visibility.Visible)

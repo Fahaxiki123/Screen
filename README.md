@@ -2,7 +2,15 @@
 
 个人使用的 Windows 截图、录屏、OCR 与翻译工具，使用 .NET 10 / WPF。
 
-当前源码版本为 **1.0.9**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用夜蓝与月白青渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
+当前源码版本为 **1.0.10**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
+
+## 下载与本次更新
+
+[下载 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.10/Screen-1.0.10-win-x64-Setup.exe) · [版本说明与 SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.10)
+
+安装包适用于 Windows 11 24H2 及更新版本，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。更新前请完成截图或录屏并退出 Screen；GitHub 的 Source code 附件为开发源码。
+
+1.0.10 更新了设置、截图工具栏、OCR/翻译卡片的主题与布局；录屏增加呼吸指示灯、音频电平显示、取景框和倒计时动画，预览时间轴加强裁剪范围提示。本版本的已知交互限制见发布说明。
 
 ## 已实现的功能
 
@@ -89,7 +97,7 @@ dotnet run --project src/Screen.App/Screen.App.csproj -c Release
 ./tools/build-installer.ps1 -CompilerPath 'C:\Tools\NSIS\makensis.exe'
 ```
 
-脚本也会从 `PATH`、常见 NSIS 安装目录及 `artifacts/tooling/nsis-3.12/Bin/makensis.exe` 自动发现编译器。打包使用上一层已有的 `正式版` 目录，应先完成发布与功能检查。构建成功后，`../安装包` 中保留当前版本的 `Screen-1.0.9-win-x64-Setup.exe`。
+脚本也会从 `PATH`、常见 NSIS 安装目录及 `artifacts/tooling/nsis-3.12/Bin/makensis.exe` 自动发现编译器。打包使用上一层已有的 `正式版` 目录，应先完成发布与功能检查。构建成功后，`../安装包` 中保留当前版本的 `Screen-1.0.10-win-x64-Setup.exe`。
 
 安装器按当前用户安装，可直接使用标准用户权限，包含 .NET、OCR 模型、FFmpeg 和 Visual C++ 运行库。用户作品、个人配置与密钥由各用户自行管理，默认保存目录为使用者自己的图片目录，云服务配置由使用者自行填写。
 

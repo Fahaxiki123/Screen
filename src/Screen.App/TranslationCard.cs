@@ -12,6 +12,7 @@ internal sealed class TranslationCard : Grid
 {
     private readonly TextBox _text;
     private readonly TextBlock _status;
+    private readonly Ellipse _statusDot;
     private readonly TextBlock _sourceLanguage;
     private readonly TextBlock _targetLanguage;
     private readonly TextBlock _provider;
@@ -30,55 +31,23 @@ internal sealed class TranslationCard : Grid
 
     public TranslationCard()
     {
-        Width = 460;
-        var title = new TextBlock
-        {
-            Text = "截图翻译",
-            FontSize = 18,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = Token("Brush.TextPrimary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var close = new Button
-        {
-            Content = new LucideIconElement
-            {
-                Kind = LucideIconKind.X,
-                Width = 18,
-                Height = 18,
-                Stroke = Token("Brush.TextSecondary"),
-                StrokeThickness = 2
-            },
-            ToolTip = "关闭"
-        };
-        close.SetResourceReference(StyleProperty, "CardIconButtonStyle");
-        close.Click += (_, _) => Visibility = Visibility.Collapsed;
+        Width = 450;
 
-        var header = new Grid();
-        header.ColumnDefinitions.Add(new ColumnDefinition());
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(title);
-        Grid.SetColumn(close, 1);
-        header.Children.Add(close);
-
+        // Top bar: language switch takes center stage, AI provider badge + close on the right
         _sourceLanguage = new TextBlock
         {
             Text = "自动识别",
-            FontSize = 14,
-            Foreground = Token("Brush.TextPrimary"),
+            FontSize = 13,
+            Foreground = Token("Brush.TextSecondary"),
             VerticalAlignment = VerticalAlignment.Center
         };
-        var sourceChip = new Border
-        {
-            Background = Token("Brush.SurfaceRaised"),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(11, 6, 11, 6),
-            Child = _sourceLanguage
-        };
+
         _targetLanguage = new TextBlock
         {
             Text = TargetLanguage,
-            FontSize = 14,
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = Token("Brush.TextPrimary"),
             VerticalAlignment = VerticalAlignment.Center
         };
         var targetContent = new StackPanel { Orientation = Orientation.Horizontal };
@@ -86,113 +55,167 @@ internal sealed class TranslationCard : Grid
         targetContent.Children.Add(new LucideIconElement
         {
             Kind = LucideIconKind.ChevronDown,
-            Width = 14,
-            Height = 14,
-            Stroke = Token("Brush.TextPrimary"),
-            Margin = new Thickness(8, 0, 0, 0),
+            Width = 13,
+            Height = 13,
+            Stroke = Token("Brush.AccentText"),
+            Margin = new Thickness(6, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
         });
         var targetButton = new Button
         {
             Content = targetContent,
-            Height = 32,
+            Height = 28,
             Margin = new Thickness(0),
-            Padding = new Thickness(11, 0, 10, 0),
-            Background = Token("Brush.SurfaceRaised"),
+            Padding = new Thickness(10, 0, 9, 0),
+            Background = Token("Brush.AccentSubtleDark"),
+            BorderBrush = Token("Brush.AccentSubtleDarkBorder"),
+            BorderThickness = new Thickness(1),
             ToolTip = "选择目标语言"
         };
         targetButton.SetResourceReference(StyleProperty, "CardSecondaryButtonStyle");
         targetButton.Click += (_, _) => ShowTargetLanguageMenu(targetButton);
-        _provider = new TextBlock
+
+        var langGroup = new StackPanel
         {
-            Text = "AI 自然翻译",
-            FontSize = 13,
-            Foreground = Token("Brush.TextSecondary"),
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(12, 0, 0, 0)
-        };
-        var languageRow = new Grid { Margin = new Thickness(0, 16, 0, 0) };
-        languageRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        languageRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
-        languageRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        languageRow.ColumnDefinitions.Add(new ColumnDefinition());
-        languageRow.Children.Add(sourceChip);
-        var direction = new LucideIconElement
-        {
-            Kind = LucideIconKind.ArrowRight,
-            Width = 16,
-            Height = 16,
-            Stroke = Token("Brush.TextSecondary"),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetColumn(direction, 1);
-        languageRow.Children.Add(direction);
-        Grid.SetColumn(targetButton, 2);
-        languageRow.Children.Add(targetButton);
-        Grid.SetColumn(_provider, 3);
-        languageRow.Children.Add(_provider);
+        langGroup.Children.Add(_sourceLanguage);
+        langGroup.Children.Add(new LucideIconElement
+        {
+            Kind = LucideIconKind.ArrowRight,
+            Width = 14,
+            Height = 14,
+            Stroke = Token("Brush.TextTertiary"),
+            Margin = new Thickness(8, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        langGroup.Children.Add(targetButton);
 
+        _provider = new TextBlock
+        {
+            Text = "✦ AI 自然翻译",
+            FontSize = 11.5,
+            FontWeight = FontWeights.Medium,
+            Foreground = Token("Brush.AccentText"),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var providerPill = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0x1E, 0x38, 0xBD, 0xF8)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x38, 0x38, 0xBD, 0xF8)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(11),
+            Padding = new Thickness(9, 3, 9, 3),
+            Margin = new Thickness(8, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = _provider
+        };
+
+        var close = new Button
+        {
+            Content = new LucideIconElement
+            {
+                Kind = LucideIconKind.X,
+                Width = 16,
+                Height = 16,
+                Stroke = Token("Brush.TextSecondary"),
+                StrokeThickness = 1.9
+            },
+            ToolTip = "关闭"
+        };
+        close.SetResourceReference(StyleProperty, "CardIconButtonStyle");
+        close.Click += (_, _) => Visibility = Visibility.Collapsed;
+
+        var headerGrid = new Grid();
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.Children.Add(langGroup);
+        Grid.SetColumn(providerPill, 1);
+        headerGrid.Children.Add(providerPill);
+        Grid.SetColumn(close, 2);
+        headerGrid.Children.Add(close);
+
+        var headerBar = new Border
+        {
+            Padding = new Thickness(18, 12, 12, 11),
+            BorderBrush = Token("Brush.BorderSubtle"),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Child = headerGrid
+        };
+
+        // Frameless reading surface: text breathes directly inside the aurora card
         _text = new TextBox
         {
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            MinHeight = 210,
-            MaxHeight = 340,
+            MinHeight = 186,
+            MaxHeight = 330,
             IsReadOnly = true,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI"),
-            FontSize = 17,
+            FontSize = 15.5,
             Foreground = Token("Brush.TextPrimary"),
             CaretBrush = Token("Brush.TextPrimary"),
             SelectionBrush = Token("Brush.Accent"),
             SelectionOpacity = 0.28,
-            Padding = new Thickness(16, 14, 12, 14)
+            Padding = new Thickness(20, 16, 16, 16)
         };
         _text.Resources[typeof(ScrollBar)] = Application.Current.FindResource("DarkScrollBarStyle");
-        TextBlock.SetLineHeight(_text, 27);
+        TextBlock.SetLineHeight(_text, 26);
         TextOptions.SetTextFormattingMode(_text, TextFormattingMode.Display);
         TextOptions.SetTextRenderingMode(_text, TextRenderingMode.ClearType);
-        var textBorder = new Border
-        {
-            Background = Token("Brush.SurfaceRaised"),
-            BorderBrush = Token("Brush.Border"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Margin = new Thickness(0, 16, 0, 0),
-            Child = _text
-        };
 
+        // Quiet bottom action bar with live status dot + ghost retry + luminous copy CTA
+        _statusDot = new Ellipse
+        {
+            Width = 6,
+            Height = 6,
+            Fill = Token("Brush.Success"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 7, 0)
+        };
         _status = new TextBlock
         {
-            FontSize = 11,
+            FontSize = 12,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            Foreground = Token("Brush.TextSecondary"),
-            Margin = new Thickness(0, 8, 0, 0),
-            Height = 16
+            Foreground = Token("Brush.TextTertiary"),
+            VerticalAlignment = VerticalAlignment.Center
         };
+        var statusGroup = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        statusGroup.Children.Add(_statusDot);
+        statusGroup.Children.Add(_status);
+
         _retranslate = new Button
         {
-            Content = ButtonContent("重新翻译", LucideIconKind.RotateCw),
-            Width = 154,
-            Height = 40,
-            Margin = new Thickness(0),
+            Content = ButtonContent("重新翻译", LucideIconKind.RotateCw, 14),
+            Height = 32,
+            MinWidth = 88,
+            Margin = new Thickness(0, 0, 8, 0),
+            Padding = new Thickness(10, 0, 10, 0),
             Background = Brushes.Transparent,
-            BorderBrush = Token("Brush.Border"),
-            BorderThickness = new Thickness(1)
+            Foreground = Token("Brush.TextSecondary"),
+            BorderThickness = new Thickness(0),
+            FontSize = 12.5
         };
         _retranslate.SetResourceReference(StyleProperty, "CardSecondaryButtonStyle");
         _retranslate.Click += (_, _) => RetranslateRequested?.Invoke(this, EventArgs.Empty);
+
         _copy = new Button
         {
-            Content = ButtonContent("复制译文", LucideIconKind.Copy),
-            Width = 154,
-            Height = 40,
-            Margin = new Thickness(0)
+            Content = ButtonContent("复制译文", LucideIconKind.Copy, 14),
+            Height = 32,
+            MinWidth = 98,
+            Margin = new Thickness(0),
+            Padding = new Thickness(12, 0, 14, 0)
         };
         _copy.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
         _copy.Click += (_, _) =>
@@ -211,40 +234,69 @@ internal sealed class TranslationCard : Grid
             }
         };
 
-        var footer = new Grid { Margin = new Thickness(0, 12, 0, 0) };
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        footer.ColumnDefinitions.Add(new ColumnDefinition());
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        footer.Children.Add(_retranslate);
-        Grid.SetColumn(_copy, 2);
-        footer.Children.Add(_copy);
+        var actionButtons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        actionButtons.Children.Add(_retranslate);
+        actionButtons.Children.Add(_copy);
+
+        var footerGrid = new Grid();
+        footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footerGrid.Children.Add(statusGroup);
+        Grid.SetColumn(actionButtons, 1);
+        footerGrid.Children.Add(actionButtons);
+
+        var footerBar = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0x52, 0x06, 0x0C, 0x18)),
+            BorderBrush = Token("Brush.BorderSubtle"),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            CornerRadius = new CornerRadius(0, 0, 15, 15),
+            Padding = new Thickness(18, 9, 12, 9),
+            Child = footerGrid
+        };
 
         var content = new Grid();
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.Children.Add(header);
-        Grid.SetRow(languageRow, 1);
-        content.Children.Add(languageRow);
-        Grid.SetRow(textBorder, 2);
-        content.Children.Add(textBorder);
-        Grid.SetRow(_status, 3);
-        content.Children.Add(_status);
-        Grid.SetRow(footer, 4);
-        content.Children.Add(footer);
+        content.Children.Add(headerBar);
+        Grid.SetRow(_text, 1);
+        content.Children.Add(_text);
+        Grid.SetRow(footerBar, 2);
+        content.Children.Add(footerBar);
+
+        // Subtle aurora glow bloom at top center of the card
+        var auroraGlow = new Border
+        {
+            CornerRadius = new CornerRadius(15),
+            Background = new RadialGradientBrush
+            {
+                GradientOrigin = new Point(0.5, 0.0),
+                Center = new Point(0.5, 0.0),
+                RadiusX = 0.72,
+                RadiusY = 0.35,
+                GradientStops = new GradientStopCollection
+                {
+                    new(Color.FromArgb(0x2E, 0x38, 0xBD, 0xF8), 0),
+                    new(Color.FromArgb(0x00, 0x38, 0xBD, 0xF8), 1)
+                }
+            },
+            Child = content
+        };
 
         _card = new Border
         {
-            Background = Token("Brush.Surface"),
-            BorderBrush = Token("Brush.Border"),
+            Background = Token("Brush.AuroraCard"),
+            BorderBrush = Token("Brush.GlassRim"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(20, 18, 18, 18),
+            CornerRadius = new CornerRadius(16),
             Margin = new Thickness(0, 0, 0, 10),
             Effect = (System.Windows.Media.Effects.DropShadowEffect)Application.Current.FindResource("Shadow.Floating"),
-            Child = content
+            Child = auroraGlow
         };
         _pointer = new Polygon
         {
@@ -273,16 +325,16 @@ internal sealed class TranslationCard : Grid
         _text.Text = "正在识别选区文字…";
         _text.ScrollToHome();
         _text.Foreground = Token("Brush.TextSecondary");
+        _statusDot.Fill = Token("Brush.Accent");
         SetStatus("正在准备翻译");
         Visibility = Visibility.Visible;
     }
 
     public void SetAvailableSize(double availableWidth, double availableHeight)
     {
-        Width = Math.Min(Math.Clamp(availableWidth * 0.34, 440, 480), Math.Max(340, availableWidth - 32));
-        _retranslate.Width = _copy.Width = Math.Min(154, (Width - 64) / 2);
-        var bodyHeight = Math.Clamp(availableHeight - 230, 100, 340);
-        _text.MinHeight = Math.Min(210, bodyHeight);
+        Width = Math.Min(Math.Clamp(availableWidth * 0.34, 430, 470), Math.Max(340, availableWidth - 32));
+        var bodyHeight = Math.Clamp(availableHeight - 170, 100, 330);
+        _text.MinHeight = Math.Min(186, bodyHeight);
         _text.MaxHeight = bodyHeight;
     }
 
@@ -318,7 +370,7 @@ internal sealed class TranslationCard : Grid
 
     public void SetProvider(string providerName)
     {
-        _provider.Text = providerName;
+        _provider.Text = string.IsNullOrWhiteSpace(providerName) ? "✦ AI 翻译" : $"✦ {providerName}";
         _provider.ToolTip = providerName;
     }
 
@@ -326,6 +378,7 @@ internal sealed class TranslationCard : Grid
     {
         _retranslate.IsEnabled = true;
         _copy.IsEnabled = _hasTranslation;
+        _statusDot.Fill = _hasTranslation ? Token("Brush.Success") : Token("Brush.Warning");
         if (!_hasTranslation)
         {
             _text.Text = "未识别到可翻译文字";
@@ -334,11 +387,12 @@ internal sealed class TranslationCard : Grid
 
     public void SetError(string message)
     {
-        _text.Foreground = Token("Brush.Danger");
+        _text.Foreground = Token("Brush.DangerOnDark");
         _text.Text = message;
         _hasTranslation = false;
         _copy.IsEnabled = false;
         _retranslate.IsEnabled = true;
+        _statusDot.Fill = Token("Brush.Danger");
         SetStatus("请求失败，请检查接口配置");
     }
 
@@ -411,15 +465,15 @@ internal sealed class TranslationCard : Grid
         };
     }
 
-    private static StackPanel ButtonContent(string text, LucideIconKind icon)
+    private static StackPanel ButtonContent(string text, LucideIconKind icon, double iconSize = 16)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         var iconElement = new LucideIconElement
         {
             Kind = icon,
-            Width = 18,
-            Height = 18,
-            StrokeThickness = 2,
+            Width = iconSize,
+            Height = iconSize,
+            StrokeThickness = 1.9,
             Margin = new Thickness(0, 0, 6, 0),
             VerticalAlignment = VerticalAlignment.Center
         };

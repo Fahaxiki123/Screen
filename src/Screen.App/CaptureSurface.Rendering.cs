@@ -60,7 +60,7 @@ internal sealed partial class CaptureSurface
             var selected = new RectangleGeometry(ToRect(Selection));
             var dim = new CombinedGeometry(GeometryCombineMode.Exclude, full, selected);
             dc.DrawGeometry(new SolidColorBrush(Color.FromArgb(148, 0, 0, 0)), null, dim);
-            dc.DrawRectangle(null, new Pen(_accentBrush, 1), ToRect(Selection));
+            dc.DrawRectangle(null, new Pen(new SolidColorBrush(Color.FromRgb(0x38, 0xBD, 0xF8)), 1.5), ToRect(Selection));
             DrawSelectionHandles(dc);
             DrawSizeLabel(dc);
         }
@@ -622,9 +622,12 @@ internal sealed partial class CaptureSurface
             new Point(Selection.Right, Selection.Y + Selection.Height / 2.0), new Point(Selection.X, Selection.Bottom),
             new Point(Selection.X + Selection.Width / 2.0, Selection.Bottom), new Point(Selection.Right, Selection.Bottom)
         };
+        var handleShadow = new SolidColorBrush(Color.FromArgb(140, 0, 0, 0));
+        var handleBorder = new Pen(new SolidColorBrush(Color.FromRgb(0x0E, 0xA5, 0xE9)), 1.5);
         foreach (var point in points)
         {
-            dc.DrawEllipse(Brushes.White, new Pen(_accentBrush, 1), point, 4, 4);
+            dc.DrawEllipse(handleShadow, null, new Point(point.X, point.Y + 1), 4.5, 4.5);
+            dc.DrawEllipse(Brushes.White, handleBorder, point, 3.5, 3.5);
         }
     }
 
@@ -634,17 +637,17 @@ internal sealed partial class CaptureSurface
             $"{Selection.Width} × {Selection.Height}",
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
-            new Typeface("Segoe UI"),
-            13,
-            _overlayTextBrush,
+            new Typeface(new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
+            12,
+            Brushes.White,
             1.0);
         var x = Selection.X;
-        var y = Selection.Y > 34 ? Selection.Y - 30 : Selection.Y + 8;
-        dc.DrawRoundedRectangle(
-            _overlayBaseBrush,
-            null,
-            new Rect(x, y, text.Width + 16, 24), 6, 6);
-        dc.DrawText(text, new Point(x + 8, y + 3));
+        var y = Selection.Y > 34 ? Selection.Y - 32 : Selection.Y + 8;
+        var labelRect = new Rect(x, y, text.Width + 20, 24);
+        var glassLabelBrush = new SolidColorBrush(Color.FromArgb(0xDC, 0x10, 0x18, 0x26));
+        var glassLabelPen = new Pen(new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF)), 1);
+        dc.DrawRoundedRectangle(glassLabelBrush, glassLabelPen, labelRect, 7, 7);
+        dc.DrawText(text, new Point(x + 10, y + 4));
     }
 
     private void DrawMagnifier(DrawingContext dc)

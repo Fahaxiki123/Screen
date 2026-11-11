@@ -35,16 +35,16 @@
             <SolidColorBrush x:Key="Settings.Brush.AccentPressed" Color="{Binding Color, Source={StaticResource Brush.AccentHover}, Mode=OneWay}" />
             <SolidColorBrush x:Key="Settings.Brush.AccentText" Color="{Binding Color, Source={StaticResource Brush.AccentText}, Mode=OneWay}" />
             <SolidColorBrush x:Key="Settings.Brush.AccentSelectedBackground" Color="{Binding Color, Source={StaticResource Brush.AccentSubtle}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.ControlBackground" Color="{Binding Color, Source={StaticResource Brush.SurfaceRaised}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.ControlBackgroundSubtle" Color="{Binding Color, Source={StaticResource Brush.SurfaceRaised}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.ControlBackgroundHover" Color="{Binding Color, Source={StaticResource Brush.SurfaceHover}, Mode=OneWay}" />
+            <SolidColorBrush x:Key="Settings.Brush.ControlBackground" Color="{Binding Color, Source={StaticResource Brush.SurfaceSunken}, Mode=OneWay}" />
+            <SolidColorBrush x:Key="Settings.Brush.ControlBackgroundSubtle" Color="{Binding Color, Source={StaticResource Brush.SurfaceSunken}, Mode=OneWay}" />
+            <SolidColorBrush x:Key="Settings.Brush.ControlBackgroundHover" Color="{Binding Color, Source={StaticResource Brush.SurfaceRaised}, Mode=OneWay}" />
             <SolidColorBrush x:Key="Settings.Brush.ControlBackgroundPressed" Color="{Binding Color, Source={StaticResource Brush.SurfaceHover}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.ControlBorder" Color="{Binding Color, Source={StaticResource Brush.Border}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.ControlBorderHover" Color="{Binding Color, Source={StaticResource Brush.TextTertiary}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.NavHover" Color="{Binding Color, Source={StaticResource Brush.SurfaceHover}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.ToggleOff" Color="{Binding Color, Source={StaticResource Brush.SurfaceHover}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.ToggleOffHover" Color="{Binding Color, Source={StaticResource Brush.Border}, Mode=OneWay}" />
-            <SolidColorBrush x:Key="Settings.Brush.Selection" Color="{Binding Color, Source={StaticResource Brush.AccentSubtle}, Mode=OneWay}" />
+            <SolidColorBrush x:Key="Settings.Brush.ControlBorder" Color="#2494C5FF" />
+            <SolidColorBrush x:Key="Settings.Brush.ControlBorderHover" Color="#507DD3FC" />
+            <SolidColorBrush x:Key="Settings.Brush.NavHover" Color="#147DD3FC" />
+            <SolidColorBrush x:Key="Settings.Brush.ToggleOff" Color="{Binding Color, Source={StaticResource Brush.SurfaceRaised}, Mode=OneWay}" />
+            <SolidColorBrush x:Key="Settings.Brush.ToggleOffHover" Color="{Binding Color, Source={StaticResource Brush.SurfaceHover}, Mode=OneWay}" />
+            <SolidColorBrush x:Key="Settings.Brush.Selection" Color="#3338BDF8" />
             <SolidColorBrush x:Key="Settings.Brush.Success" Color="{Binding Color, Source={StaticResource Brush.SuccessOnDark}, Mode=OneWay}" />
             <SolidColorBrush x:Key="Settings.Brush.Error" Color="{Binding Color, Source={StaticResource Brush.DangerOnDark}, Mode=OneWay}" />
 
@@ -72,11 +72,11 @@
             <Thickness x:Key="Settings.Spacing.RowPadding">18,16</Thickness>
             <Thickness x:Key="Settings.Spacing.SectionHeaderPadding">18,18,18,6</Thickness>
 
-            <CornerRadius x:Key="Settings.CornerRadius.Card">14</CornerRadius>
+            <CornerRadius x:Key="Settings.CornerRadius.Card">12</CornerRadius>
             <CornerRadius x:Key="Settings.CornerRadius.Control">8</CornerRadius>
-            <CornerRadius x:Key="Settings.CornerRadius.Nav">10</CornerRadius>
+            <CornerRadius x:Key="Settings.CornerRadius.Nav">8</CornerRadius>
             <CornerRadius x:Key="Settings.CornerRadius.IconPlate">8</CornerRadius>
-            <CornerRadius x:Key="Settings.CornerRadius.Keycap">4</CornerRadius>
+            <CornerRadius x:Key="Settings.CornerRadius.Keycap">6</CornerRadius>
             <CornerRadius x:Key="Settings.CornerRadius.Popup">8</CornerRadius>
 
             <sys:Double x:Key="Settings.ControlHeight">36</sys:Double>
@@ -609,7 +609,7 @@
                  reserved for floating elements in the capture chrome. -->
             <Style x:Key="SettingsCardStyle" TargetType="{x:Type Border}">
                 <Setter Property="Background" Value="{StaticResource Settings.Brush.CardBackground}" />
-                <Setter Property="BorderBrush" Value="{StaticResource Settings.Brush.CardBorder}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource Brush.GlassRim}" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="CornerRadius" Value="{StaticResource Settings.CornerRadius.Card}" />
                 <Setter Property="Padding" Value="0" />

@@ -23,9 +23,9 @@ internal sealed partial class CaptureOverlayWindow
         return new Border
         {
             Background = FindResourceBrush("Brush.ChromeGradient"),
-            BorderBrush = FindResourceBrush("Brush.OverlayBorder"),
+            BorderBrush = FindResourceBrush("Brush.GlassRim"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(14),
             Padding = new Thickness(5),
             Effect = FindResourceEffect("Shadow.Floating"),
             Child = row
@@ -97,6 +97,8 @@ internal sealed partial class CaptureOverlayWindow
     private Border BuildToolbar(out Button translationButton, out Button translationDropDownButton)
     {
         var tools = new WrapPanel { Orientation = Orientation.Horizontal };
+
+        // Cluster 1: Annotation drawing tools
         AddTool(tools, CaptureTool.Rectangle, LucideIconKind.Square, "矩形");
         AddTool(tools, CaptureTool.Ellipse, LucideIconKind.Circle, "圆形");
         AddTool(tools, CaptureTool.Line, LucideIconKind.Minus, "直线");
@@ -104,7 +106,6 @@ internal sealed partial class CaptureOverlayWindow
         AddTool(tools, CaptureTool.Pen, LucideIconKind.PencilLine, "画笔");
         AddTool(tools, CaptureTool.Text, LucideIconKind.Type, "文字");
         AddTool(tools, CaptureTool.Number, LucideIconKind.ListOrdered, "序号");
-        tools.Children.Add(Separator());
         var mosaicButton = ActionButton(
             ToolbarIcons.MosaicFrame,
             ToolbarIcons.MosaicBlocks,
@@ -113,7 +114,11 @@ internal sealed partial class CaptureOverlayWindow
             (_, _) => SelectTool(CaptureTool.Mosaic));
         _toolButtons[CaptureTool.Mosaic] = mosaicButton;
         tools.Children.Add(mosaicButton);
+
+        // Divider: Drawing tools | Smart extensions
         tools.Children.Add(Separator());
+
+        // Cluster 2: Smart / AI extensions
         tools.Children.Add(ActionButton(LucideIconKind.Pin, "贴图到桌面", Pin));
         var translationGroup = new StackPanel { Orientation = Orientation.Horizontal };
         translationButton = ActionButton(LucideIconKind.Languages, "按当前语种翻译", TranslateWithCurrentLanguage);
@@ -127,28 +132,59 @@ internal sealed partial class CaptureOverlayWindow
         tools.Children.Add(ActionButton(LucideIconKind.ScanText, "提取文字", ShowOcr));
         tools.Children.Add(ActionButton(LucideIconKind.ScissorsLineDashed, "长截图", StartLongCapture, rotationDegrees: 90));
         tools.Children.Add(ActionButton(LucideIconKind.Video, "录制此区域", StartRegionRecording));
+
+        // Divider: Smart extensions | Output / Delivery
         tools.Children.Add(Separator());
+
+        // Cluster 3: History & Delivery
         tools.Children.Add(ActionButton(LucideIconKind.Undo2, "撤销 · Ctrl+Z", (_, _) => _surface.Undo()));
         tools.Children.Add(ActionButton(LucideIconKind.Redo2, "重做 · Ctrl+Y", (_, _) => _surface.Redo()));
         tools.Children.Add(ActionButton(LucideIconKind.Download, "另存为 PNG · Ctrl+S", Save));
         tools.Children.Add(ActionButton(LucideIconKind.X, "取消截图 · Esc", (_, _) => Close(), FindResourceBrush("Brush.DangerOnDark")));
-        var finishButton = ActionButton(
-            LucideIconKind.Check,
-            "完成并复制 · Enter",
-            Finish);
+
+        var finishContent = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        finishContent.Children.Add(new LucideIconElement
+        {
+            Kind = LucideIconKind.Check,
+            Width = 14,
+            Height = 14,
+            Stroke = Brushes.White,
+            StrokeThickness = 2.4,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        finishContent.Children.Add(new TextBlock
+        {
+            Text = "完成",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = Brushes.White,
+            Margin = new Thickness(5, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        var finishButton = new Button
+        {
+            Content = finishContent,
+            ToolTip = "完成并复制 · Enter",
+            Height = 34,
+            MinWidth = 66,
+            Margin = new Thickness(4, 1, 2, 1),
+            Padding = new Thickness(10, 0, 12, 0)
+        };
         finishButton.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
-        finishButton.Width = finishButton.MinWidth = 36;
-        finishButton.Height = 36;
-        finishButton.Margin = new Thickness(3, 1, 1, 1);
-        finishButton.Padding = new Thickness(0);
+        finishButton.Click += Finish;
         tools.Children.Add(finishButton);
+
         return new Border
         {
             Background = FindResourceBrush("Brush.ChromeGradient"),
-            BorderBrush = FindResourceBrush("Brush.Border"),
+            BorderBrush = FindResourceBrush("Brush.GlassRim"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(5),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(7, 5, 7, 5),
             Effect = FindResourceEffect("Shadow.Floating"),
             Child = tools,
             Visibility = Visibility.Collapsed
@@ -160,10 +196,10 @@ internal sealed partial class CaptureOverlayWindow
         return new Border
         {
             Background = FindResourceBrush("Brush.ChromeGradient"),
-            BorderBrush = FindResourceBrush("Brush.OverlayBorder"),
+            BorderBrush = FindResourceBrush("Brush.GlassRim"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(8, 6, 8, 6),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(8, 5, 8, 5),
             Effect = FindResourceEffect("Shadow.Floating"),
             Visibility = Visibility.Collapsed
         };
@@ -626,17 +662,11 @@ internal sealed partial class CaptureOverlayWindow
 
         return new Border
         {
-            Background = FindResourceBrush("Brush.ChromeGradient"),
-            CornerRadius = new CornerRadius(12),
-            BorderBrush = FindResourceBrush("Brush.Border"),
+            Background = FindResourceBrush("Brush.AuroraCard"),
+            CornerRadius = new CornerRadius(14),
+            BorderBrush = FindResourceBrush("Brush.GlassRim"),
             BorderThickness = new Thickness(1),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect
-            {
-                BlurRadius = 24,
-                Color = Colors.Black,
-                Opacity = 0.4,
-                ShadowDepth = 6
-            },
+            Effect = FindResourceEffect("Shadow.Floating"),
             Child = content
         };
     }
@@ -735,8 +765,9 @@ internal sealed partial class CaptureOverlayWindow
     private static Border Separator() => new()
     {
         Width = 1,
-        Height = 22,
-        Background = FindResourceBrush("Brush.OverlayBorder"),
-        Margin = new Thickness(7)
+        Height = 20,
+        Background = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)),
+        Margin = new Thickness(6, 4, 6, 4),
+        VerticalAlignment = VerticalAlignment.Center
     };
 }

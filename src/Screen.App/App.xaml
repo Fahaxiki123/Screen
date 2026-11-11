@@ -89,13 +89,17 @@
            style panel). Selection state is set in code via Background /
            Foreground using Brush.AccentSubtleDark / Brush.AccentOnDark. -->
       <Style x:Key="ToolbarIconButtonDarkStyle" TargetType="Button" BasedOn="{StaticResource ToolbarIconButtonStyle}">
+        <Setter Property="Width" Value="34" />
+        <Setter Property="Height" Value="34" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.OverlayIcon}" />
         <Setter Property="Template">
           <Setter.Value>
             <ControlTemplate TargetType="Button">
               <Border x:Name="ButtonChrome"
-                      Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                      CornerRadius="{StaticResource Radius.Medium}"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="8"
                       SnapsToDevicePixels="True">
                 <ContentPresenter HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
@@ -104,9 +108,13 @@
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                   <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource Brush.OverlayHover}" />
+                  <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#40FFFFFF" />
+                  <Setter TargetName="ButtonChrome" Property="BorderThickness" Value="1" />
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
                   <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource Brush.OverlayPressed}" />
+                  <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#60FFFFFF" />
+                  <Setter TargetName="ButtonChrome" Property="BorderThickness" Value="1" />
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
                   <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.35" />
@@ -117,13 +125,13 @@
         </Setter>
       </Style>
 
-      <!-- Blue-gray scrollbar for navy surfaces (overlay menus, settings).
+      <!-- Slim sapphire scrollbar for navy surfaces (overlay menus, settings).
            Scoped by reference: light surfaces keep the system scrollbar. -->
       <Style x:Key="DarkScrollBarStyle" TargetType="ScrollBar">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Neutral300}" />
-        <Setter Property="Width" Value="10" />
-        <Setter Property="MinWidth" Value="10" />
+        <Setter Property="Width" Value="6" />
+        <Setter Property="MinWidth" Value="6" />
         <Setter Property="Template">
           <Setter.Value>
             <ControlTemplate TargetType="ScrollBar">
@@ -142,12 +150,12 @@
                       <Thumb.Template>
                         <ControlTemplate TargetType="Thumb">
                           <Border x:Name="ThumbChrome"
-                                  Background="{DynamicResource Brush.Neutral300}"
-                                  CornerRadius="4"
+                                  Background="#4594C5FF"
+                                  CornerRadius="3"
                                   Margin="1,2" />
                           <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                              <Setter TargetName="ThumbChrome" Property="Background" Value="{DynamicResource Brush.Neutral400}" />
+                              <Setter TargetName="ThumbChrome" Property="Background" Value="#7594C5FF" />
                             </Trigger>
                             <Trigger Property="IsDragging" Value="True">
                               <Setter TargetName="ThumbChrome" Property="Background" Value="{DynamicResource Brush.Accent}" />
@@ -164,8 +172,8 @@
                   <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False" />
                   <Setter Property="Width" Value="Auto" />
                   <Setter Property="MinWidth" Value="0" />
-                  <Setter Property="Height" Value="10" />
-                  <Setter Property="MinHeight" Value="10" />
+                  <Setter Property="Height" Value="6" />
+                  <Setter Property="MinHeight" Value="6" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
@@ -207,12 +215,12 @@
       </Style>
 
       <Style x:Key="CardPrimaryButtonStyle" TargetType="Button">
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="13" />
         <Setter Property="Height" Value="34" />
-        <Setter Property="MinWidth" Value="68" />
-        <Setter Property="Margin" Value="8,0,0,0" />
-        <Setter Property="Padding" Value="13,0" />
-        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="MinWidth" Value="66" />
+        <Setter Property="Margin" Value="4,1,2,1" />
+        <Setter Property="Padding" Value="10,0,12,0" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Background" Value="{DynamicResource Brush.PrimaryAction}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
         <Setter Property="FontWeight" Value="SemiBold" />
@@ -222,17 +230,39 @@
           <Setter.Value>
             <ControlTemplate TargetType="Button">
               <Border x:Name="ButtonChrome"
-                      Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                      CornerRadius="{StaticResource Radius.Medium}">
-                <ContentPresenter HorizontalAlignment="Center"
-                                  VerticalAlignment="Center" />
+                      CornerRadius="8"
+                      Background="{TemplateBinding Background}"
+                      BorderThickness="1"
+                      SnapsToDevicePixels="True">
+                <Border.BorderBrush>
+                  <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="#90FFFFFF" Offset="0" />
+                    <GradientStop Color="#30FFFFFF" Offset="1" />
+                  </LinearGradientBrush>
+                </Border.BorderBrush>
+                <Border CornerRadius="7" BorderThickness="1,1,0,0">
+                  <Border.BorderBrush>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                      <GradientStop Color="#60FFFFFF" Offset="0" />
+                      <GradientStop Color="#00FFFFFF" Offset="0.75" />
+                    </LinearGradientBrush>
+                  </Border.BorderBrush>
+                  <ContentPresenter HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Margin="{TemplateBinding Padding}" />
+                </Border>
               </Border>
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource Brush.AccentHover}" />
+                  <Setter TargetName="ButtonChrome" Property="Effect">
+                    <Setter.Value>
+                      <DropShadowEffect Color="#0EA5E9" BlurRadius="12" Opacity="0.55" ShadowDepth="0" />
+                    </Setter.Value>
+                  </Setter>
+                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.95" />
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.76" />
+                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.80" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>

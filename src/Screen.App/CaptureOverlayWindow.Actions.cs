@@ -23,12 +23,19 @@ internal sealed partial class CaptureOverlayWindow
         ConfigureStylePanel(tool);
         foreach (var pair in _toolButtons)
         {
-            pair.Value.Background = pair.Key == tool
+            var isSelected = pair.Key == tool;
+            pair.Value.Background = isSelected
                 ? (Brush)Application.Current.FindResource("Brush.AccentSubtleDark")
                 : Brushes.Transparent;
-            pair.Value.Foreground = pair.Key == tool
+            pair.Value.Foreground = isSelected
                 ? (Brush)Application.Current.FindResource("Brush.AccentOnDark")
                 : (Brush)Application.Current.FindResource("Brush.OverlayIcon");
+            pair.Value.BorderBrush = isSelected
+                ? (Brush)Application.Current.FindResource("Brush.AccentSubtleDarkBorder")
+                : Brushes.Transparent;
+            pair.Value.BorderThickness = isSelected
+                ? new Thickness(1)
+                : new Thickness(0);
         }
         PositionFloatingPanels();
     }

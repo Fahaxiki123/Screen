@@ -54,7 +54,9 @@ internal sealed class RecordingController : IDisposable
         _audio = audio;
         _stopSignal = stopSignal;
 
-        _control = new RecordingControlWindow();
+        _control = new RecordingControlWindow(
+            hasAudio: audio is not null,
+            levelProvider: audio is null ? null : () => audio.CurrentPeakLevel);
         _control.PauseToggled += (_, _) => TogglePause();
         _control.StopRequested += (_, _) => _ = StopAsync();
         _control.Show();
@@ -86,7 +88,7 @@ internal sealed class RecordingController : IDisposable
             }
         }
 
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _timer.Tick += (_, _) =>
         {
             // Check for mid-recording faults (GPU device loss, encoder crash, etc.)

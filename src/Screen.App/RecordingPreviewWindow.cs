@@ -112,7 +112,7 @@ internal sealed class RecordingPreviewWindow : Window
             CaptionHeight = TitleBarHeight,
             ResizeBorderThickness = new Thickness(5),
             GlassFrameThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(16),
             UseAeroCaptionButtons = false
         });
 
@@ -124,7 +124,7 @@ internal sealed class RecordingPreviewWindow : Window
         };
         _videoHost = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x12, 0x16)),
+            Background = new SolidColorBrush(Color.FromRgb(0x06, 0x0B, 0x15)),
             Child = _videoImage
         };
         _videoHost.MouseLeftButtonDown += (_, e) =>
@@ -178,8 +178,9 @@ internal sealed class RecordingPreviewWindow : Window
         _timeText = new TextBlock
         {
             Text = "00:00:00 / 00:00:00",
-            FontSize = 12,
-            Foreground = RecordingTheme.Brush("Brush.TextSecondary", "#B5C9D9"),
+            FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI Variable Text"),
+            FontSize = 12.5,
+            Foreground = RecordingTheme.Brush("Brush.TextSecondary", "#94AECE"),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(10, 0, 12, 0)
         };
@@ -272,8 +273,13 @@ internal sealed class RecordingPreviewWindow : Window
         // 125% scale: 26.4 DIP, edge to edge, with no extra border or padding.
         var progressHost = new Border
         {
-            Height = 26.4,
-            Background = RecordingTheme.Brush("Brush.Surface", "#1B3049"),
+            Height = 30,
+            Margin = new Thickness(14, 8, 14, 0),
+            CornerRadius = new CornerRadius(7),
+            ClipToBounds = true,
+            Background = RecordingTheme.Brush("Brush.SurfaceSunken", "#080F1D"),
+            BorderBrush = RecordingTheme.Brush("Brush.Border", "#2694C5FF"),
+            BorderThickness = new Thickness(1),
             SnapsToDevicePixels = true,
             Child = _timeline
         };
@@ -302,17 +308,17 @@ internal sealed class RecordingPreviewWindow : Window
         root.Children.Add(_videoHost);
         var windowFrame = new Border
         {
-            Background = RecordingTheme.Brush("Brush.WindowBackground", "#15223A"),
-            BorderBrush = RecordingTheme.Brush("Brush.Border", "#39556F"),
+            Background = RecordingTheme.Brush("Brush.WindowBackground", "#0A1222"),
+            BorderBrush = RecordingTheme.Brush("Brush.GlassRim", "#4594C5FF"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(16),
             SnapsToDevicePixels = true,
             Child = root
         };
         StateChanged += (_, _) =>
         {
             var maximized = WindowState == WindowState.Maximized;
-            windowFrame.CornerRadius = maximized ? new CornerRadius(0) : new CornerRadius(10);
+            windowFrame.CornerRadius = maximized ? new CornerRadius(0) : new CornerRadius(16);
             windowFrame.BorderThickness = maximized ? new Thickness(0) : new Thickness(1);
         };
         Content = windowFrame;
@@ -999,24 +1005,24 @@ internal sealed class RecordingPreviewWindow : Window
         {
             Text = text,
             FontSize = 13,
-            FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal,
+            FontWeight = primary ? FontWeights.SemiBold : FontWeights.Medium,
             Foreground = primary
-                ? RecordingTheme.Brush("Brush.OnAccent", "#15223A")
-                : RecordingTheme.Brush("Brush.TextPrimary", "#E8F1F7")
+                ? Brushes.White
+                : RecordingTheme.Brush("Brush.TextPrimary", "#F4F8FF")
         };
         Brush background = primary
-            ? RecordingTheme.Brush("Brush.PrimaryAction", "#A7CFDF")
-            : Brushes.Transparent;
+            ? RecordingTheme.Brush("Brush.PrimaryAction", "#0EA5E9")
+            : RecordingTheme.Brush("Brush.SurfaceRaised", "#13223D");
         Brush hoverBackground = primary
-            ? RecordingTheme.Brush("Brush.AccentHover", "#C0DEEA")
+            ? RecordingTheme.Brush("Brush.PrimaryActionHover", "#38BDF8")
             : HoverBrush();
         var button = MakeFlatButton(label, double.NaN, 32, background, hoverBackground, handler);
-        button.MinWidth = 72;
+        button.MinWidth = 76;
         button.Padding = new Thickness(16, 0, 16, 0);
         button.BorderThickness = new Thickness(1);
         button.BorderBrush = primary
-            ? RecordingTheme.Brush("Brush.Accent", "#A7CFDF")
-            : RecordingTheme.Brush("Brush.Border", "#39556F");
+            ? RecordingTheme.Brush("Brush.GlassRim", "#50FFFFFF")
+            : RecordingTheme.Brush("Brush.Border", "#2694C5FF");
         return button;
     }
 
@@ -1578,13 +1584,51 @@ internal sealed class TimelineBar : FrameworkElement
     private const double MinTrimGap = 0.2;
     private const double HandleWidth = 11;
     private const double HandleHitPadding = 5;
-    private const double PlayheadWidth = 3;
+    private const double PlayheadWidth = 2.4;
 
-    private static readonly Brush SurfaceBrush = RecordingTheme.Brush("Brush.Surface", "#1B3049");
-    private static readonly Brush AccentBrush = RecordingTheme.Brush("Brush.Accent", "#A7CFDF");
-    private static readonly Brush AccentHoverBrush = RecordingTheme.Brush("Brush.AccentHover", "#C0DEEA");
-    private static readonly Brush GripBrush = RecordingTheme.Brush("Brush.OnAccent", "#15223A");
-    private static readonly Brush PlayheadBrush = RecordingTheme.Brush("Brush.AccentText", "#C5E5F0");
+    private static readonly Brush SurfaceBrush = CreateFrozenBrush(Color.FromRgb(0x07, 0x0E, 0x1B));
+    private static readonly Brush ExcludedDimBrush = CreateFrozenBrush(Color.FromArgb(0xA8, 0x03, 0x06, 0x0E));
+    private static readonly Brush ActiveZoneBrush = CreateFrozenGradient(
+        Color.FromArgb(0x2E, 0x38, 0xBD, 0xF8),
+        Color.FromArgb(0x16, 0x0E, 0xA5, 0xE9),
+        horizontal: true);
+    private static readonly Pen TickPen = CreateFrozenPen(Color.FromArgb(0x16, 0x94, 0xC5, 0xFF), 1);
+    private static readonly Pen ActiveEdgePen = CreateFrozenPen(Color.FromRgb(0x38, 0xBD, 0xF8), 1.6);
+    private static readonly Brush AccentBrush = CreateFrozenGradient(
+        Color.FromRgb(0x7D, 0xD3, 0xFC),
+        Color.FromRgb(0x0E, 0xA5, 0xE9),
+        horizontal: false);
+    private static readonly Brush AccentHoverBrush = CreateFrozenGradient(
+        Color.FromRgb(0xBA, 0xE6, 0xFD),
+        Color.FromRgb(0x38, 0xBD, 0xF8),
+        horizontal: false);
+    private static readonly Brush GripBrush = CreateFrozenBrush(Color.FromRgb(0x06, 0x13, 0x26));
+    private static readonly Brush PlayheadBrush = Brushes.White;
+
+    private static SolidColorBrush CreateFrozenBrush(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
+    private static LinearGradientBrush CreateFrozenGradient(Color start, Color end, bool horizontal)
+    {
+        var brush = new LinearGradientBrush(
+            start,
+            end,
+            new Point(0, 0),
+            horizontal ? new Point(1, 0) : new Point(0, 1));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Pen CreateFrozenPen(Color color, double thickness)
+    {
+        var pen = new Pen(CreateFrozenBrush(color), thickness);
+        pen.Freeze();
+        return pen;
+    }
 
     private enum DragMode { None, Thumb, TrimStart, TrimEnd }
 
@@ -1696,51 +1740,61 @@ internal sealed class TimelineBar : FrameworkElement
         var xs = XFor(_trimStart, width);
         var xe = XFor(_trimEnd, width);
 
-        // Trimming moves the handles, not the timeline's background. Keep
-        // the same continuous surface under both included and excluded time.
+        // Cinema filmstrip track + subtle vertical tick marks
         dc.DrawRectangle(SurfaceBrush, null, new Rect(0, 0, width, height));
+        for (var tickX = 24.0; tickX < width - 8; tickX += 28.0)
+        {
+            dc.DrawLine(TickPen, new Point(tickX, 4), new Point(tickX, Math.Max(4, height - 4)));
+        }
 
         var startHandle = HandleRect(xs, width, height, DragMode.TrimStart);
         var endHandle = HandleRect(xe, width, height, DragMode.TrimEnd);
 
-        // Feishu keeps this as one quiet, flat trim strip. Playback position
-        // is represented only by the vertical marker; there is deliberately
-        // no centre rail and no horizontal elapsed-progress fill.
+        // Dim trimmed-out regions outside the handles
+        if (startHandle.Left > 0.5)
+        {
+            dc.DrawRectangle(ExcludedDimBrush, null, new Rect(0, 0, startHandle.Left, height));
+        }
+        if (endHandle.Right < width - 0.5)
+        {
+            dc.DrawRectangle(ExcludedDimBrush, null, new Rect(endHandle.Right, 0, width - endHandle.Right, height));
+        }
+
+        // Luminous ice-cyan active interval highlight & top/bottom rails
+        if (xe > xs)
+        {
+            dc.DrawRectangle(ActiveZoneBrush, null, new Rect(xs, 1, xe - xs, Math.Max(0, height - 2)));
+            dc.DrawLine(ActiveEdgePen, new Point(xs, 0.8), new Point(xe, 0.8));
+            dc.DrawLine(ActiveEdgePen, new Point(xs, height - 0.8), new Point(xe, height - 0.8));
+        }
+
         var x = XFor(_value, width);
         DrawHandle(dc, startHandle, DragMode.TrimStart);
         DrawHandle(dc, endHandle, DragMode.TrimEnd);
 
-        // Feishu's position marker is a short cyan bar, without a circular
-        // cap. At the beginning it is visible directly beside the left grip.
         var playheadWidth = Math.Min(PlayheadWidth, Math.Max(0, xe - xs));
         var playheadX = Math.Clamp(x, xs, Math.Max(xs, xe - playheadWidth));
-        var inset = Math.Min(2, height / 2);
+        var inset = Math.Min(1.5, height / 2);
         dc.DrawRoundedRectangle(
             PlayheadBrush, null,
             new Rect(playheadX, inset, playheadWidth, Math.Max(0, height - 2 * inset)),
-            0.8, 0.8);
+            1.2, 1.2);
     }
 
     private void DrawHandle(DrawingContext dc, Rect rect, DragMode mode)
     {
         var brush = _dragMode == mode || _hoverMode == mode ? AccentHoverBrush : AccentBrush;
-        // Only the outside corners are rounded in the reference. The inner
-        // edge is square where it meets the selected clip.
-        dc.DrawRoundedRectangle(brush, null, rect, 2.4, 2.4);
+        dc.DrawRoundedRectangle(brush, null, rect, 4, 4);
         var squareHalf = mode == DragMode.TrimStart
             ? new Rect(rect.Left + rect.Width / 2, rect.Top, rect.Width / 2, rect.Height)
             : new Rect(rect.Left, rect.Top, rect.Width / 2, rect.Height);
         dc.DrawRectangle(brush, null, squareHalf);
 
-        // Two understated grip grooves make the trim affordance readable
-        // without introducing another accent color.
+        // Clean single slot pill inside the ice-cyan grip
         var center = rect.Left + rect.Width / 2;
-        var gripInset = Math.Min(4, rect.Height / 2);
-        var gripTop = rect.Top + gripInset;
-        var gripBottom = rect.Bottom - gripInset;
-        var pen = new Pen(GripBrush, 0.8);
-        dc.DrawLine(pen, new Point(center - 1.6, gripTop), new Point(center - 1.6, gripBottom));
-        dc.DrawLine(pen, new Point(center + 1.6, gripTop), new Point(center + 1.6, gripBottom));
+        var slotHeight = Math.Clamp(rect.Height * 0.42, 4, 12);
+        var slotTop = rect.Top + (rect.Height - slotHeight) / 2;
+        dc.DrawRoundedRectangle(GripBrush, null, new Rect(center - 1, slotTop, 2, slotHeight), 1, 1);
     }
 
     private DragMode HitTest(Point point, double width)

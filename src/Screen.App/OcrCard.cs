@@ -70,9 +70,9 @@ internal sealed class OcrCard : Grid, IDisposable
         _textBorder = new Border
         {
             CornerRadius = new CornerRadius(10),
-            BorderBrush = Token("Brush.Border"),
+            BorderBrush = Brushes.Transparent,
             BorderThickness = new Thickness(1),
-            Background = Token("Brush.SurfaceRaised"),
+            Background = Token("Brush.SurfaceSunken"),
             Padding = new Thickness(0),
             Child = _text
         };
@@ -173,11 +173,11 @@ internal sealed class OcrCard : Grid, IDisposable
 
         _card = new Border
         {
-            Background = Token("Brush.Surface"),
-            BorderBrush = Token("Brush.Border"),
+            Background = Token("Brush.AuroraCard"),
+            BorderBrush = Token("Brush.GlassRim"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(20, 18, 18, 18),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(20, 16, 18, 16),
             Margin = new Thickness(0, 0, 0, 10),
             Effect = (System.Windows.Media.Effects.DropShadowEffect)Application.Current.FindResource("Shadow.Floating"),
             Child = content
@@ -491,10 +491,10 @@ internal sealed class OcrCard : Grid, IDisposable
     {
         _editing = editing;
         _text.IsReadOnly = !editing;
-        _textBorder.BorderThickness = editing ? new Thickness(2) : new Thickness(1);
+        _textBorder.BorderThickness = new Thickness(1);
         _textBorder.BorderBrush = editing
             ? Token("Brush.Accent")
-            : Token("Brush.Border");
+            : Brushes.Transparent;
         _textBorder.Padding = new Thickness(0);
         _text.Background = Brushes.Transparent;
         _editButton.Content = CreateButtonContent(
