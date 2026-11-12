@@ -1,4 +1,4 @@
-Screen — Third-party notices
+Screen 1.0.12 — Third-party notices
 Inventory updated on 2026-11-12 from the actual win-x64 publication.
 
 This folder contains third-party license texts, attribution, package versions,

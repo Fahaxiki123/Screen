@@ -1,5 +1,5 @@
 FFmpeg build identity and source information
-Recorded for Screen 1.0.12 optimization branch on 2026-11-12
+Recorded for Screen 1.0.12 on 2026-11-12
 
 Distributed file: ffmpeg/bin/ffmpeg.exe
 Size: 10568704 bytes (10.08 MiB)

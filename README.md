@@ -2,15 +2,15 @@
 
 个人使用的 Windows 截图、录屏、OCR 与翻译工具，使用 .NET 10 / WPF。
 
-当前源码版本为 **1.0.11**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
+当前源码版本为 **1.0.12**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
 
 ## 下载与本次更新
 
-[下载 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.11/Screen-1.0.11-win-x64-Setup.exe) · [版本说明与 SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.11)
+[下载 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.12/Screen-1.0.12-win-x64-Setup.exe) · [版本说明与 SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.12)
 
 安装器允许在 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64 上安装，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。Windows 10 实机安装与运行待验收。更新前请完成截图或录屏并退出 Screen。
 
-1.0.11 新增跨显示器录屏、单按 F1–F24 和可选的快捷键优先模式。长截图复用已匹配的接缝增量更新预览，完成时再拼接原尺寸图。版本也修复了录屏快速停止、混流失败后的素材保留、鼠标残影和凭据保存状态。
+1.0.12 新增录屏硬件编码自动探测（NVENC / QSV / AMF，失败自动无损回退 `libx264`）、预览按显示尺寸缩放解码与高分屏硬件加速解码、托盘空闲自动释放本地 OCR 与 DXGI 会话内存，并换用精简静态编译的 FFmpeg 9.0.2（安装包体积缩减约 30%）。同时修复了 AI 翻译竞速流式显示与提前回退、UIA 选区文本边界过滤、画笔与重叠马赛克渲染精度、录屏单色反色光标与热点偏移、Loopback 静音段音画同步及托盘非阻塞退出。
 
 ## 已实现的功能
 
@@ -99,7 +99,7 @@ dotnet run --project src/Screen.App/Screen.App.csproj -c Release
 ./tools/build-installer.ps1 -CompilerPath 'C:\Tools\NSIS\makensis.exe'
 ```
 
-脚本也会从 `PATH`、常见 NSIS 安装目录及 `artifacts/tooling/nsis-3.12/Bin/makensis.exe` 自动发现编译器。打包使用上一层已有的 `正式版` 目录，应先完成发布与功能检查。构建成功后，`../安装包` 中保留当前版本的 `Screen-1.0.11-win-x64-Setup.exe`。
+脚本也会从 `PATH`、常见 NSIS 安装目录及 `artifacts/tooling/nsis-3.12/Bin/makensis.exe` 自动发现编译器。打包使用上一层已有的 `正式版` 目录，应先完成发布与功能检查。构建成功后，`../安装包` 中保留当前版本的 `Screen-1.0.12-win-x64-Setup.exe`。
 
 安装器按当前用户安装，可直接使用标准用户权限，包含 .NET、OCR 模型、FFmpeg 和 Visual C++ 运行库。用户作品、个人配置与密钥由各用户自行管理，默认保存目录为使用者自己的图片目录，云服务配置由使用者自行填写。
 
