@@ -2,15 +2,15 @@
 
 个人使用的 Windows 截图、录屏、OCR 与翻译工具，使用 .NET 10 / WPF。
 
-当前源码版本为 **1.0.10**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
+当前源码版本为 **1.0.11**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
 
 ## 下载与本次更新
 
-[下载 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.10/Screen-1.0.10-win-x64-Setup.exe) · [版本说明与 SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.10)
+[下载 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.11/Screen-1.0.11-win-x64-Setup.exe) · [版本说明与 SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.11)
 
-安装包适用于 Windows 11 24H2 及更新版本，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。更新前请完成截图或录屏并退出 Screen；GitHub 的 Source code 附件为开发源码。
+安装器允许在 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64 上安装，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。Windows 10 实机安装与运行待验收。更新前请完成截图或录屏并退出 Screen。
 
-1.0.10 更新了设置、截图工具栏、OCR/翻译卡片的主题与布局；录屏增加呼吸指示灯、音频电平显示、取景框和倒计时动画，预览时间轴加强裁剪范围提示。本版本的已知交互限制见发布说明。
+1.0.11 新增跨显示器录屏、单按 F1–F24 和可选的快捷键优先模式。长截图复用已匹配的接缝增量更新预览，完成时再拼接原尺寸图。版本也修复了录屏快速停止、混流失败后的素材保留、鼠标残影和凭据保存状态。
 
 ## 已实现的功能
 
@@ -22,14 +22,16 @@
 - 腾讯机器翻译、OpenAI 兼容 AI 自然翻译、MyMemory，支持失败回退和模型竞速。
 - OCR/翻译等待时在选区内上下往返扫光，翻译可在设置的“翻译接口 → 翻译显示”切换浮动卡片与原位覆盖。
 - 原位译文按识别位置覆盖，可对照原文、复制译文，并将当前显示画面复制、保存 PNG 或贴图。
-- 单显示器内区域/全屏录屏、暂停恢复、系统声/麦克风、点击效果、MP4、录后预览与时长裁切。
+- 单显示器或跨显示器区域录屏、暂停恢复、系统声/麦克风、点击效果、MP4、录后预览与时长裁切。
 - 热键、启动项与保存目录设置。
 
-原位翻译通过局部底色覆盖文字，复杂图片背景可能出现覆盖痕迹，过长译文会缩小字号。录屏区域须位于单个显示器内，要求 SDR。当前翻译提供方以上述列表为准，本地 OCR 模型随项目提供。
+原位翻译通过局部底色覆盖文字，复杂图片背景可能出现覆盖痕迹，过长译文会缩小字号。单显示器录屏走 DXGI，要求 SDR。跨显示器选区按桌面物理像素采集，显示器布局中的空白区域填黑。当前翻译提供方以上述列表为准，本地 OCR 模型随项目提供。
+
+跨显示器录屏请从录屏快捷键或托盘「录屏」开始，拖出覆盖多个屏幕的选区。
 
 ## 环境与获取源码
 
-- Windows 11 24H2（26100）及更新版本的 x64 系统，项目最低平台声明为 `10.0.26100.0`。
+- x64 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11。项目使用较新的 Windows SDK，最低运行平台声明为 `10.0.19044.0`。
 - .NET 10 SDK。
 - Git 和 Git LFS，FFmpeg 二进制通过 Git LFS 保存。
 - 构建安装包时另需 PowerShell 7 和 NSIS 3.12。
@@ -97,7 +99,7 @@ dotnet run --project src/Screen.App/Screen.App.csproj -c Release
 ./tools/build-installer.ps1 -CompilerPath 'C:\Tools\NSIS\makensis.exe'
 ```
 
-脚本也会从 `PATH`、常见 NSIS 安装目录及 `artifacts/tooling/nsis-3.12/Bin/makensis.exe` 自动发现编译器。打包使用上一层已有的 `正式版` 目录，应先完成发布与功能检查。构建成功后，`../安装包` 中保留当前版本的 `Screen-1.0.10-win-x64-Setup.exe`。
+脚本也会从 `PATH`、常见 NSIS 安装目录及 `artifacts/tooling/nsis-3.12/Bin/makensis.exe` 自动发现编译器。打包使用上一层已有的 `正式版` 目录，应先完成发布与功能检查。构建成功后，`../安装包` 中保留当前版本的 `Screen-1.0.11-win-x64-Setup.exe`。
 
 安装器按当前用户安装，可直接使用标准用户权限，包含 .NET、OCR 模型、FFmpeg 和 Visual C++ 运行库。用户作品、个人配置与密钥由各用户自行管理，默认保存目录为使用者自己的图片目录，云服务配置由使用者自行填写。
 
@@ -116,6 +118,8 @@ dotnet run --project src/Screen.App/Screen.App.csproj -c Release
 | 取消截图 | Esc |
 
 OCR/翻译文本获得焦点时，复制、换行和撤销交给文本框处理。
+
+截图、录屏和恢复贴图均可直接设置 F1–F24。快捷键页可启用「快捷键优先交给 Screen」。此选项会优先处理已设置的组合，系统保留的操作和其他应用的键盘钩子仍可能先收到按键。
 
 ## 配置和失败恢复
 

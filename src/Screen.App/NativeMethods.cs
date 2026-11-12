@@ -44,6 +44,9 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool UnregisterHotKey(nint hWnd, int id);
 
+    [LibraryImport("user32.dll")]
+    internal static partial short GetAsyncKeyState(int virtualKey);
+
     internal delegate bool EnumWindowsProc(nint hWnd, nint lParam);
 
     [LibraryImport("user32.dll")]

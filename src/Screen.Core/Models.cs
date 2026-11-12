@@ -263,6 +263,7 @@ public sealed class AppSettings
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
     public string HotKey { get; set; } = DefaultHotKey;
+    public bool PreferScreenHotKeys { get; set; }
     public string ClickThroughRecoveryHotKey { get; set; } = DefaultClickThroughRecoveryHotKey;
     public string RecordHotKey { get; set; } = DefaultRecordHotKey;
     public bool HasShownClickThroughHint { get; set; }

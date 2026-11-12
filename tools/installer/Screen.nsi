@@ -46,7 +46,7 @@ Var InstallerMutexHandle
 !define MUI_UNICON "${ICON_FILE}"
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "安装 Screen"
-!define MUI_WELCOMEPAGE_TEXT "安装截图、录屏和文字识别功能。所需运行组件已包含在安装包中，无需联网下载，无需管理员权限。$\r$\n$\r$\n支持 Windows 11 24H2（26100）或更新版本的 x64 系统。$\r$\n$\r$\n安装或升级前，请先保存录屏并从系统托盘退出 Screen。安装程序不会强行结束截图或录屏。"
+!define MUI_WELCOMEPAGE_TEXT "安装截图、录屏和文字识别功能。所需运行组件已包含在安装包中，无需联网下载，无需管理员权限。$\r$\n$\r$\n支持 Windows 10 21H2（19044）或更新版本的 Windows 10 / Windows 11 x64 系统。$\r$\n$\r$\n安装或升级前，请先保存录屏并从系统托盘退出 Screen。安装程序不会强行结束截图或录屏。"
 !insertmacro MUI_PAGE_WELCOME
 !define MUI_LICENSEPAGE_TEXT_TOP "以下协议仅适用于随附的 Microsoft Visual C++ 运行库。Screen 和其他开源组件的许可说明保存在安装目录的 licenses 文件夹中。"
 !define MUI_LICENSEPAGE_CHECKBOX
@@ -107,14 +107,14 @@ Function .onInit
   StrCpy $AppMutexHandle 0
   StrCpy $DesktopShortcut ${BST_CHECKED}
   ${IfNot} ${IsNativeAMD64}
-    !insertmacro VisibleError "此安装包仅支持 x64 系统，需要 Windows 11 24H2（26100）或更新版本。"
+    !insertmacro VisibleError "此安装包仅支持 Windows 10 / Windows 11 x64。"
     SetErrorLevel 1
     Quit
   ${EndIf}
   ${IfNot} ${AtLeastWin10}
-  ${OrIfNot} ${AtLeastBuild} 26100
+  ${OrIfNot} ${AtLeastBuild} 19044
   ${OrIf} ${IsServerOS}
-    !insertmacro VisibleError "此安装包需要 Windows 11 24H2（26100）或更新版本。"
+    !insertmacro VisibleError "此安装包需要 Windows 10 21H2（19044）或更新版本。"
     SetErrorLevel 1
     Quit
   ${EndIf}

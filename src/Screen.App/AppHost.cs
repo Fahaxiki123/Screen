@@ -23,10 +23,6 @@ internal sealed class AppHost : IDisposable
     private AppSettings _settings;
     private Icon? _trayIcon;
     private RecordingController? _recordingController;
-    private CaptureOverlayWindow? _recordingSelectionOverlay;
-    // Covers the gap between confirming the setup panel and the controller
-    // being assigned (delay + countdown + early-fault wait), during which
-    // both fields above are null but the flow is already underway.
     private bool _recordingFlowActive;
     private bool _settingsLoadFailed;
 
@@ -93,6 +89,10 @@ internal sealed class AppHost : IDisposable
         };
         _hotKeyWindow.ClickThroughRecoveryRequested += (_, _) => RecoverClickThrough(showConfirmation: true);
         _hotKeyWindow.RecordRequested += (_, _) => _ = StartRecordingSelectionAsync();
+        if (!_hotKeyWindow.TrySetPriority(_settings.PreferScreenHotKeys))
+        {
+            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键", "无法启用优先模式，已使用普通快捷键注册。", Forms.ToolTipIcon.Warning);
+        }
         if (!_hotKeyWindow.RegisterRecordHotKey(_settings.RecordHotKey))
         {
             _notifyIcon.ShowBalloonTip(
@@ -157,7 +157,7 @@ internal sealed class AppHost : IDisposable
 
     private bool RecordingActive()
     {
-        if (_recordingController is null && _recordingSelectionOverlay is null && !_recordingFlowActive)
+        if (!_recordingFlowActive)
         {
             return false;
         }
@@ -166,138 +166,133 @@ internal sealed class AppHost : IDisposable
         return true;
     }
 
-    public async Task StartRecordingSelectionAsync()
+    public Task StartRecordingSelectionAsync() => RunRecordingAsync(null);
+
+    public Task StartRecordingWithRegionAsync(PixelRect region, RecordingBorderWindow persistentBorder) =>
+        RunRecordingAsync(region, persistentBorder);
+
+    private async Task RunRecordingAsync(PixelRect? region, RecordingBorderWindow? persistentBorder = null)
     {
-        if (_recordingController is not null || _recordingSelectionOverlay is not null || _recordingFlowActive)
+        if (_recordingFlowActive)
         {
+            persistentBorder?.Close();
             HintToastWindow.Show("已有录制正在进行");
             return;
         }
-        if (_coordinator.IsCapturing)
+        if (region is null && _coordinator.IsCapturing)
         {
             HintToastWindow.Show("截图进行中，请先完成或取消截图再录屏");
             return;
         }
+
+        // Reserve the workflow before capturing the selection background.
+        _recordingFlowActive = true;
+        CaptureOverlayWindow? overlay = null;
+        RecordingSaveResult result;
+        string filePath;
         try
         {
-            NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
-            var frame = await _captureService.CaptureAtAsync(new PixelPoint(cursor.X, cursor.Y));
-            var overlay = new CaptureOverlayWindow(
-                frame,
-                _captureService,
-                _windowSnapService,
-                _pinWindowManager,
-                _ocrEngine,
-                _translationProvider,
-                _credentialService,
-                _settingsStore,
-                recordingMode: true);
-            _recordingSelectionOverlay = overlay;
-            overlay.RecordingRegionConfirmed += async (_, selection) =>
+            RecordingSelection? selection = null;
+            if (region is null)
             {
-                // The persistent border takes over BEFORE the overlay (and
-                // its selection chrome) closes — Feishu-style: the outline
-                // never disappears from confirm to recording end.
-                var border = new RecordingBorderWindow(selection.Region);
-                border.Show();
+                NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
+                var frame = DesktopRegionCapture.GetMonitorBounds().Length > 1
+                    ? await GdiScreenCaptureService.CaptureDesktopAsync()
+                    : await _captureService.CaptureAtAsync(new PixelPoint(cursor.X, cursor.Y));
+                overlay = new CaptureOverlayWindow(
+                    frame,
+                    _captureService,
+                    _windowSnapService,
+                    _pinWindowManager,
+                    _ocrEngine,
+                    _translationProvider,
+                    _credentialService,
+                    _settingsStore,
+                    recordingMode: true);
+                var confirmation = new TaskCompletionSource<RecordingSelection?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                overlay.RecordingRegionConfirmed += (_, selected) => confirmation.TrySetResult(selected);
+                overlay.Closed += (_, _) =>
+                {
+                    overlay = null;
+                    confirmation.TrySetResult(null);
+                };
+                overlay.Show();
+                overlay?.Activate();
+                selection = await confirmation.Task;
+                if (selection is null || overlay is null)
+                {
+                    return;
+                }
+                region = selection.Region;
+                persistentBorder = new RecordingBorderWindow(region.Value);
+                persistentBorder.Show();
                 overlay.Close();
-                await StartRecordingWithRegionAsync(
-                    selection.Region,
-                    selection.ShowCursor,
-                    selection.ShowClickEffects,
-                    selection.RecordSystemAudio,
-                    selection.RecordMicrophone,
-                    border);
-            };
-            overlay.Closed += (_, _) => _recordingSelectionOverlay = null;
-            overlay.Show();
-            overlay.Activate();
+            }
+
+            // Let the selection overlay disappear while the border stays visible.
+            await Task.Delay(200);
+            var countdown = new RecordingCountdownWindow(region.Value);
+            countdown.Show();
+            if (!await countdown.Completion)
+            {
+                return;
+            }
+
+            // Release the DXGI session used for selection before recording.
+            _captureService.ReleaseSessions();
+            using var controller = RecordingController.Create(_settingsStore, region.Value, selection, persistentBorder);
+            persistentBorder = null; // The controller now owns the border.
+            _recordingController = controller;
+            controller.ShowControls();
+            result = await controller.Completion;
+            filePath = controller.FilePath;
         }
         catch (Exception exception)
         {
+            SimpleLogger.LogError("Unable to start recording", exception);
             MessageBox.Show($"无法开始录屏：{exception.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    /// <summary>
-    /// Feishu flow after a region is known: 3-2-1 countdown over the region,
-    /// then the capture loop; on completion the editor/preview window opens.
-    /// <paramref name="persistentBorder"/> is the outline window created at
-    /// confirm time; this method takes responsibility for closing it on every
-    /// abort path.
-    /// </summary>
-    public async Task StartRecordingWithRegionAsync(
-        PixelRect region,
-        bool? showCursor = null,
-        bool? showClickEffects = null,
-        bool? recordSystemAudio = null,
-        bool? recordMicrophone = null,
-        RecordingBorderWindow? persistentBorder = null)
-    {
-        if (_recordingController is not null || _recordingFlowActive)
-        {
-            persistentBorder?.Close();
-            HintToastWindow.Show("已有录制正在进行");
             return;
         }
-        _recordingFlowActive = true;
-        // Give the selection overlay time to disappear before the countdown
-        // takes over; the persistent border keeps the outline visible.
-        await Task.Delay(200);
-        var countdown = new RecordingCountdownWindow(region);
-        countdown.Show();
-        await countdown.Completion;
-
-        // Desktop Duplication allows a single session per output; the capture
-        // service still owns the one created during region selection, so it
-        // must be released before the recorder takes over.
-        _captureService.ReleaseSessions();
-        var controller = await RecordingController.StartAsync(
-            _settingsStore,
-            region,
-            showCursor,
-            showClickEffects,
-            recordSystemAudio,
-            recordMicrophone,
-            persistentBorder);
-        if (controller is null)
-        {
-            _recordingFlowActive = false;
-            persistentBorder?.Close();
-            return;
-        }
-        _recordingController = controller;
-        controller.Completed += (_, _) =>
+        finally
         {
             _recordingController = null;
             _recordingFlowActive = false;
+            overlay?.Close();
+            persistentBorder?.Close();
+        }
+
+        if (!result.Saved)
+        {
+            MessageBox.Show($"录屏失败：{result.Error}\n录制素材已保留，可从以下位置恢复：\n{result.RecoveryDirectory}",
+                "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+        if (result.Warning is not null)
+        {
+            HintToastWindow.Show(result.RecoveryDirectory is null
+                ? "声音处理失败，已保存无声视频"
+                : $"声音处理失败，已保存无声视频。原始素材保留在：{result.RecoveryDirectory}");
+        }
+        try
+        {
+            WindowActivation.ShowTopmost(new RecordingPreviewWindow(filePath));
+        }
+        catch
+        {
+            // A preview failure must never swallow the finished file.
             try
             {
-                WindowActivation.ShowTopmost(new RecordingPreviewWindow(controller.FilePath));
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{filePath}\"");
             }
             catch
             {
-                // A preview failure must never swallow the finished file.
-                try
-                {
-                    System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{controller.FilePath}\"");
-                }
-                catch
-                {
-                }
             }
-            _notifyIcon.ShowBalloonTip(
-                5000,
-                "Screen 录制已保存",
-                Path.GetFileName(controller.FilePath),
-                Forms.ToolTipIcon.Info);
-        };
-        controller.Failed += (_, message) =>
-        {
-            _recordingController = null;
-            _recordingFlowActive = false;
-            MessageBox.Show($"录屏失败：{message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
-        };
+        }
+        _notifyIcon.ShowBalloonTip(
+            5000,
+            "Screen 录制已保存",
+            Path.GetFileName(filePath),
+            Forms.ToolTipIcon.Info);
     }
 
     private Forms.ContextMenuStrip BuildMenu()
@@ -332,47 +327,34 @@ internal sealed class AppHost : IDisposable
             // right there instead of being silently reverted on close.
             hotKey => _hotKeyWindow.RegisterCaptureHotKey(hotKey),
             hotKey => _hotKeyWindow.RegisterClickThroughRecoveryHotKey(hotKey),
-            hotKey => _hotKeyWindow.RegisterRecordHotKey(hotKey));
-        window.ShowDialog();
+            hotKey => _hotKeyWindow.RegisterRecordHotKey(hotKey),
+            _hotKeyWindow.TrySetPriority);
+        window.SourceInitialized += (_, _) =>
+            _hotKeyWindow.SettingsWindowHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        try
+        {
+            window.ShowDialog();
+        }
+        finally
+        {
+            _hotKeyWindow.SettingsWindowHandle = 0;
+        }
 
         // Settings are auto-saved while the window is open, so always reload and
         // re-register hot keys after the window closes.
-        var previousHotKey = _settings.HotKey;
-        var previousRecoveryHotKey = _settings.ClickThroughRecoveryHotKey;
-        var previousRecordHotKey = _settings.RecordHotKey;
         _settings = _settingsStore.Load();
-        if (!_hotKeyWindow.RegisterCaptureHotKey(_settings.HotKey))
+        _hotKeyWindow.TrySetPriority(_settings.PreferScreenHotKeys);
+        void RefreshShortcut(string description, string key, Func<string, bool> register)
         {
-            var failed = _settings.HotKey;
-            _settings.HotKey = previousHotKey;
-            _settingsStore.Update(latest => latest.HotKey = previousHotKey);
-            _hotKeyWindow.RegisterCaptureHotKey(previousHotKey);
-            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键冲突", $"{failed} 已被其他程序占用，已恢复 {previousHotKey}。", Forms.ToolTipIcon.Warning);
+            if (!register(key))
+            {
+                _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键冲突",
+                    $"{description}快捷键 {key} 无法注册，仍可使用托盘菜单。", Forms.ToolTipIcon.Warning);
+            }
         }
-        if (!_hotKeyWindow.RegisterClickThroughRecoveryHotKey(_settings.ClickThroughRecoveryHotKey))
-        {
-            var failed = _settings.ClickThroughRecoveryHotKey;
-            _settings.ClickThroughRecoveryHotKey = previousRecoveryHotKey;
-            _settingsStore.Update(latest => latest.ClickThroughRecoveryHotKey = previousRecoveryHotKey);
-            _hotKeyWindow.RegisterClickThroughRecoveryHotKey(previousRecoveryHotKey);
-            _notifyIcon.ShowBalloonTip(
-                5000,
-                "Screen 快捷键冲突",
-                $"{failed} 已被其他程序占用，已恢复 {previousRecoveryHotKey}。",
-                Forms.ToolTipIcon.Warning);
-        }
-        if (!_hotKeyWindow.RegisterRecordHotKey(_settings.RecordHotKey))
-        {
-            var failed = _settings.RecordHotKey;
-            _settings.RecordHotKey = previousRecordHotKey;
-            _settingsStore.Update(latest => latest.RecordHotKey = previousRecordHotKey);
-            _hotKeyWindow.RegisterRecordHotKey(previousRecordHotKey);
-            _notifyIcon.ShowBalloonTip(
-                5000,
-                "Screen 快捷键冲突",
-                $"录屏快捷键 {failed} 已被其他程序占用，已恢复 {previousRecordHotKey}。",
-                Forms.ToolTipIcon.Warning);
-        }
+        RefreshShortcut("截图", _settings.HotKey, _hotKeyWindow.RegisterCaptureHotKey);
+        RefreshShortcut("恢复贴图", _settings.ClickThroughRecoveryHotKey, _hotKeyWindow.RegisterClickThroughRecoveryHotKey);
+        RefreshShortcut("录屏", _settings.RecordHotKey, _hotKeyWindow.RegisterRecordHotKey);
         _notifyIcon.ContextMenuStrip?.Dispose();
         _notifyIcon.ContextMenuStrip = BuildMenu();
         _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
@@ -408,7 +390,6 @@ internal sealed class AppHost : IDisposable
 
     public void Dispose()
     {
-        _recordingController?.StopForShutdown();
         _recordingController?.Dispose();
         _recordingController = null;
         _notifyIcon.Visible = false;

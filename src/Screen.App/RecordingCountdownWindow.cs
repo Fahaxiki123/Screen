@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
@@ -17,7 +16,7 @@ namespace Screen.App;
 /// </summary>
 internal sealed class RecordingCountdownWindow : Window
 {
-    private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TextBlock _number;
     private readonly Grid _orb;
     private readonly Ellipse _pulseRing;
@@ -158,7 +157,7 @@ internal sealed class RecordingCountdownWindow : Window
         Canvas.SetLeft(_orb, rx + (rw - _orb.Width) / 2);
         Canvas.SetTop(_orb, ry + (rh - _orb.Height) / 2);
         canvas.Children.Add(_orb);
-        Content = canvas;
+        RecordingRegionWindow.Attach(this, canvas, screen);
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) =>
@@ -173,20 +172,15 @@ internal sealed class RecordingCountdownWindow : Window
             PlayBeatAnimation();
         };
 
-        SourceInitialized += (_, _) =>
-        {
-            var handle = new WindowInteropHelper(this).Handle;
-            var style = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlExStyle).ToInt64();
-            NativeMethods.SetWindowLongPtr(
-                handle,
-                NativeMethods.GwlExStyle,
-                (nint)(style | NativeMethods.WsExTransparent | NativeMethods.WsExNoActivate));
-            NativeMethods.SetWindowDisplayAffinity(handle, NativeMethods.WdaExcludeFromCapture);
-        };
         Loaded += (_, _) =>
         {
             PlayBeatAnimation();
             _timer.Start();
+        };
+        Closed += (_, _) =>
+        {
+            _timer.Stop();
+            _completion.TrySetResult(false);
         };
     }
 
@@ -225,13 +219,13 @@ internal sealed class RecordingCountdownWindow : Window
         return rect;
     }
 
-    public Task Completion => _completion.Task;
+    public Task<bool> Completion => _completion.Task;
 
     /// <summary>Stops the countdown and closes; idempotent and cancel-safe.</summary>
     public void Finish()
     {
         _timer.Stop();
-        _completion.TrySetResult();
+        _completion.TrySetResult(true);
         Close();
     }
 }

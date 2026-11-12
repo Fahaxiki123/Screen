@@ -1,3 +1,4 @@
+using System.Windows.Media.Imaging;
 using Screen.Core;
 
 namespace Screen.App;
@@ -12,37 +13,32 @@ internal enum ScrollFrameOutcome
 
 internal sealed record ScrollFrameCapture(ScrollFrameOutcome Outcome, string? FailureReason = null);
 
+internal sealed record ScrollPreviewFrame(BitmapSource Image, int Width, int Height, int FrameCount);
+
 /// <summary>
 /// Keeps acquisition independent of the increasingly expensive full preview.
 /// Only the preceding accepted viewport is needed to validate a new seam.
 /// </summary>
 internal sealed class ScrollCaptureSequence
 {
-    private const long MaximumInputBytes = 512L * 1024 * 1024;
-    private const long MaximumOutputBytes = 512L * 1024 * 1024;
-    private const long MaximumWorkingBytes = 768L * 1024 * 1024;
     private readonly Func<CancellationToken, Task<PixelBuffer>> _capture;
-    private readonly IScrollStitcher _stitcher;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly CancellationTokenSource _cancellation = new();
-    private readonly List<PixelBuffer> _frames = [];
+    private readonly VerticalScrollStitcher.Session _stitch = new();
+    private readonly ScrollPreviewBuilder _preview = new();
     private Task<ScrollFrameCapture>? _pendingCapture;
     private PixelBuffer? _lastObserved;
     private int _stableObservations;
-    private long _inputBytes;
-    private int _outputHeight;
 
     public ScrollCaptureSequence(
         Func<CancellationToken, Task<PixelBuffer>> capture,
-        IScrollStitcher stitcher,
         Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _capture = capture;
-        _stitcher = stitcher;
         _delay = delay ?? Task.Delay;
     }
 
-    public int FrameCount => _frames.Count;
+    public int FrameCount => _stitch.Count;
     public CancellationToken CancellationToken => _cancellation.Token;
 
     public Task<ScrollFrameCapture> CaptureAsync() =>
@@ -63,37 +59,15 @@ internal sealed class ScrollCaptureSequence
             ? Math.Min(2, _stableObservations + 1)
             : 0;
         _lastObserved = crop;
-        if (_frames.Count > 0 && AreNearlyEqual(_frames[^1], crop))
+        if (_stitch.LastFrame is { } previous && AreNearlyEqual(previous, crop))
         {
             return new ScrollFrameCapture(ScrollFrameOutcome.Unchanged);
         }
 
-        var nextHeight = crop.Height;
-        if (_frames.Count > 0)
-        {
-            PixelBuffer[] pair = [_frames[^1], crop];
-            var match = await Task.Run(() => _stitcher.Stitch(pair, token), token);
-            token.ThrowIfCancellationRequested();
-            if (!match.IsComplete || match.Seams.Count != 1)
-            {
-                return new ScrollFrameCapture(ScrollFrameOutcome.Rejected, match.FailureReason);
-            }
-            nextHeight = checked(_outputHeight + match.Seams[0].OutputY);
-        }
-
-        var nextInputBytes = checked(_inputBytes + (long)crop.Stride * crop.Height);
-        var outputBytes = checked((long)crop.Width * nextHeight * 4);
-        if (nextHeight > 100_000 || nextInputBytes > MaximumInputBytes
-            || outputBytes > MaximumOutputBytes || nextInputBytes + outputBytes > MaximumWorkingBytes)
-        {
-            return new ScrollFrameCapture(ScrollFrameOutcome.Rejected,
-                "The long screenshot memory limit was reached.");
-        }
-
-        _frames.Add(crop);
-        _inputBytes = nextInputBytes;
-        _outputHeight = nextHeight;
-        return new ScrollFrameCapture(ScrollFrameOutcome.Added);
+        var failure = await Task.Run(() => _stitch.TryAppend(crop, token), token);
+        return failure is null
+            ? new ScrollFrameCapture(ScrollFrameOutcome.Added)
+            : new ScrollFrameCapture(ScrollFrameOutcome.Rejected, failure);
     }
 
     /// <summary>
@@ -122,10 +96,22 @@ internal sealed class ScrollCaptureSequence
             : new ScrollFrameCapture(ScrollFrameOutcome.Unstable);
     }
 
-    public PixelBuffer[] Snapshot() => _frames.ToArray();
+    // The controller serializes preview updates. Finish uses its own immutable
+    // layout and can run even if a preview worker is still returning.
+    public Task<ScrollPreviewFrame> UpdatePreviewAsync()
+    {
+        var layout = _stitch.Snapshot();
+        var token = _cancellation.Token;
+        return Task.Run(() => new ScrollPreviewFrame(
+            _preview.Update(layout, token).ToBitmapSource(), layout.Width, layout.Height, layout.Frames.Length), token);
+    }
 
-    public Task<StitchResult> StitchAsync(PixelBuffer[] snapshot) =>
-        Task.Run(() => _stitcher.Stitch(snapshot, _cancellation.Token), _cancellation.Token);
+    public Task<StitchResult> ComposeAsync()
+    {
+        var layout = _stitch.Snapshot();
+        var token = _cancellation.Token;
+        return Task.Run(() => VerticalScrollStitcher.Compose(layout, token), token);
+    }
 
     public void Cancel() => _cancellation.Cancel();
 

@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
@@ -105,18 +104,7 @@ internal sealed class RecordingBorderWindow : Window
             canvas.Children.Add(specBadge);
         }
 
-        Content = canvas;
-
-        SourceInitialized += (_, _) =>
-        {
-            var handle = new WindowInteropHelper(this).Handle;
-            var style = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlExStyle).ToInt64();
-            NativeMethods.SetWindowLongPtr(
-                handle,
-                NativeMethods.GwlExStyle,
-                (nint)(style | NativeMethods.WsExTransparent | NativeMethods.WsExNoActivate));
-            NativeMethods.SetWindowDisplayAffinity(handle, NativeMethods.WdaExcludeFromCapture);
-        };
+        RecordingRegionWindow.Attach(this, canvas, screen);
     }
 
     private static System.Windows.Shapes.Path CornerBracket(

@@ -28,24 +28,82 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
             throw new ArgumentException("All frames must have the same BGRA dimensions.", nameof(frames));
         }
 
-        var origins = new List<int> { 0 };
-        var seams = new List<StitchSeam>();
-        var fixedHeaders = new List<int>();
-        var fixedFooters = new List<int>();
-        var acceptedInputBytes = checked((long)frames[0].Stride * frames[0].Height);
-        var previousSamples = SampleRows(frames[0]);
+        var session = new Session();
+        session.AddFirstFrame(frames[0], cancellationToken);
         string? failureReason = null;
-
         for (var index = 1; index < frames.Count; index++)
         {
+            failureReason = session.TryAppend(frames[index], cancellationToken);
+            if (failureReason is not null)
+            {
+                break;
+            }
+        }
+        return Compose(session.Snapshot(), cancellationToken, failureReason);
+    }
+
+    internal sealed record Layout(
+        PixelBuffer[] Frames, int[] Origins, StitchSeam[] Seams, int FixedHeader, int FixedFooter)
+    {
+        public int Width => Frames[0].Width;
+        public int Height => checked(Origins[^1] + Frames[0].Height);
+    }
+
+    /// <summary>Matches each new viewport once. One writer admits frames while preview can take snapshots.</summary>
+    internal sealed class Session
+    {
+        private readonly object _gate = new();
+        private readonly List<PixelBuffer> _frames = [];
+        private readonly List<int> _origins = [];
+        private readonly List<StitchSeam> _seams = [];
+        private byte[]? _previousSamples;
+        private long _inputBytes;
+        private int _fixedHeader;
+        private int _fixedFooter;
+
+        public int Count
+        {
+            get { lock (_gate) return _frames.Count; }
+        }
+
+        public PixelBuffer? LastFrame
+        {
+            get { lock (_gate) return _frames.Count == 0 ? null : _frames[^1]; }
+        }
+
+        public Layout Snapshot()
+        {
+            lock (_gate)
+            {
+                return new Layout(_frames.ToArray(), _origins.ToArray(), _seams.ToArray(), _fixedHeader, _fixedFooter);
+            }
+        }
+
+        public string? TryAppend(PixelBuffer current, CancellationToken cancellationToken)
+        {
             cancellationToken.ThrowIfCancellationRequested();
-            var previous = frames[index - 1];
-            var current = frames[index];
-            var nextInputBytes = checked(acceptedInputBytes + (long)current.Stride * current.Height);
+            var height = current.Height;
+            var width = current.Width;
+            var nextInputBytes = checked(_inputBytes + (long)current.Stride * height);
             if (nextInputBytes > MaximumInputBytes)
             {
-                failureReason = "The long screenshot input-frame memory limit was reached.";
-                break;
+                return "The long screenshot input-frame memory limit was reached.";
+            }
+            if (_frames.Count == 0)
+            {
+                if (ExceedsOutputLimit(width, height, nextInputBytes))
+                {
+                    return "The long screenshot memory limit was reached.";
+                }
+                AddFirstFrame(current, cancellationToken);
+                return null;
+            }
+
+            var previous = _frames[^1];
+            var index = _frames.Count;
+            if (width != previous.Width || height != previous.Height || current.Stride < width * 4)
+            {
+                throw new ArgumentException("All frames must have the same BGRA dimensions.", nameof(current));
             }
             var fixedHeader = DetectFixedBand(previous, current, fromTop: true);
             var fixedFooter = DetectFixedBand(previous, current, fromTop: false);
@@ -56,6 +114,7 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
             }
 
             var currentSamples = SampleRows(current);
+            var previousSamples = _previousSamples!;
             var sampleWidth = Math.Min(width, HorizontalSamples);
             var match = FindBestOverlap(previousSamples, currentSamples, sampleWidth, height, fixedHeader, fixedFooter, reverse: false, cancellationToken);
             // An exact, unambiguous downward match cannot be improved by an
@@ -69,50 +128,73 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
                     || match.Error > MaximumAcceptedError
                     || reverseMatch.Error + AmbiguityMargin(reverseMatch.Error) < match.Error))
             {
-                failureReason = $"Frame {index + 1} moved upward; scroll capture only accepts downward movement.";
-                break;
+                return $"Frame {index + 1} moved upward; scroll capture only accepts downward movement.";
             }
             if (match.Overlap < MinimumOverlap || match.Error > MaximumAcceptedError)
             {
-                failureReason = $"Frame {index + 1} could not be joined reliably (error {match.Error:F1}).";
-                break;
+                return $"Frame {index + 1} could not be joined reliably (error {match.Error:F1}).";
             }
 
             var previousContentBottom = height - fixedFooter;
             var scrollDistance = previousContentBottom - match.Overlap - fixedHeader;
             if (scrollDistance <= 0)
             {
-                failureReason = $"Frame {index + 1} did not add new content.";
-                break;
+                return $"Frame {index + 1} did not add new content.";
             }
 
-            var origin = checked(origins[^1] + scrollDistance);
+            var origin = checked(_origins[^1] + scrollDistance);
             var outputHeight = checked(origin + height);
-            var outputBytes = checked((long)width * outputHeight * 4);
-            if (outputHeight > MaximumHeight
-                || outputBytes > MaximumOutputBytes
-                || nextInputBytes + outputBytes > MaximumWorkingBytes)
+            if (ExceedsOutputLimit(width, outputHeight, nextInputBytes))
             {
-                failureReason = "The long screenshot memory limit was reached.";
-                break;
+                return "The long screenshot memory limit was reached.";
             }
 
-            fixedHeaders.Add(fixedHeader);
-            fixedFooters.Add(fixedFooter);
-            origins.Add(origin);
-            seams.Add(new StitchSeam(index, fixedHeader, match.Overlap, match.Error, origin));
-            acceptedInputBytes = nextInputBytes;
-            previousSamples = currentSamples;
+            lock (_gate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _frames.Add(current);
+                _origins.Add(origin);
+                _seams.Add(new StitchSeam(index, fixedHeader, match.Overlap, match.Error, origin));
+                _fixedHeader = Math.Max(_fixedHeader, fixedHeader);
+                _fixedFooter = Math.Max(_fixedFooter, fixedFooter);
+                _inputBytes = nextInputBytes;
+                _previousSamples = currentSamples;
+            }
+            return null;
         }
 
-        var acceptedFrames = frames.Take(origins.Count).ToArray();
-        var header = fixedHeaders.Count == 0 ? 0 : fixedHeaders.Max();
-        var footer = fixedFooters.Count == 0 ? 0 : fixedFooters.Max();
-        var overlays = acceptedFrames.Length < 2
+        internal void AddFirstFrame(PixelBuffer frame, CancellationToken cancellationToken)
+        {
+            var samples = SampleRows(frame);
+            lock (_gate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _frames.Add(frame);
+                _origins.Add(0);
+                _inputBytes = checked((long)frame.Stride * frame.Height);
+                _previousSamples = samples;
+            }
+        }
+
+        private static bool ExceedsOutputLimit(int width, int height, long inputBytes)
+        {
+            var outputBytes = checked((long)width * height * 4);
+            return height > MaximumHeight || outputBytes > MaximumOutputBytes || inputBytes + outputBytes > MaximumWorkingBytes;
+        }
+    }
+
+    internal static StitchResult Compose(Layout layout, CancellationToken cancellationToken, string? failureReason = null)
+    {
+        if (layout.Frames.Length == 0)
+        {
+            throw new ArgumentException("At least one frame is required.", nameof(layout));
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        var overlays = layout.Frames.Length < 2
             ? Array.Empty<PixelRect>()
-            : DetectStableOverlays(acceptedFrames, origins, header, footer, cancellationToken);
-        var image = BuildResult(acceptedFrames, origins, header, footer, overlays);
-        return new StitchResult(image, seams, failureReason is null, failureReason);
+            : DetectStableOverlays(layout.Frames, layout.Origins, layout.FixedHeader, layout.FixedFooter, cancellationToken);
+        var image = BuildResult(layout.Frames, layout.Origins, layout.FixedHeader, layout.FixedFooter, overlays, cancellationToken);
+        return new StitchResult(image, layout.Seams, failureReason is null, failureReason);
     }
 
     private static PixelBuffer BuildResult(
@@ -120,8 +202,10 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         IReadOnlyList<int> origins,
         int fixedHeader,
         int fixedFooter,
-        IReadOnlyList<PixelRect> overlays)
+        IReadOnlyList<PixelRect> overlays,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var width = frames[0].Width;
         var frameHeight = frames[0].Height;
         var height = checked(origins[^1] + frameHeight);
@@ -134,6 +218,7 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         var hasOverlays = overlays.Count > 0;
         for (var frameIndex = 0; frameIndex < frames.Count; frameIndex++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var frame = frames[frameIndex];
             for (var y = fixedHeader; y < frameHeight - fixedFooter; y++)
             {

@@ -4,7 +4,14 @@ using System.Text;
 
 namespace Screen.App;
 
-internal sealed class CredentialService
+internal interface ICredentialStore
+{
+    string? Read(string targetName);
+    void Write(string targetName, string secret);
+    void Delete(string targetName);
+}
+
+internal sealed class CredentialService : ICredentialStore
 {
     private const uint CredTypeGeneric = 1;
     private const uint CredPersistLocalMachine = 2;

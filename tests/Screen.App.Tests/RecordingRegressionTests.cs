@@ -1,6 +1,7 @@
 using System.IO;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using NAudio.Wave;
+using Screen.Core;
 
 namespace Screen.App.Tests;
 
@@ -80,6 +81,138 @@ public sealed class RecordingRegressionTests
         Assert.IsNull(result.RecoveryDirectory);
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, File.ReadAllBytes(destination));
         Assert.IsFalse(Directory.Exists(scratch));
+    }
+
+    [TestMethod]
+    public void CrossDisplayCaptureKeepsNegativeCoordinatesAndExcludesGaps()
+    {
+        PixelRect[] monitors = [new(-1600, 120, 1600, 900), new(0, 0, 1920, 1080)];
+        Assert.IsTrue(DesktopRegionCapture.FitsOnOneDisplay(new PixelRect(-1500, 150, 500, 200), monitors));
+        var region = new PixelRect(-100, 40, 300, 300);
+        Assert.IsFalse(DesktopRegionCapture.FitsOnOneDisplay(region, monitors));
+        CollectionAssert.AreEqual(new[] { new PixelRect(-100, 120, 100, 220), new PixelRect(0, 40, 200, 300) },
+            DesktopRegionCapture.GetVisibleAreas(region, monitors));
+        Assert.IsEmpty(DesktopRegionCapture.GetVisibleAreas(new PixelRect(-100, 0, 100, 100), monitors));
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void ReusedDesktopFrameHasNoStaleCursor(bool useNv12)
+    {
+        const int width = 4;
+        const int height = 4;
+        var frames = new ScreenRecorder.FrameBuffer(width, height, useNv12);
+        Array.Fill(frames.Desktop, (byte)64);
+        if (useNv12)
+        {
+            frames.Desktop.AsSpan(width * height).Fill(128);
+        }
+        var clean = frames.Desktop.ToArray();
+        var cursor = new ScreenRecorder.CursorBitmap([10, 20, 120, 128], new PixelRect(0, 0, 1, 1));
+        var first = frames.GetEncodingFrame(cursor);
+        var firstSnapshot = first.ToArray();
+        Assert.IsFalse(firstSnapshot.SequenceEqual(clean), "A visible cursor must change the encoded frame.");
+
+        // No fresh desktop readback occurs between these encoding ticks.
+        CollectionAssert.AreEqual(firstSnapshot, frames.GetEncodingFrame(cursor), "Repeated blending must not accumulate.");
+        var movedCursor = cursor with { Bounds = new PixelRect(2, 2, 1, 1) };
+        var moved = frames.GetEncodingFrame(movedCursor);
+        Assert.AreSame(first, moved, "Cursor composition should reuse its encoding buffer.");
+        Assert.IsFalse(moved.SequenceEqual(firstSnapshot), "The cursor should move to its new position.");
+        var fresh = new ScreenRecorder.FrameBuffer(width, height, useNv12);
+        clean.CopyTo(fresh.Desktop, 0);
+        CollectionAssert.AreEqual(fresh.GetEncodingFrame(movedCursor), moved, "The previous cursor must leave no pixels behind.");
+
+        Assert.AreSame(frames.Desktop, frames.GetEncodingFrame(null));
+        CollectionAssert.AreEqual(clean, frames.Desktop, "The cached desktop must stay clean when the cursor disappears.");
+    }
+
+    [STATestMethod(UseSTASynchronizationContext = true)]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task ImmediateStopKeepsItsResultForTheHost(bool hasVideo)
+    {
+        var scratch = Directory.CreateDirectory(Path.Combine(_root, "session")).FullName;
+        var source = Path.Combine(scratch, "video.mp4");
+        var destination = Path.Combine(_root, "recording.mp4");
+        var stopSignal = new RecordingStopSignal();
+        var capture = new FakeRecordingCapture(() =>
+        {
+            if (!hasVideo)
+            {
+                throw new InvalidOperationException("No frames captured.");
+            }
+            File.WriteAllBytes(source, [1, 2, 3]);
+        });
+        using var controller = new RecordingController(capture, new PixelRect(0, 0, 64, 64),
+            destination, scratch, audio: null, border: null, stopSignal);
+
+        // Let the stop finish before the host starts waiting for its result.
+        await controller.StopAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await controller.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await controller.StopAsync();
+
+        Assert.AreEqual(hasVideo, result.Saved);
+        Assert.AreEqual(1, capture.FinalizeCalls);
+        Assert.IsTrue(stopSignal.IsRequested);
+        Assert.IsTrue(capture.WasDisposed);
+        Assert.AreEqual(hasVideo, File.Exists(destination));
+        if (!hasVideo)
+        {
+            Assert.AreEqual("No frames captured.", result.Error);
+            Assert.AreEqual(scratch, result.RecoveryDirectory);
+        }
+    }
+
+    [STATestMethod(UseSTASynchronizationContext = true)]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task StopPublishesVideoAndKeepsOriginalAudioIfMuxFails(bool muxFails)
+    {
+        const int width = 64;
+        const int height = 64;
+        const int frameRate = 12;
+        var scratch = Directory.CreateDirectory(Path.Combine(_root, "session")).FullName;
+        var source = Path.Combine(scratch, "video.mp4");
+        var audioPath = Path.Combine(scratch, "audio.raw");
+        var destination = Path.Combine(_root, "recording.mp4");
+        using (var pipeline = new RecordingPipeline(source, width, height, frameRate, 400_000, "nv12"))
+        {
+            pipeline.WriteVideoFrame(new byte[width * height * 3 / 2]);
+            pipeline.FinalizeFile();
+        }
+        var videoBytes = File.ReadAllBytes(source);
+        var audioBytes = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+        var signal = new RecordingStopSignal();
+        var waveIn = new FakeWaveIn();
+        using var track = new RecordingAudioTrack(waveIn, audioPath,
+            muxFails ? "invalid_test_audio_format" : "s16le", 48000, 2, signal);
+        waveIn.Emit(audioBytes);
+        using var audio = new RecordingAudioService([track]);
+        var capture = new FakeRecordingCapture(() => { }) { EncodedDurationSeconds = 1.0 / frameRate };
+        using var controller = new RecordingController(capture, new PixelRect(0, 0, width, height),
+            destination, scratch, audio, border: null, signal);
+
+        await controller.StopAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        var result = await controller.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.IsTrue(result.Saved, result.Error);
+        Assert.IsTrue(File.Exists(destination));
+        if (muxFails)
+        {
+            StringAssert.Contains(result.Warning ?? string.Empty, "invalid_test_audio_format");
+            Assert.AreEqual(scratch, result.RecoveryDirectory);
+            CollectionAssert.AreEqual(videoBytes, File.ReadAllBytes(destination));
+            CollectionAssert.AreEqual(videoBytes, File.ReadAllBytes(source));
+            CollectionAssert.AreEqual(audioBytes, File.ReadAllBytes(audioPath));
+        }
+        else
+        {
+            Assert.IsNull(result.Warning);
+            Assert.IsNull(result.RecoveryDirectory);
+            Assert.IsFalse(Directory.Exists(scratch));
+        }
     }
 
     [TestMethod]
@@ -307,6 +440,25 @@ public sealed class RecordingRegressionTests
             () => throw videoError));
 
         Assert.AreSame(videoError, error);
+    }
+
+    private sealed class FakeRecordingCapture(Action finalize) : IRecordingCapture
+    {
+        public bool IsPaused { get; private set; }
+        public Exception? Fault => null;
+        public double ElapsedSeconds => EncodedDurationSeconds;
+        public double EncodedDurationSeconds { get; init; }
+        public int FinalizeCalls { get; private set; }
+        public bool WasDisposed { get; private set; }
+        public void Pause() => IsPaused = true;
+        public void Resume() => IsPaused = false;
+        public void RequestStop() { }
+        public void StopAndFinalize()
+        {
+            FinalizeCalls++;
+            finalize();
+        }
+        public void Dispose() => WasDisposed = true;
     }
 
     private sealed class FlushFailingStream : MemoryStream

@@ -16,7 +16,6 @@ public sealed class ScrollCaptureCompletionRegressionTests
         var settlingSamples = 0;
         var sequence = new ScrollCaptureSequence(
             _ => Task.FromResult(++captures == 1 ? first : hovered),
-            new RejectingPairStitcher(),
             (_, token) =>
             {
                 token.ThrowIfCancellationRequested();
@@ -33,7 +32,7 @@ public sealed class ScrollCaptureCompletionRegressionTests
         Assert.IsTrue(settlingSamples <= 3,
             $"The current viewport is already stationary, but completion took {settlingSamples} settling samples.");
         Assert.AreEqual(1, sequence.FrameCount);
-        var result = await sequence.StitchAsync(sequence.Snapshot());
+        var result = await sequence.ComposeAsync();
         Assert.IsTrue(result.IsComplete);
         CollectionAssert.AreEqual(first.Pixels, result.Image.Pixels);
     }
@@ -46,7 +45,6 @@ public sealed class ScrollCaptureCompletionRegressionTests
         var settlingSamples = 0;
         var sequence = new ScrollCaptureSequence(
             _ => Task.FromResult(++captures == 1 ? first : WithChangedPatch(first, (byte)(captures * 13))),
-            new RejectingPairStitcher(),
             (_, token) =>
             {
                 token.ThrowIfCancellationRequested();
@@ -62,7 +60,7 @@ public sealed class ScrollCaptureCompletionRegressionTests
         Assert.AreEqual(ScrollFrameOutcome.Rejected, tail.Outcome);
         Assert.AreEqual(1, sequence.FrameCount,
             "Unverified animation frames must not be appended to the screenshot.");
-        var result = await sequence.StitchAsync(sequence.Snapshot());
+        var result = await sequence.ComposeAsync();
         Assert.IsTrue(result.IsComplete);
         CollectionAssert.AreEqual(first.Pixels, result.Image.Pixels);
     }
@@ -77,7 +75,6 @@ public sealed class ScrollCaptureCompletionRegressionTests
         var sequence = new ScrollCaptureSequence(
             _ => Task.FromResult(document.Crop(new PixelRect(0,
                 offsets[Math.Min(captures++, offsets.Length - 1)], document.Width, viewportHeight))),
-            new VerticalScrollStitcher(),
             (_, token) =>
             {
                 token.ThrowIfCancellationRequested();
@@ -91,7 +88,7 @@ public sealed class ScrollCaptureCompletionRegressionTests
         Assert.AreEqual(ScrollFrameOutcome.Unchanged, tail.Outcome);
         Assert.AreEqual(4, sequence.FrameCount,
             "Completion must still capture all real movement before the final stationary viewport.");
-        var result = await sequence.StitchAsync(sequence.Snapshot());
+        var result = await sequence.ComposeAsync();
         Assert.IsTrue(result.IsComplete, result.FailureReason);
         CollectionAssert.AreEqual(document.Crop(new PixelRect(0, 0, document.Width, 443)).Pixels,
             result.Image.Pixels);
@@ -157,15 +154,5 @@ public sealed class ScrollCaptureCompletionRegressionTests
             }
         }
         return new PixelBuffer(pixels, source.Width, source.Height, source.Stride);
-    }
-
-    private sealed class RejectingPairStitcher : IScrollStitcher
-    {
-        public StitchResult Stitch(IReadOnlyList<PixelBuffer> frames, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return new StitchResult(frames[0], [], frames.Count == 1,
-                frames.Count > 1 ? "No reliable scrolling overlap was found." : null);
-        }
     }
 }

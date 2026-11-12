@@ -395,29 +395,20 @@ internal sealed class RecordingControlWindow : Window
     /// <summary>Centers the capsule above or below the recording region (DPI-aware).</summary>
     public void Reposition(PixelRect region)
     {
+        var center = new System.Drawing.Point(region.X + region.Width / 2, region.Y + region.Height / 2);
+        var workArea = System.Windows.Forms.Screen.FromPoint(center).WorkingArea;
         var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
-            region.X + region.Width / 2,
-            region.Y + region.Height / 2)) / 96.0;
-        Left = (region.X + region.Width / 2.0 - ActualWidth * dpi / 2) / dpi;
-
-        // Prefer floating cleanly above the region like a camera viewfinder HUD;
-        // fall back to below or inside top when recording near screen edges.
-        var virtualTop = SystemParameters.VirtualScreenTop;
-        var virtualBottom = SystemParameters.VirtualScreenHeight + virtualTop;
-        var above = region.Y / dpi - ActualHeight + 8;
-        var below = (region.Bottom + 4) / dpi;
-
-        if (above >= virtualTop + 4)
-        {
-            Top = above;
-        }
-        else if (below + ActualHeight <= virtualBottom - 4)
-        {
-            Top = below;
-        }
-        else
-        {
-            Top = (region.Y + 8) / dpi;
-        }
+            workArea.X + workArea.Width / 2, workArea.Y + workArea.Height / 2)) / 96.0;
+        var width = (int)Math.Ceiling(ActualWidth * dpi);
+        var height = (int)Math.Ceiling(ActualHeight * dpi);
+        var maxX = Math.Max(workArea.Left, workArea.Right - width);
+        var maxY = Math.Max(workArea.Top, workArea.Bottom - height);
+        var above = region.Y - height - 4;
+        var below = region.Bottom + 4;
+        var top = above >= workArea.Top ? above : below <= maxY ? below : region.Y + 8;
+        var handle = new WindowInteropHelper(this).Handle;
+        NativeMethods.SetWindowPos(handle, 0,
+            Math.Clamp(center.X - width / 2, workArea.Left, maxX), Math.Clamp(top, workArea.Top, maxY),
+            0, 0, NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
     }
 }

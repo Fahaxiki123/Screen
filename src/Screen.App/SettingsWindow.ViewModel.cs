@@ -14,14 +14,14 @@ namespace Screen.App;
 internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly JsonSettingsStore _store;
-    private readonly CredentialService _credentials;
-    private readonly StartupService _startup;
+    private readonly ICredentialStore _credentials;
+    private readonly Action<bool> _setStartupEnabled;
+    private readonly Func<bool, bool>? _setHotKeyPriority;
     private readonly DispatcherTimer _saveTimer;
     private readonly AppSettings _settings;
+    private readonly Dictionary<string, string> _pendingCredentials = new();
 
-    private bool _suppressSave = true;
     private bool _dirty;
-    private bool _credentialsDirty;
     private bool _disposed;
 
     private string _tencentSecretId;
@@ -29,11 +29,13 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     private string _apiKey;
     private string _racingApiKey;
 
-    public SettingsViewModel(JsonSettingsStore store, CredentialService credentials, StartupService startup)
+    public SettingsViewModel(JsonSettingsStore store, ICredentialStore credentials, Action<bool> setStartupEnabled,
+        Func<bool, bool>? setHotKeyPriority = null)
     {
         _store = store;
         _credentials = credentials;
-        _startup = startup;
+        _setStartupEnabled = setStartupEnabled;
+        _setHotKeyPriority = setHotKeyPriority;
         _settings = store.Load();
 
         _tencentSecretId = credentials.Read(TranslationProfile.TencentSecretIdCredentialName) ?? string.Empty;
@@ -45,13 +47,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         {
             Interval = TimeSpan.FromMilliseconds(650)
         };
-        _saveTimer.Tick += (_, _) =>
-        {
-            _saveTimer.Stop();
-            SaveNow();
-        };
-
-        _suppressSave = false;
+        _saveTimer.Tick += (_, _) => SaveNow();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -78,6 +74,27 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     }
 
     // ---------- Hot keys ----------
+    public bool PreferScreenHotKeys
+    {
+        get => _settings.PreferScreenHotKeys;
+        set
+        {
+            if (value == _settings.PreferScreenHotKeys)
+            {
+                return;
+            }
+            if (_setHotKeyPriority?.Invoke(value) == false)
+            {
+                SetStatus("无法启用快捷键优先模式。", isError: true);
+                OnPropertyChanged();
+                return;
+            }
+            _settings.PreferScreenHotKeys = value;
+            OnPropertyChanged();
+            QueueSave();
+        }
+    }
+
     public string HotKey
     {
         get => _settings.HotKey;
@@ -510,25 +527,25 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public string TencentSecretId
     {
         get => _tencentSecretId;
-        set => SetCredential(ref _tencentSecretId, value, nameof(TencentSecretId));
+        set => SetCredential(ref _tencentSecretId, value, TranslationProfile.TencentSecretIdCredentialName);
     }
 
     public string TencentSecretKey
     {
         get => _tencentSecretKey;
-        set => SetCredential(ref _tencentSecretKey, value, nameof(TencentSecretKey));
+        set => SetCredential(ref _tencentSecretKey, value, TranslationProfile.TencentSecretKeyCredentialName);
     }
 
     public string ApiKey
     {
         get => _apiKey;
-        set => SetCredential(ref _apiKey, value, nameof(ApiKey));
+        set => SetCredential(ref _apiKey, value, _settings.Translation.CredentialName);
     }
 
     public string RacingApiKey
     {
         get => _racingApiKey;
-        set => SetCredential(ref _racingApiKey, value, nameof(RacingApiKey));
+        set => SetCredential(ref _racingApiKey, value, _settings.Translation.RacingCredentialName);
     }
 
     public void SetStatus(string text, bool isError)
@@ -549,48 +566,33 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     public void SaveNow()
     {
-        if (!_dirty)
+        _saveTimer.Stop();
+        if (!_dirty && _pendingCredentials.Count == 0)
         {
             return;
         }
 
-        // Credentials are keyed writes to Credential Manager with no
-        // whole-document overwrite risk, so persist them even while a settings
-        // validation error is pending — otherwise closing the dialog with an
-        // unrelated error (e.g. a hotkey conflict) would silently discard
-        // freshly entered API keys.
-        try
+        // A validation or write failure in one store must not block the other.
+        var credentialError = SavePendingCredentials();
+        var settingsError = _dirty ? SaveSettings() : null;
+        var error = credentialError ?? settingsError;
+        if (credentialError is not null && settingsError is not null)
         {
-            PersistCredentials();
-            _credentialsDirty = false;
+            error = $"{credentialError} · {settingsError}";
         }
-        catch (Exception exception)
+        SetStatus(error ?? $"已自动保存 · {DateTime.Now:HH:mm:ss}", isError: error is not null);
+        if (error is not null && !_disposed)
         {
-            HasError = true;
-            StatusText = $"凭据保存失败：{exception.Message}";
-            OnPropertyChanged(nameof(HasError));
-            OnPropertyChanged(nameof(StatusText));
-            if (!_disposed)
-            {
-                _saveTimer.Start();
-            }
+            _saveTimer.Start();
         }
+    }
 
+    private string? SaveSettings()
+    {
         NormalizeBeforeSave();
-        var validationError = Validate();
-        if (validationError is not null)
+        if (Validate() is { } validationError)
         {
-            HasError = true;
-            StatusText = validationError;
-            OnPropertyChanged(nameof(HasError));
-            OnPropertyChanged(nameof(StatusText));
-            // Keep the change pending and retry later; otherwise valid edits queued
-            // behind the invalid one would never be persisted.
-            if (!_disposed)
-            {
-                _saveTimer.Start();
-            }
-            return;
+            return validationError;
         }
 
         try
@@ -602,6 +604,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             {
                 latest.StartWithWindows = _settings.StartWithWindows;
                 latest.HotKey = _settings.HotKey;
+                latest.PreferScreenHotKeys = _settings.PreferScreenHotKeys;
                 latest.ClickThroughRecoveryHotKey = _settings.ClickThroughRecoveryHotKey;
                 latest.RecordHotKey = _settings.RecordHotKey;
                 latest.Ocr = _settings.Ocr;
@@ -609,31 +612,20 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
                 latest.TranslationDisplayMode = _settings.TranslationDisplayMode;
                 latest.Recording = _settings.Recording;
             });
-            _startup.SetEnabled(_settings.StartWithWindows);
+            _setStartupEnabled(_settings.StartWithWindows);
 
             _dirty = false;
-            _credentialsDirty = false;
-            HasError = false;
-            StatusText = $"已自动保存 · {DateTime.Now:HH:mm:ss}";
+            return null;
         }
         catch (Exception exception)
         {
-            HasError = true;
-            StatusText = $"自动保存失败：{exception.Message}";
-            if (!_disposed)
-            {
-                _saveTimer.Start();
-            }
+            return $"自动保存失败：{exception.Message}";
         }
-
-        OnPropertyChanged(nameof(HasError));
-        OnPropertyChanged(nameof(StatusText));
     }
 
     public void Dispose()
     {
         _disposed = true;
-        _saveTimer.Stop();
         SaveNow();
     }
 
@@ -643,41 +635,41 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public static string[] TranslationLanguages() =>
         ["简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch"];
 
-    private void SetCredential(ref string field, string value, string propertyName)
+    private void SetCredential(ref string field, string value, string targetName, [CallerMemberName] string? propertyName = null)
     {
         if (string.Equals(field, value, StringComparison.Ordinal))
         {
             return;
         }
         field = value;
-        _credentialsDirty = true;
+        _pendingCredentials[targetName] = value;
         OnPropertyChanged(propertyName);
-        QueueSave();
+        ScheduleSave();
     }
 
-    private void PersistCredentials()
+    private string? SavePendingCredentials()
     {
-        if (!_credentialsDirty)
+        string? error = null;
+        foreach (var (targetName, secret) in _pendingCredentials.ToArray())
         {
-            return;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(secret))
+                {
+                    _credentials.Delete(targetName);
+                }
+                else
+                {
+                    _credentials.Write(targetName, secret);
+                }
+                _pendingCredentials.Remove(targetName);
+            }
+            catch (Exception exception)
+            {
+                error ??= $"凭据保存失败：{exception.Message}";
+            }
         }
-
-        WriteOrDelete(TranslationProfile.TencentSecretIdCredentialName, _tencentSecretId);
-        WriteOrDelete(TranslationProfile.TencentSecretKeyCredentialName, _tencentSecretKey);
-        WriteOrDelete(_settings.Translation.CredentialName, _apiKey);
-        WriteOrDelete(_settings.Translation.RacingCredentialName, _racingApiKey);
-    }
-
-    private void WriteOrDelete(string targetName, string secret)
-    {
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            _credentials.Delete(targetName);
-        }
-        else
-        {
-            _credentials.Write(targetName, secret);
-        }
+        return error;
     }
 
     private void NormalizeBeforeSave()
@@ -700,11 +692,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         {
             return "截图快捷键格式无效。";
         }
-        if (!HotKeyWindow.TryParseHotKey(
-                _settings.ClickThroughRecoveryHotKey,
-                out _,
-                out _,
-                allowUnmodifiedFunctionKey: true))
+        if (!HotKeyWindow.TryParseHotKey(_settings.ClickThroughRecoveryHotKey, out _, out _))
         {
             return "恢复贴图穿透快捷键格式无效。";
         }
@@ -749,11 +737,12 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     private void QueueSave()
     {
-        if (_suppressSave)
-        {
-            return;
-        }
         _dirty = true;
+        ScheduleSave();
+    }
+
+    private void ScheduleSave()
+    {
         _saveTimer.Stop();
         _saveTimer.Start();
     }

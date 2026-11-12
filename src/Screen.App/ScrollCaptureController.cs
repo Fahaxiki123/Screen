@@ -33,13 +33,11 @@ internal sealed class ScrollCaptureController : IDisposable
     private bool _finishing;
     private Task? _captureOperation;
     private Task? _previewOperation;
-    private StitchResult? _previewResult;
     private int _previewFrameCount;
     private string? _captureStatus;
 
     public ScrollCaptureController(
         IScreenCaptureService capture,
-        IScrollStitcher stitcher,
         SelectionRegion selection,
         JsonSettingsStore settings)
     {
@@ -52,7 +50,7 @@ internal sealed class ScrollCaptureController : IDisposable
                 selection.Bounds.Y + selection.Bounds.Height / 2.0);
             var frame = await capture.CaptureAtAsync(center, token);
             return frame.Crop(selection.Bounds);
-        }, stitcher);
+        });
     }
 
     public event EventHandler? Completed;
@@ -249,25 +247,17 @@ internal sealed class ScrollCaptureController : IDisposable
     {
         try
         {
-            // Only one full preview runs at a time. New frames coalesce into
-            // the next snapshot without blocking their pairwise admission.
+            // New frames coalesce into the next preview update while capture
+            // continues matching each accepted viewport.
             while (!_ended && !_finishing && _previewFrameCount != _sequence.FrameCount)
             {
-                var snapshot = _sequence.Snapshot();
-                var result = await _sequence.StitchAsync(snapshot);
+                var preview = await _sequence.UpdatePreviewAsync();
                 if (_ended || _finishing)
                 {
                     return;
                 }
-                var source = await Task.Run(() => result.Image.ToDownscaledBitmapSource(512, 4096),
-                    _sequence.CancellationToken);
-                if (_ended || _finishing)
-                {
-                    return;
-                }
-                _previewResult = result;
-                _previewFrameCount = snapshot.Length;
-                _preview?.Update(source, result.Image.Width, result.Image.Height, snapshot.Length, result.IsComplete);
+                _previewFrameCount = preview.FrameCount;
+                _preview?.Update(preview.Image, preview.Width, preview.Height, preview.FrameCount);
                 if (_captureStatus is not null)
                 {
                     _preview?.SetStatus(_captureStatus);
@@ -312,14 +302,8 @@ internal sealed class ScrollCaptureController : IDisposable
             // Finish is an explicit request to stop. A changing avatar,
             // hover style, or unjoinable tail must not trap the user here.
             // Export only validated content and disclose an omitted tail.
-            if (_previewOperation is not null)
-            {
-                await _previewOperation;
-            }
-            var snapshot = _sequence.Snapshot();
-            var result = _previewFrameCount == snapshot.Length && _previewResult is not null
-                ? _previewResult
-                : await _sequence.StitchAsync(snapshot);
+            _preview?.SetStatus("正在拼接原尺寸长截图…");
+            var result = await _sequence.ComposeAsync();
             if (_ended)
             {
                 return;
@@ -537,10 +521,10 @@ internal sealed class ScrollCapturePreviewWindow : Window
         };
     }
 
-    public void Update(BitmapSource preview, int originalWidth, int originalHeight, int frames, bool reliable)
+    public void Update(BitmapSource preview, int originalWidth, int originalHeight, int frames)
     {
         _image.Source = preview;
-        _status.Text = $"总览 · {frames} 帧 · {originalWidth} × {originalHeight}" + (reliable ? string.Empty : " · 已保留可靠部分");
+        _status.Text = $"总览 · {frames} 帧 · {originalWidth} × {originalHeight}";
         Height = Math.Clamp(54 + Width * originalHeight / Math.Max(1.0, originalWidth), 138, 520);
         Reposition();
     }

@@ -11,6 +11,21 @@ internal sealed class GdiScreenCaptureService : IScreenCaptureService
     public Task<CaptureFrame> CaptureAtAsync(PixelPoint screenPoint, CancellationToken cancellationToken = default) =>
         Task.Run(() => Capture(screenPoint, cancellationToken), cancellationToken);
 
+    public static Task<CaptureFrame> CaptureDesktopAsync(CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
+            var bounds = new PixelRect(screen.X, screen.Y, screen.Width, screen.Height);
+            var stride = checked(bounds.Width * 4);
+            var pixels = GC.AllocateUninitializedArray<byte>(checked(stride * bounds.Height));
+            using var desktop = new DesktopRegionCapture(bounds, DesktopRegionCapture.GetMonitorBounds());
+            cancellationToken.ThrowIfCancellationRequested();
+            desktop.ReadInto(pixels);
+            var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(bounds.X, bounds.Y));
+            return new CaptureFrame(pixels, bounds.Width, bounds.Height, stride, dpi, dpi,
+                bounds, CaptureColorSpace.Srgb, DateTimeOffset.UtcNow);
+        }, cancellationToken);
+
     private static CaptureFrame Capture(PixelPoint screenPoint, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

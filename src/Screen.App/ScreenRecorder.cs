@@ -9,6 +9,18 @@ using static Vortice.DXGI.DXGI;
 
 namespace Screen.App;
 
+internal interface IRecordingCapture : IDisposable
+{
+    bool IsPaused { get; }
+    Exception? Fault { get; }
+    double ElapsedSeconds { get; }
+    double EncodedDurationSeconds { get; }
+    void Pause();
+    void Resume();
+    void RequestStop();
+    void StopAndFinalize();
+}
+
 /// <summary>
 /// Screen recording loop: DXGI Desktop Duplication capture on a dedicated
 /// thread, GPU crop + BGRA→NV12 conversion via the D3D11 video processor,
@@ -16,7 +28,7 @@ namespace Screen.App;
 /// <see cref="RecordingPipeline"/>.  Paused ticks drop frames entirely so the
 /// output timeline has no frozen segments (see <see cref="PauseClock"/>).
 /// </summary>
-internal sealed class ScreenRecorder : IDisposable
+internal sealed class ScreenRecorder : IRecordingCapture
 {
     private const uint CursorShowing = 1;
 
@@ -34,7 +46,6 @@ internal sealed class ScreenRecorder : IDisposable
     private bool _disposed;
     private long _framesWritten;
     private bool _useNv12 = true;
-    private int _frameByteSize;
 
     // GPU resources owned by the loop thread; created in Run, disposed there.
     private IDXGIAdapter1? _adapter;
@@ -53,16 +64,10 @@ internal sealed class ScreenRecorder : IDisposable
     private ID3D11VideoDevice? _videoDevice;
     private ID3D11VideoContext? _videoContext;
 
-    private byte[]? _lastNv12;
-    // Rotating pair of preallocated frame buffers: the capture loop never
-    // allocates per frame, and the buffer referenced by _lastNv12 is never
-    // the one ConvertFrame is refilling.
-    private byte[]? _frameBufferA;
-    private byte[]? _frameBufferB;
-    private bool _fillBufferB;
+    private FrameBuffer? _frames;
     private volatile bool _paused;
     private volatile bool _stopRequested;
-    private Exception? _fault;
+    private volatile Exception? _fault;
 
     public ScreenRecorder(string filePath, PixelRect region, RecordingProfile profile, RecordingStopSignal? stopSignal = null)
     {
@@ -139,7 +144,7 @@ internal sealed class ScreenRecorder : IDisposable
                 TimeSpan.FromSeconds(5));
             if (_pipeline is null || EncodedDurationSeconds <= 0)
             {
-                throw new InvalidOperationException("没有捕获到可保存的视频帧。", _fault);
+                throw new InvalidOperationException(_fault?.Message ?? "没有捕获到可保存的视频帧。", _fault);
             }
         }
     }
@@ -179,8 +184,19 @@ internal sealed class ScreenRecorder : IDisposable
     {
         try
         {
-            CreateSession();
-            CreateProcessorChain();
+            var monitors = DesktopRegionCapture.GetMonitorBounds();
+            using var desktop = DesktopRegionCapture.FitsOnOneDisplay(_region, monitors)
+                ? null
+                : new DesktopRegionCapture(_region, monitors);
+            if (desktop is null)
+            {
+                CreateSession();
+                CreateProcessorChain();
+            }
+            else
+            {
+                _useNv12 = false;
+            }
             _cts.Token.ThrowIfCancellationRequested();
             _pipeline = new RecordingPipeline(
                 _filePath,
@@ -189,7 +205,7 @@ internal sealed class ScreenRecorder : IDisposable
                 _frameRate,
                 _profile.VideoBitrate,
                 _useNv12 ? "nv12" : "bgra");
-            RunLoop();
+            RunLoop(desktop);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -201,7 +217,7 @@ internal sealed class ScreenRecorder : IDisposable
         }
     }
 
-    private void RunLoop()
+    private void RunLoop(DesktopRegionCapture? desktop)
     {
         var frameIntervalTicks = Stopwatch.Frequency / (double)_frameRate;
         var stopwatch = Stopwatch.StartNew();
@@ -232,23 +248,30 @@ internal sealed class ScreenRecorder : IDisposable
                 continue;
             }
 
-            var fresh = TryAcquireDesktopFrame();
-            var frame = fresh ? ConvertFrame() : _lastNv12;
-            if (frame is null)
+            if (desktop is not null || TryAcquireDesktopFrame())
+            {
+                _frames ??= new FrameBuffer(_region.Width, _region.Height, _useNv12);
+                if (desktop is null)
+                {
+                    ConvertFrame(_frames.Desktop);
+                }
+                else
+                {
+                    desktop.ReadInto(_frames.Desktop);
+                }
+            }
+            if (_frames is null)
             {
                 continue;
             }
-            if (_showCursor)
-            {
-                CompositeCursor(frame);
-            }
+            var cursor = _showCursor ? CaptureCursorBitmap() : null;
+            var frame = _frames.GetEncodingFrame(cursor);
             if (_stopSignal.IsRequested)
             {
                 break;
             }
             _pipeline!.WriteVideoFrame(frame);
             Interlocked.Increment(ref _framesWritten);
-            _lastNv12 = frame;
         }
     }
 
@@ -283,7 +306,7 @@ internal sealed class ScreenRecorder : IDisposable
     }
 
     /// <summary>GPU crop (source rect) + BGRA→NV12 in one video-processor pass, then read back.</summary>
-    private byte[] ConvertFrame()
+    private void ConvertFrame(byte[] frame)
     {
         using var inputView = _videoDevice!.CreateVideoProcessorInputView(
             _bgraTexture!,
@@ -303,12 +326,6 @@ internal sealed class ScreenRecorder : IDisposable
         };
         _videoContext!.VideoProcessorBlt(_processor!, _outputView!, 0, streams);
 
-        // Allocated once per session (sized by the active pixel format) and
-        // rotated thereafter; see the field declarations above.
-        _frameBufferA ??= new byte[_frameByteSize];
-        _frameBufferB ??= new byte[_frameByteSize];
-        var frame = _fillBufferB ? _frameBufferB : _frameBufferA;
-        _fillBufferB = !_fillBufferB;
         _context!.CopyResource(_nv12Staging!, _nv12Texture!);
         _context!.Map(_nv12Staging!, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None, out var mapped).CheckError();
         try
@@ -343,7 +360,6 @@ internal sealed class ScreenRecorder : IDisposable
         {
             _context.Unmap(_nv12Staging!, 0);
         }
-        return frame;
     }
 
     // ------------------------------------------------------------------
@@ -597,10 +613,6 @@ internal sealed class ScreenRecorder : IDisposable
             }
             _useNv12 = false;
         }
-        _frameByteSize = _useNv12
-            ? checked(_region.Width * _region.Height * 3 / 2)
-            : checked(_region.Width * _region.Height * 4);
-
         _processor = _videoDevice.CreateVideoProcessor(enumerator, 0);
         _outputView = _videoDevice.CreateVideoProcessorOutputView(
             _nv12Texture!,
@@ -639,24 +651,36 @@ internal sealed class ScreenRecorder : IDisposable
     }
 
     // ------------------------------------------------------------------
-    // Cursor compositing (CPU, into the NV12 buffer)
+    // Cursor compositing (CPU, into the encoding buffer)
     // ------------------------------------------------------------------
 
-    private void CompositeCursor(byte[] frame)
+    internal readonly record struct CursorBitmap(byte[] Pixels, PixelRect Bounds);
+
+    internal sealed class FrameBuffer(int width, int height, bool useNv12)
     {
-        if (!TryCaptureCursorBitmap(out var pixels, out var width, out var height, out var left, out var top))
+        public byte[] Desktop { get; } = new byte[useNv12 ? checked(width * height * 3 / 2) : checked(width * height * 4)];
+        private byte[]? _withCursor;
+
+        // The encoder writes synchronously. It can reuse the same output buffer
+        // on each tick while the clean desktop remains available after timeouts.
+        public byte[] GetEncodingFrame(CursorBitmap? cursor)
         {
-            return;
-        }
-        var regionWidth = _region.Width;
-        var regionHeight = _region.Height;
-        if (_useNv12)
-        {
-            CompositeCursorNv12(frame, pixels, width, height, left, top, regionWidth, regionHeight);
-        }
-        else
-        {
-            CompositeCursorBgra(frame, pixels, width, height, left, top, regionWidth, regionHeight);
+            if (cursor is not { } bitmap)
+            {
+                return Desktop;
+            }
+            _withCursor ??= new byte[Desktop.Length];
+            Desktop.AsSpan().CopyTo(_withCursor);
+            var bounds = bitmap.Bounds;
+            if (useNv12)
+            {
+                CompositeCursorNv12(_withCursor, bitmap.Pixels, bounds.Width, bounds.Height, bounds.X, bounds.Y, width, height);
+            }
+            else
+            {
+                CompositeCursorBgra(_withCursor, bitmap.Pixels, bounds.Width, bounds.Height, bounds.X, bounds.Y, width, height);
+            }
+            return _withCursor;
         }
     }
 
@@ -732,32 +756,29 @@ internal sealed class ScreenRecorder : IDisposable
         }
     }
 
-    private bool TryCaptureCursorBitmap(out byte[] pixels, out int width, out int height, out int left, out int top)
+    private CursorBitmap? CaptureCursorBitmap()
     {
-        pixels = [];
-        width = height = 0;
-        left = top = 0;
         var info = new NativeMethods.CursorInfo
         {
             CbSize = (uint)Marshal.SizeOf<NativeMethods.CursorInfo>()
         };
         if (!NativeMethods.GetCursorInfo(ref info) || info.Cursor == 0 || info.Flags != CursorShowing)
         {
-            return false;
+            return null;
         }
-        left = info.ScreenPosition.X - _region.X;
-        top = info.ScreenPosition.Y - _region.Y;
-        width = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SmCursorWidth));
-        height = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SmCursorHeight));
+        var left = info.ScreenPosition.X - _region.X;
+        var top = info.ScreenPosition.Y - _region.Y;
+        var width = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SmCursorWidth));
+        var height = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SmCursorHeight));
         if (left + width <= 0 || top + height <= 0 || left >= _region.Width || top >= _region.Height)
         {
-            return false;
+            return null;
         }
 
         var screenDc = NativeMethods.GetDC(0);
         if (screenDc == 0)
         {
-            return false;
+            return null;
         }
         var memDc = NativeMethods.CreateCompatibleDC(screenDc);
         nint dib = 0;
@@ -776,7 +797,7 @@ internal sealed class ScreenRecorder : IDisposable
             dib = NativeMethods.CreateDIBSection(memDc, ref header, 0, out var bits, 0, 0);
             if (dib == 0 || bits == 0)
             {
-                return false;
+                return null;
             }
             previousObject = NativeMethods.SelectObject(memDc, dib);
             unsafe
@@ -785,11 +806,11 @@ internal sealed class ScreenRecorder : IDisposable
             }
             if (!NativeMethods.DrawIconEx(memDc, 0, 0, info.Cursor, width, height, 0, 0, NativeMethods.DiNormal))
             {
-                return false;
+                return null;
             }
-            pixels = new byte[width * height * 4];
+            var pixels = new byte[width * height * 4];
             Marshal.Copy(bits, pixels, 0, pixels.Length);
-            return true;
+            return new CursorBitmap(pixels, new PixelRect(left, top, width, height));
         }
         finally
         {

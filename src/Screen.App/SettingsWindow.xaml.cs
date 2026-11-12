@@ -45,7 +45,8 @@ public partial class SettingsWindow : Window
         StartupService startup,
         Func<string, bool>? registerCaptureHotKey = null,
         Func<string, bool>? registerRecoveryHotKey = null,
-        Func<string, bool>? registerRecordHotKey = null)
+        Func<string, bool>? registerRecordHotKey = null,
+        Func<bool, bool>? setHotKeyPriority = null)
     {
         InitializeComponent();
         Background = (Brush)FindResource("Brush.WindowBackdrop");
@@ -73,7 +74,7 @@ public partial class SettingsWindow : Window
             }
         };
 
-        _viewModel = new SettingsViewModel(store, credentials, startup);
+        _viewModel = new SettingsViewModel(store, credentials, startup.SetEnabled, setHotKeyPriority);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
 

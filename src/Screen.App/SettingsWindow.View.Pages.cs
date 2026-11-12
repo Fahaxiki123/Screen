@@ -34,7 +34,7 @@ public partial class SettingsWindow
         body.Children.Add(CreateSettingRow(
             LucideIconKind.ScanLine,
             "截图快捷键",
-            "全局唤起区域截图，需包含 Ctrl、Shift、Alt 或 Win",
+            "全局唤起区域截图，允许直接使用 F1–F24",
             _captureHotKeyButton));
 
         body.Children.Add(CreateDivider());
@@ -45,6 +45,13 @@ public partial class SettingsWindow
             "恢复贴图操作",
             "解除全部贴图的鼠标穿透，允许直接使用 F1–F24",
             _clickThroughRecoveryHotKeyButton));
+
+        body.Children.Add(CreateDivider());
+        body.Children.Add(CreateSettingRow(
+            LucideIconKind.Settings2,
+            "快捷键优先交给 Screen",
+            "开启后，已设置的组合优先触发 Screen，其他软件可能收不到这些按键",
+            CreateBoundToggle(nameof(SettingsViewModel.PreferScreenHotKeys))));
 
         return card;
     }
@@ -115,7 +122,7 @@ public partial class SettingsWindow
         body.Children.Add(CreateSettingRow(
             LucideIconKind.Video,
             "录屏快捷键",
-            "全局唤起录屏选区，需包含 Ctrl、Shift、Alt 或 Win",
+            "全局唤起录屏选区，允许直接使用 F1–F24",
             _recordHotKeyButton));
 
         body.Children.Add(CreateFootnote(

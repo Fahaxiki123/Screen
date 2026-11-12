@@ -38,12 +38,9 @@ public partial class SettingsWindow
 
         var modifiers = Keyboard.Modifiers;
         var isFunctionKey = key is >= Key.F1 and <= Key.F24;
-        if (modifiers == ModifierKeys.None && !(isClickThroughRecovery && isFunctionKey))
+        if (modifiers == ModifierKeys.None && !isFunctionKey)
         {
-            var message = isClickThroughRecovery
-                ? "无修饰键时只能使用 F1–F24。"
-                : "至少需要一个 Ctrl、Shift、Alt 或 Win 修饰键。";
-            _viewModel.SetStatus(message, isError: true);
+            _viewModel.SetStatus("可以直接按 F1–F24，其他键请搭配 Ctrl、Shift、Alt 或 Win。", isError: true);
             input.Content = BuildKeycapPanel(GetHotKeyValue(propertyName));
             return;
         }
@@ -86,7 +83,7 @@ public partial class SettingsWindow
             : isRecord ? _registerRecordHotKey : _registerCaptureHotKey;
         if (register is not null && !register(value))
         {
-            _viewModel.SetStatus($"快捷键 {value} 注册失败（可能已被其他程序占用），已保留 {previous}。", isError: true);
+            _viewModel.SetStatus($"快捷键 {value} 注册失败，已保留 {previous}。冲突时可启用 Screen 优先。", isError: true);
             input.Content = BuildKeycapPanel(previous);
             return;
         }

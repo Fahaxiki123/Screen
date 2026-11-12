@@ -45,6 +45,45 @@ public sealed class InteractionRegressionTests
     }
 
     [TestMethod]
+    [DataRow("F1", Key.F1)]
+    [DataRow("F12", Key.F12)]
+    [DataRow("F24", Key.F24)]
+    public void StandaloneFunctionKeysAreValidForGlobalShortcuts(string shortcut, Key expected)
+    {
+        Assert.IsTrue(HotKeyWindow.TryParseHotKey(shortcut, out var modifiers, out var key));
+        Assert.AreEqual(0u, modifiers);
+        Assert.AreEqual(expected, key);
+        Assert.IsFalse(HotKeyWindow.TryParseHotKey("A", out _, out _));
+    }
+
+    [TestMethod]
+    public void F12AndPriorityBindingsCanBeConfiguredWithoutOwningTheNativeHotKey() => OnSta(() =>
+    {
+        const int reservedId = 0x5A10;
+        const uint modifiers = NativeMethods.ModControl | NativeMethods.ModShift | NativeMethods.ModAlt;
+        const uint vkF23 = 0x86;
+        const string conflict = "Ctrl+Shift+Alt+F23";
+        Assert.IsTrue(NativeMethods.RegisterHotKey(0, reservedId, modifiers, vkF23));
+        try
+        {
+            using var hotKeys = new HotKeyWindow();
+            Assert.IsTrue(hotKeys.RegisterCaptureHotKey("F12"));
+            Assert.IsFalse(hotKeys.RegisterClickThroughRecoveryHotKey("F12"));
+            Assert.IsFalse(hotKeys.RegisterRecordHotKey(conflict));
+            Assert.IsTrue(hotKeys.TrySetPriority(true));
+            Assert.IsTrue(hotKeys.RegisterRecordHotKey(conflict));
+            Assert.IsFalse(hotKeys.RegisterCaptureHotKey(conflict));
+            Assert.IsTrue(hotKeys.TrySetPriority(false));
+            Assert.IsFalse(hotKeys.RegisterRecordHotKey(conflict));
+            Assert.IsTrue(hotKeys.RegisterCaptureHotKey("F12"));
+        }
+        finally
+        {
+            NativeMethods.UnregisterHotKey(0, reservedId);
+        }
+    });
+
+    [TestMethod]
     public void OccupiedReplacementLeavesPreviousHotKeyRegisteredAndRoutable()
     {
         var registered = new Dictionary<int, uint>();

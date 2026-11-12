@@ -364,7 +364,6 @@ internal sealed partial class CaptureOverlayWindow
         // abnormal exit path cannot leave the hook + helper windows behind.
         _scrollCapture = new ScrollCaptureController(
             _captureService,
-            new VerticalScrollStitcher(),
             region,
             _settingsStore);
         _scrollCapture.Completed += (_, _) => Close();
@@ -419,14 +418,7 @@ internal sealed partial class CaptureOverlayWindow
         var border = new RecordingBorderWindow(region);
         border.Show();
         Close();
-        var recordingDefaults = _settingsStore.Load().Recording;
-        await host.StartRecordingWithRegionAsync(
-            region,
-            recordingDefaults.ShowCursor,
-            recordingDefaults.ShowClickEffects,
-            recordingDefaults.RecordSystemAudio,
-            recordingDefaults.RecordMicrophone,
-            border);
+        await host.StartRecordingWithRegionAsync(region, border);
     }
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)

@@ -15,11 +15,11 @@ namespace Screen.App;
 /// </summary>
 internal sealed class RecordingController : IDisposable
 {
-    private readonly ScreenRecorder _recorder;
+    private readonly IRecordingCapture _recorder;
     private readonly RecordingControlWindow _control;
-    private readonly RecordingBorderWindow? _border;
-    private readonly LowLevelKeyboardHook _hook;
-    private readonly LowLevelMouseHook? _mouseHook;
+    private RecordingBorderWindow? _border;
+    private LowLevelKeyboardHook? _hook;
+    private LowLevelMouseHook? _mouseHook;
     private readonly RecordingAudioService? _audio;
     private readonly DispatcherTimer _timer;
     private readonly PixelRect _region;
@@ -27,66 +27,37 @@ internal sealed class RecordingController : IDisposable
     private readonly string _tempDir;
     private readonly string _videoTempPath;
     private readonly RecordingStopSignal _stopSignal;
+    private readonly bool _showClickEffects;
+    private readonly TaskCompletionSource<RecordingSaveResult> _completion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task<RecordingSaveResult>? _finishTask;
-    private bool _finished;
     private bool _disposed;
-    private bool _uiClosed;
 
-    public event EventHandler? Completed;
-    public event EventHandler<string>? Failed;
-
-    private RecordingController(
-        ScreenRecorder recorder,
+    internal RecordingController(
+        IRecordingCapture recorder,
         PixelRect region,
         string filePath,
         string tempDir,
-        string videoTempPath,
         RecordingAudioService? audio,
         RecordingBorderWindow? border,
-        bool showClickEffects,
-        RecordingStopSignal stopSignal)
+        RecordingStopSignal stopSignal,
+        bool showClickEffects = false)
     {
         _recorder = recorder;
         _region = region;
         _filePath = filePath;
         _tempDir = tempDir;
-        _videoTempPath = videoTempPath;
+        _videoTempPath = Path.Combine(tempDir, "video.mp4");
         _audio = audio;
+        _border = border;
         _stopSignal = stopSignal;
+        _showClickEffects = showClickEffects;
 
         _control = new RecordingControlWindow(
             hasAudio: audio is not null,
             levelProvider: audio is null ? null : () => audio.CurrentPeakLevel);
         _control.PauseToggled += (_, _) => TogglePause();
         _control.StopRequested += (_, _) => _ = StopAsync();
-        _control.Show();
-        _control.Reposition(region);
-
-        // The border is usually the persistent one created the moment the
-        // user confirmed the region (before the overlay closed), so the
-        // outline never blinks; fall back to creating it here for callers
-        // that skipped that step.
-        _border = border ?? new RecordingBorderWindow(region);
-        _border.Show();
-
-        // Esc stops recording from anywhere: the user is interacting with the
-        // app being recorded, so the hook must not require our own foreground.
-        _hook = new LowLevelKeyboardHook(0, requireForegroundWindow: false);
-        _hook.EscapePressed += (_, _) => Application.Current.Dispatcher.BeginInvoke(() => _ = StopAsync());
-
-        if (showClickEffects)
-        {
-            try
-            {
-                _mouseHook = new LowLevelMouseHook();
-                _mouseHook.LeftButtonDown += (_, point) =>
-                    Application.Current.Dispatcher.BeginInvoke(() => new ClickRippleWindow(point.X, point.Y).Show());
-            }
-            catch
-            {
-                // Hook failure must not sink the recording itself.
-            }
-        }
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _timer.Tick += (_, _) =>
@@ -100,153 +71,100 @@ internal sealed class RecordingController : IDisposable
             }
             _control.UpdateTimer(_recorder.ElapsedSeconds);
         };
-        _timer.Start();
     }
 
     public string FilePath => _filePath;
+    public Task<RecordingSaveResult> Completion => _completion.Task;
 
-    public static async Task<RecordingController?> StartAsync(
+    public static RecordingController Create(
         JsonSettingsStore settings,
-        PixelRect? region,
-        bool? showCursor = null,
-        bool? showClickEffects = null,
-        bool? recordSystemAudio = null,
-        bool? recordMicrophone = null,
-        RecordingBorderWindow? persistentBorder = null)
+        PixelRect region,
+        RecordingSelection? selection,
+        RecordingBorderWindow? persistentBorder)
     {
-        RecordingProfile profile;
-        PixelRect target;
-        string filePath;
-        string tempDir;
-        try
+        var appSettings = settings.Load();
+        var profile = appSettings.Recording;
+        if (selection is not null)
         {
-            var appSettings = settings.Load();
-            profile = appSettings.Recording;
-            if (showCursor is { } cursor)
+            profile = profile with
             {
-                profile = profile with { ShowCursor = cursor };
-            }
-            if (showClickEffects is { } clickEffects)
-            {
-                profile = profile with { ShowClickEffects = clickEffects };
-            }
-            if (recordSystemAudio is { } systemAudio)
-            {
-                profile = profile with { RecordSystemAudio = systemAudio };
-            }
-            if (recordMicrophone is { } microphone)
-            {
-                profile = profile with { RecordMicrophone = microphone };
-            }
-            target = region ?? PrimaryMonitorBounds();
-            // Encoders need even dimensions; the crop keeps the top-left.
-            target = new PixelRect(target.X, target.Y, target.Width & ~1, target.Height & ~1);
-            if (target.Width < 64 || target.Height < 64)
-            {
-                throw new InvalidOperationException("录制区域太小。");
-            }
-            FfmpegLocator.Resolve();
-            Directory.CreateDirectory(appSettings.SaveDirectory);
-            filePath = Path.Combine(
-                appSettings.SaveDirectory,
-                $"Recording-{DateTime.Now:yyyyMMdd-HHmmss}.mp4");
-            // Scratch space for the video-only intermediate and raw audio
-            // tracks; muxed into the final file at stop, then deleted.
-            tempDir = Path.Combine(
-                Path.GetTempPath(),
-                "Screen.Recording",
-                Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(tempDir);
+                ShowCursor = selection.ShowCursor,
+                ShowClickEffects = selection.ShowClickEffects,
+                RecordSystemAudio = selection.RecordSystemAudio,
+                RecordMicrophone = selection.RecordMicrophone
+            };
         }
-        catch (Exception exception)
+        // Encoders need even dimensions; the crop keeps the top-left.
+        var target = region with { Width = region.Width & ~1, Height = region.Height & ~1 };
+        if (target.Width < 64 || target.Height < 64)
         {
-            MessageBox.Show($"无法开始录屏：{exception.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
-            return null;
+            throw new InvalidOperationException("录制区域太小。");
         }
+        FfmpegLocator.Resolve();
+        Directory.CreateDirectory(appSettings.SaveDirectory);
+        var filePath = Path.Combine(appSettings.SaveDirectory, $"Recording-{DateTime.Now:yyyyMMdd-HHmmss}.mp4");
+        var tempDir = Path.Combine(Path.GetTempPath(), "Screen.Recording", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
 
-        ScreenRecorder recorder;
         var stopSignal = new RecordingStopSignal();
+        ScreenRecorder? recorder = null;
+        RecordingAudioService? audio = null;
         try
         {
-            // Video goes to the scratch file first; audio is muxed in after
-            // both streams are complete (see StopAsync).
             recorder = new ScreenRecorder(Path.Combine(tempDir, "video.mp4"), target, profile, stopSignal);
-        }
-        catch (Exception exception)
-        {
-            DeleteQuietly(tempDir);
-            MessageBox.Show($"无法开始录屏：{exception.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
-            return null;
-        }
-
-        RecordingAudioService? audio = null;
-        if (profile.RecordSystemAudio || profile.RecordMicrophone)
-        {
-            audio = RecordingAudioService.Start(tempDir, profile.RecordSystemAudio, profile.RecordMicrophone, stopSignal);
-            if (audio.Tracks.Count == 0)
+            if (profile.RecordSystemAudio || profile.RecordMicrophone)
             {
-                audio.Dispose();
-                audio = null;
+                audio = RecordingAudioService.Start(tempDir, profile.RecordSystemAudio, profile.RecordMicrophone, stopSignal);
+                if (audio.Tracks.Count == 0)
+                {
+                    audio.Dispose();
+                    audio = null;
+                }
+            }
+            return new RecordingController(recorder, target, filePath, tempDir, audio, persistentBorder, stopSignal,
+                profile.ShowClickEffects);
+        }
+        catch
+        {
+            audio?.Dispose();
+            recorder?.Dispose();
+            if (recorder?.IsRunning != true)
+            {
+                DeleteQuietly(tempDir);
+            }
+            throw;
+        }
+    }
+
+    public void ShowControls()
+    {
+        // The host owns this controller before any stop input can arrive.
+        // Keep the selection border visible through the countdown and handoff.
+        _hook = new LowLevelKeyboardHook(0, requireForegroundWindow: false);
+        _hook.EscapePressed += (_, _) => _control.Dispatcher.BeginInvoke(() => _ = StopAsync());
+        if (_showClickEffects)
+        {
+            try
+            {
+                _mouseHook = new LowLevelMouseHook();
+                _mouseHook.LeftButtonDown += (_, point) =>
+                    _control.Dispatcher.BeginInvoke(() => new ClickRippleWindow(point.X, point.Y).Show());
+            }
+            catch
+            {
+                // Click effects are optional.
             }
         }
-
-        // The persistent border already covers the region; show the control
-        // bar BEFORE the early-fault wait so the takeover from the countdown
-        // phase is seamless.
-        var controller = new RecordingController(
-            recorder,
-            target,
-            filePath,
-            tempDir,
-            Path.Combine(tempDir, "video.mp4"),
-            audio,
-            persistentBorder,
-            profile.ShowClickEffects,
-            stopSignal);
-
-        // Give the capture session a moment to fail loudly (HDR output,
-        // duplicated desktop, missing ffmpeg input).
-        await Task.Delay(500);
-        if (recorder.Fault is { } earlyFault)
-        {
-            controller.AbortStartup();
-            MessageBox.Show($"无法开始录屏：{earlyFault.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
-            return null;
-        }
-
-        return controller;
-    }
-
-    /// <summary>
-    /// Early-fault path: tear the UI down, discard scratch data, and release
-    /// everything without producing a file.
-    /// </summary>
-    public void AbortStartup()
-    {
-        _finished = true; // keeps StopForShutdown inside Dispose from finalizing
-        _stopSignal.Request();
-        _timer.Stop();
-        TeardownUi();
-        _mouseHook?.Dispose();
-        _hook.Dispose();
-        _audio?.Dispose();
-        _recorder.Dispose();
-        if (!_recorder.IsRunning)
-        {
-            DeleteQuietly(_tempDir);
-        }
-    }
-
-    private static PixelRect PrimaryMonitorBounds()
-    {
-        var screen = System.Windows.Forms.Screen.PrimaryScreen?.Bounds
-                     ?? throw new InvalidOperationException("未找到主显示器。");
-        return new PixelRect(screen.X, screen.Y, screen.Width, screen.Height);
+        _border ??= new RecordingBorderWindow(_region);
+        _border.Show();
+        _control.Show();
+        _control.Reposition(_region);
+        _timer.Start();
     }
 
     private void TogglePause()
     {
-        if (_finished)
+        if (_finishTask is not null)
         {
             return;
         }
@@ -267,39 +185,18 @@ internal sealed class RecordingController : IDisposable
         _control.SetPaused(_recorder.IsPaused);
     }
 
-    private async Task StopAsync()
+    internal async Task StopAsync()
     {
-        if (_finished)
+        if (_finishTask is not null)
         {
             return;
         }
         try
         {
-            var result = await BeginFinish();
-            if (_disposed)
-            {
-                return;
-            }
-            TeardownUi();
-            if (!result.Saved)
-            {
-                Failed?.Invoke(this, $"{result.Error}\n录制素材已保留，可从以下位置恢复：\n{result.RecoveryDirectory}");
-                return;
-            }
-            if (result.Warning is not null)
-            {
-                HintToastWindow.Show(result.RecoveryDirectory is null
-                    ? "声音处理失败，已保存无声视频"
-                    : $"声音处理失败，已保存无声视频。原始素材保留在：{result.RecoveryDirectory}");
-            }
-            Completed?.Invoke(this, EventArgs.Empty);
+            await BeginFinish();
         }
         finally
         {
-            // Dispose NO MATTER WHAT — the mouse hook's native callback must
-            // be unhooked while its delegate is still rooted; a leaked hook
-            // whose delegate gets GC'd crashes the whole process (FailFast)
-            // on the next mouse click.
             Dispose();
         }
     }
@@ -310,7 +207,6 @@ internal sealed class RecordingController : IDisposable
         {
             return _finishTask;
         }
-        _finished = true;
         _timer.Stop();
         // Both capture paths observe the same stop boundary immediately. In
         // particular, audio must not keep recording while ffmpeg finalizes.
@@ -437,11 +333,12 @@ internal sealed class RecordingController : IDisposable
         catch (Exception exception)
         {
             muxError = exception.Message;
-            SimpleLogger.LogError("Recording audio mux failed; attempting video-only save", exception);
+            SimpleLogger.LogError($"Recording audio mux failed; recovery directory: {_tempDir}", exception);
         }
         // A failed mux may fall back to the intact silent video. A failed file
         // commit may not claim success or remove either recoverable source.
-        return RecordingFileStore.Save(muxError is null ? muxPath : _videoTempPath, _filePath, _tempDir, muxError);
+        return RecordingFileStore.Save(muxError is null ? muxPath : _videoTempPath,
+            _filePath, _tempDir, muxError, preserveRecovery: muxError is not null);
     }
 
     private static void DeleteQuietly(string directory)
@@ -459,56 +356,37 @@ internal sealed class RecordingController : IDisposable
         }
     }
 
-    /// <summary>
-    /// Best-effort synchronous stop for process shutdown: finalize what has
-    /// been encoded so far instead of leaking an orphaned ffmpeg process.
-    /// </summary>
-    public void StopForShutdown()
-    {
-        if (_disposed || (_finished && _finishTask is null))
-        {
-            return;
-        }
-        try
-        {
-            // The background finish task never waits for the dispatcher, so
-            // shutdown can join it without racing disposal against mux/encoding.
-            var result = BeginFinish().GetAwaiter().GetResult();
-            if (!result.Saved)
-            {
-                SimpleLogger.LogError($"Recording recovery directory: {result.RecoveryDirectory}", new IOException(result.Error));
-            }
-        }
-        catch
-        {
-            // Shutting down; nothing useful left to report.
-        }
-        TeardownUi();
-    }
-
-    private void TeardownUi()
-    {
-        if (_uiClosed)
-        {
-            return;
-        }
-        _uiClosed = true;
-        _control.Close();
-        _border?.Close();
-    }
-
     public void Dispose()
     {
         if (_disposed)
         {
             return;
         }
-        StopForShutdown();
         _disposed = true;
-        _timer.Stop();
-        _mouseHook?.Dispose();
-        _hook.Dispose();
-        _audio?.Dispose();
-        _recorder.Dispose();
+        RecordingSaveResult result;
+        try
+        {
+            // Shutdown can join this task without waiting on the dispatcher.
+            result = BeginFinish().GetAwaiter().GetResult();
+        }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogError($"Recording recovery directory: {_tempDir}", exception);
+            result = new RecordingSaveResult(false, null, exception.Message, _tempDir);
+        }
+        try
+        {
+            _timer.Stop();
+            _mouseHook?.Dispose();
+            _hook?.Dispose();
+            _audio?.Dispose();
+            _recorder.Dispose();
+            _control.Close();
+            _border?.Close();
+        }
+        finally
+        {
+            _completion.TrySetResult(result);
+        }
     }
 }
