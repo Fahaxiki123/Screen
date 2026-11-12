@@ -1,5 +1,6 @@
-using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using RapidOcrNet;
 using Screen.Core;
 using SkiaSharp;
@@ -8,11 +9,33 @@ namespace Screen.App;
 
 internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
 {
+    private static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromMinutes(5);
+
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly TimeSpan _idleTimeout;
+    private readonly string _modelRoot;
+    private readonly Timer _idleTimer;
     private RapidOcr? _ocr;
+    private long _lastActiveTimestamp;
     private int _disposed;
 
+    public PaddleOcrEngine()
+        : this(DefaultIdleTimeout)
+    {
+    }
+
+    internal PaddleOcrEngine(TimeSpan idleTimeout, string? modelRoot = null)
+    {
+        _idleTimeout = idleTimeout > TimeSpan.Zero ? idleTimeout : Timeout.InfiniteTimeSpan;
+        _modelRoot = string.IsNullOrWhiteSpace(modelRoot)
+            ? Path.Combine(AppContext.BaseDirectory, "models")
+            : modelRoot;
+        _idleTimer = new Timer(OnIdleTimerTick, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+    }
+
     public IReadOnlyList<string> AvailableLanguages { get; } = ["auto"];
+
+    internal bool IsEngineLoaded => Volatile.Read(ref _ocr) is not null;
 
     private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
@@ -44,17 +67,20 @@ internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Volatile.Write(ref _lastActiveTimestamp, Stopwatch.GetTimestamp());
             // CreateEngine loads ~30 MB of ONNX models; it must run on the thread
             // pool, otherwise the first OCR call freezes the UI thread.
             return await Task.Run(() =>
                 {
-                    _ocr ??= CreateEngine();
+                    _ocr ??= CreateEngine(_modelRoot);
                     return RecognizeCore(_ocr, image, cancellationToken);
                 }, cancellationToken)
                 .ConfigureAwait(false);
         }
         finally
         {
+            Volatile.Write(ref _lastActiveTimestamp, Stopwatch.GetTimestamp());
+            ScheduleIdleReleaseIfLoaded();
             try
             {
                 _gate.Release();
@@ -66,12 +92,82 @@ internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
         }
     }
 
-    private static RapidOcr CreateEngine()
+    private void ScheduleIdleReleaseIfLoaded()
+    {
+        if (IsDisposed || _ocr is null || _idleTimeout == Timeout.InfiniteTimeSpan)
+        {
+            return;
+        }
+        try
+        {
+            _idleTimer.Change(_idleTimeout, Timeout.InfiniteTimeSpan);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void OnIdleTimerTick(object? state)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+        bool acquired;
+        try
+        {
+            acquired = _gate.Wait(0);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+        if (!acquired)
+        {
+            return;
+        }
+        try
+        {
+            if (IsDisposed || _ocr is null)
+            {
+                return;
+            }
+            var elapsed = Stopwatch.GetElapsedTime(Volatile.Read(ref _lastActiveTimestamp));
+            if (elapsed < _idleTimeout)
+            {
+                var remaining = _idleTimeout - elapsed;
+                _idleTimer.Change(remaining > TimeSpan.Zero ? remaining : TimeSpan.FromMilliseconds(10), Timeout.InfiniteTimeSpan);
+                return;
+            }
+            var engine = _ocr;
+            _ocr = null;
+            engine.Dispose();
+            SimpleLogger.LogInfo("Released idle local PP-OCRv6 engine.");
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogWarning($"Idle local OCR release failed: {exception.Message}");
+        }
+        finally
+        {
+            try
+            {
+                _gate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
+    private static RapidOcr CreateEngine(string modelRoot)
     {
         var engine = new RapidOcr();
         try
         {
-            var modelRoot = Path.Combine(AppContext.BaseDirectory, "models");
             var modelSet = RapidOcrModelSet.PPOCRv6Small with
             {
                 DetModelPath = RequireModel(
@@ -190,6 +286,7 @@ internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
         {
             return;
         }
+        _idleTimer.Dispose();
         // A running RecognizeAsync holds the gate across the native Detect call;
         // disposing RapidOcr under it would be use-after-free. Wait (bounded, so
         // a wedged inference cannot block shutdown forever) before releasing.
@@ -202,6 +299,7 @@ internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
             if (idle)
             {
                 _ocr?.Dispose();
+                _ocr = null;
             }
             // If the wait timed out, deliberately leak the native engine — the
             // process is shutting down and disposing it mid-inference can crash.

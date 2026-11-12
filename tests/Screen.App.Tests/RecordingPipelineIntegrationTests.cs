@@ -78,6 +78,78 @@ public sealed class RecordingPipelineIntegrationTests
             "Decoded timestamps must retain the complete recording duration.");
     }
 
+    [TestMethod]
+    public void EncoderProbeHonorsPriorityOrderAndDimensionLimits()
+    {
+        Assert.IsFalse(FfmpegEncoderProbe.SupportsHardwareDimensions(64, 64));
+        Assert.IsFalse(FfmpegEncoderProbe.SupportsHardwareDimensions(4098, 1080));
+        Assert.IsTrue(FfmpegEncoderProbe.SupportsHardwareDimensions(256, 256));
+        Assert.IsTrue(FfmpegEncoderProbe.SupportsHardwareDimensions(1920, 1080));
+
+        Assert.AreEqual("h264_nvenc", FfmpegEncoderProbe.ProbePreferredEncoder("ffmpeg.exe", _ => true));
+        Assert.AreEqual("h264_qsv", FfmpegEncoderProbe.ProbePreferredEncoder("ffmpeg.exe", name => name == "h264_qsv"));
+        Assert.AreEqual("h264_amf", FfmpegEncoderProbe.ProbePreferredEncoder("ffmpeg.exe", name => name == "h264_amf"));
+        Assert.AreEqual("libx264", FfmpegEncoderProbe.ProbePreferredEncoder("ffmpeg.exe", _ => false));
+    }
+
+    [TestMethod]
+    [DataRow("nv12")]
+    [DataRow("bgra")]
+    public async Task HardwareCapableDimensionsEncodeAndDecodeCleanlyAsync(string pixelFormat)
+    {
+        const int Width = 256;
+        const int Height = 256;
+        const int FrameRate = 15;
+        const int FrameCount = 10;
+        var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin", "ffmpeg.exe");
+        var destination = Path.Combine(_root, $"hw-{pixelFormat}.mp4");
+
+        using (var pipeline = new RecordingPipeline(destination, Width, Height, FrameRate, 1_500_000, pixelFormat))
+        {
+            for (var index = 0; index < FrameCount; index++)
+            {
+                pipeline.WriteVideoFrame(CreateFrame(Width, Height, index, pixelFormat));
+            }
+            pipeline.FinalizeFile();
+        }
+
+        var (progress, errors) = await DecodeToNullAsync(ffmpeg, destination);
+        Assert.AreEqual(string.Empty, errors.Trim(), errors);
+        Assert.AreEqual(FrameCount, int.Parse(LastProgressValue(progress, "frame"), CultureInfo.InvariantCulture));
+    }
+
+    [TestMethod]
+    public async Task FailingHardwareEncoderFallsBackToSoftwareWithoutDroppingStartupFramesAsync()
+    {
+        const int Width = 256;
+        const int Height = 256;
+        const int FrameRate = 12;
+        const int FrameCount = 6;
+        var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin", "ffmpeg.exe");
+        var destination = Path.Combine(_root, "fallback.mp4");
+
+        using (var pipeline = new RecordingPipeline(
+                   destination,
+                   Width,
+                   Height,
+                   FrameRate,
+                   800_000,
+                   "nv12",
+                   encoderOverride: "nonexistent_hw_encoder"))
+        {
+            for (var index = 0; index < FrameCount; index++)
+            {
+                pipeline.WriteVideoFrame(CreateFrame(Width, Height, index, "nv12"));
+            }
+            pipeline.FinalizeFile();
+            Assert.AreEqual("libx264", pipeline.SelectedEncoder);
+        }
+
+        var (progress, errors) = await DecodeToNullAsync(ffmpeg, destination);
+        Assert.AreEqual(string.Empty, errors.Trim(), errors);
+        Assert.AreEqual(FrameCount, int.Parse(LastProgressValue(progress, "frame"), CultureInfo.InvariantCulture));
+    }
+
     private static byte[] CreateFrame(int width, int height, int index, string pixelFormat)
     {
         var pixels = width * height;

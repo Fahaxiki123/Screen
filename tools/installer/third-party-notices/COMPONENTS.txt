@@ -89,42 +89,6 @@
     ]
   },
   {
-    "component": "NAudio/3.0.0",
-    "authors": "Mark Heath & Contributors",
-    "copyright": "漏 Mark Heath 2026",
-    "declaredLicense": "MIT",
-    "licenseType": "expression",
-    "repository": {
-      "type": "git",
-      "url": "https://github.com/naudio/NAudio",
-      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
-    },
-    "notices": [
-      {
-        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
-        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
-      }
-    ]
-  },
-  {
-    "component": "NAudio.Asio/3.0.0",
-    "authors": "Mark Heath",
-    "copyright": "漏 Mark Heath 2026",
-    "declaredLicense": "MIT",
-    "licenseType": "expression",
-    "repository": {
-      "type": "git",
-      "url": "https://github.com/naudio/NAudio",
-      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
-    },
-    "notices": [
-      {
-        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
-        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
-      }
-    ]
-  },
-  {
     "component": "NAudio.Core/3.0.0",
     "authors": "Mark Heath",
     "copyright": "漏 Mark Heath 2026",
@@ -143,61 +107,7 @@
     ]
   },
   {
-    "component": "NAudio.Dmo/3.0.0",
-    "authors": "Mark Heath",
-    "copyright": "漏 Mark Heath 2026",
-    "declaredLicense": "MIT",
-    "licenseType": "expression",
-    "repository": {
-      "type": "git",
-      "url": "https://github.com/naudio/NAudio",
-      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
-    },
-    "notices": [
-      {
-        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
-        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
-      }
-    ]
-  },
-  {
-    "component": "NAudio.Midi/3.0.0",
-    "authors": "Mark Heath",
-    "copyright": "漏 Mark Heath 2026",
-    "declaredLicense": "MIT",
-    "licenseType": "expression",
-    "repository": {
-      "type": "git",
-      "url": "https://github.com/naudio/NAudio",
-      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
-    },
-    "notices": [
-      {
-        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
-        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
-      }
-    ]
-  },
-  {
     "component": "NAudio.Wasapi/3.0.0",
-    "authors": "Mark Heath",
-    "copyright": "漏 Mark Heath 2026",
-    "declaredLicense": "MIT",
-    "licenseType": "expression",
-    "repository": {
-      "type": "git",
-      "url": "https://github.com/naudio/NAudio",
-      "commit": "23922d2a87cf9508883a939af8b1495a0d35cb5a"
-    },
-    "notices": [
-      {
-        "file": "licenses/NAudio-3.0.0-LICENSE.txt",
-        "sha256": "e518e168af44d37da3de236e719c986169e47b46b90e37c1355056175744e037"
-      }
-    ]
-  },
-  {
-    "component": "NAudio.WinForms/3.0.0",
     "authors": "Mark Heath",
     "copyright": "漏 Mark Heath 2026",
     "declaredLicense": "MIT",

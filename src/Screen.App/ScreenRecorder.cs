@@ -53,13 +53,14 @@ internal sealed class ScreenRecorder : IRecordingCapture
     private ID3D11Device? _device;
     private ID3D11DeviceContext? _context;
     private IDXGIOutputDuplication? _duplication;
-    private ID3D11Texture2D? _desktopStaging;
     private ID3D11Texture2D? _bgraTexture;
     private ID3D11Texture2D? _nv12Texture;
     private ID3D11Texture2D? _nv12Staging;
     private ID3D11VideoProcessorEnumerator? _enumerator;
     private ID3D11VideoProcessor? _processor;
+    private ID3D11VideoProcessorInputView? _inputView;
     private ID3D11VideoProcessorOutputView? _outputView;
+    private VideoProcessorStream[]? _processorStreams;
     private ID3D11RenderTargetView? _renderTarget;
     private ID3D11VideoDevice? _videoDevice;
     private ID3D11VideoContext? _videoContext;
@@ -332,9 +333,12 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 {
                     throw new NotSupportedException("当前显示输出不是 sRGB，暂不支持录屏。");
                 }
-                EnsureDesktopStaging(description);
-                _context!.CopyResource(_desktopStaging!, desktopTexture);
-                _context.CopyResource(_bgraTexture!, _desktopStaging!);
+                var targetDescription = _bgraTexture!.Description;
+                if (description.Width != targetDescription.Width || description.Height != targetDescription.Height)
+                {
+                    throw new NotSupportedException("当前显示输出分辨率或方向已变化，录屏已停止。");
+                }
+                _context!.CopyResource(_bgraTexture, desktopTexture);
             }
         }
         finally
@@ -347,23 +351,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
     /// <summary>GPU crop (source rect) + BGRA→NV12 in one video-processor pass, then read back.</summary>
     private void ConvertFrame(byte[] frame)
     {
-        using var inputView = _videoDevice!.CreateVideoProcessorInputView(
-            _bgraTexture!,
-            _enumerator!,
-            new VideoProcessorInputViewDescription
-            {
-                ViewDimension = VideoProcessorInputViewDimension.Texture2D
-            });
-        var streams = new[]
-        {
-            new VideoProcessorStream
-            {
-                Enable = true,
-                OutputIndex = 0,
-                InputSurface = inputView
-            }
-        };
-        _videoContext!.VideoProcessorBlt(_processor!, _outputView!, 0, streams);
+        _videoContext!.VideoProcessorBlt(_processor!, _outputView!, 0, _processorStreams!);
 
         _context!.CopyResource(_nv12Staging!, _nv12Texture!);
         _context!.Map(_nv12Staging!, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None, out var mapped).CheckError();
@@ -593,29 +581,6 @@ internal sealed class ScreenRecorder : IRecordingCapture
         _nv12Texture = null;
     }
 
-    private void EnsureDesktopStaging(Texture2DDescription source)
-    {
-        if (_desktopStaging is not null)
-        {
-            var current = _desktopStaging.Description;
-            if (current.Width == source.Width && current.Height == source.Height && current.Format == source.Format)
-            {
-                return;
-            }
-            _desktopStaging.Dispose();
-        }
-        _desktopStaging = _device!.CreateTexture2D(new Texture2DDescription(
-            source.Format,
-            source.Width,
-            source.Height,
-            1, 1,
-            BindFlags.None,
-            ResourceUsage.Staging,
-            CpuAccessFlags.Read,
-            1, 0,
-            ResourceOptionFlags.None));
-    }
-
     private void CreateProcessorChain()
     {
         _videoDevice = _device!.QueryInterface<ID3D11VideoDevice>();
@@ -653,6 +618,13 @@ internal sealed class ScreenRecorder : IRecordingCapture
             _useNv12 = false;
         }
         _processor = _videoDevice.CreateVideoProcessor(enumerator, 0);
+        _inputView = _videoDevice.CreateVideoProcessorInputView(
+            _bgraTexture,
+            enumerator,
+            new VideoProcessorInputViewDescription
+            {
+                ViewDimension = VideoProcessorInputViewDimension.Texture2D
+            });
         _outputView = _videoDevice.CreateVideoProcessorOutputView(
             _nv12Texture!,
             enumerator,
@@ -660,6 +632,15 @@ internal sealed class ScreenRecorder : IRecordingCapture
             {
                 ViewDimension = VideoProcessorOutputViewDimension.Texture2D
             });
+        _processorStreams =
+        [
+            new VideoProcessorStream
+            {
+                Enable = true,
+                OutputIndex = 0,
+                InputSurface = _inputView
+            }
+        ];
 
         _videoContext.VideoProcessorSetStreamFrameFormat(_processor, 0, VideoFrameFormat.Progressive);
         _videoContext.VideoProcessorSetStreamAutoProcessingMode(_processor, 0, false);
@@ -1070,6 +1051,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
 
     private void DisposeGpu()
     {
+        _inputView?.Dispose();
         _outputView?.Dispose();
         _renderTarget?.Dispose();
         _processor?.Dispose();
@@ -1079,7 +1061,6 @@ internal sealed class ScreenRecorder : IRecordingCapture
         _nv12Staging?.Dispose();
         _nv12Texture?.Dispose();
         _bgraTexture?.Dispose();
-        _desktopStaging?.Dispose();
         _duplication?.Dispose();
         _context?.Dispose();
         _device?.Dispose();

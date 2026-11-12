@@ -48,22 +48,6 @@
     "status": "ok"
   },
   {
-    "file": "licenses/FFmpeg-0056dd32fd-COPYING.GPLv3.txt",
-    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0056dd32fd/COPYING.GPLv3",
-    "resolvedUrl": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0056dd32fd/COPYING.GPLv3",
-    "bytes": 35147,
-    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    "status": "ok"
-  },
-  {
-    "file": "licenses/FFmpeg-0056dd32fd-LICENSE.txt",
-    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0056dd32fd/LICENSE.md",
-    "resolvedUrl": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/0056dd32fd/LICENSE.md",
-    "bytes": 4346,
-    "sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af",
-    "status": "ok"
-  },
-  {
     "file": "licenses/WPF-10.0.12-THIRD-PARTY-NOTICES.txt",
     "url": "https://raw.githubusercontent.com/dotnet/wpf/v10.0.12/THIRD-PARTY-NOTICES.TXT",
     "resolvedUrl": "https://raw.githubusercontent.com/dotnet/wpf/v10.0.12/THIRD-PARTY-NOTICES.TXT",
@@ -78,17 +62,6 @@
     "bytes": 1966,
     "sha256": "5a412b38efae0b162dc0893b319023f4cd14a8985a0f9f9ae01ac052b37a36eb",
     "status": "ok"
-  },
-  {
-    "file": "licenses/Windows-SDK-NET-Ref-LICENSE.txt",
-    "url": "https://aka.ms/WinSDKLicenseURL",
-    "resolvedUrl": "https://download.microsoft.com/download/0/F/F/0FF2B061-47DD-4F55-89B6-FD1D8C44F14D/sdk_license.rtf",
-    "bytes": 28095,
-    "status": "ok",
-    "downloadedFile": "licenses/Windows-SDK-NET-Ref-LICENSE.rtf",
-    "downloadedSha256": "dd07eb178e00c6bba4148457fc00ff77cd4887eb521d504186fe59c9ec8bbe62",
-    "conversion": "Plain text extracted from the original license; paragraph text retained, formatting removed.",
-    "sha256": "aba32b705ea9716ba8b6e1cb464016e1709256214022fc132d49bb0572c33406"
   },
   {
     "file": "licenses/RapidOcrNet-3.0.0-LICENSE.txt",
@@ -134,6 +107,46 @@
     "resolvedUrl": "https://licenses.nuget.org/MIT",
     "bytes": 2442,
     "sha256": "0ff20ddac3d7ee3c94cd6b60bef6537b4c4f6815063ab28228ab8ca563b1fe8e",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/FFmpeg-9.0.2-COPYING.GPLv3.txt",
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/946fcce07b6dcd0331c8cc609192aeff5e1924f8/COPYING.GPLv3",
+    "resolvedUrl": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/946fcce07b6dcd0331c8cc609192aeff5e1924f8/COPYING.GPLv3",
+    "bytes": 35821,
+    "sha256": "0b383d5a63da644f628d99c33976ea6487ed89aaa59f0b3257992deac1171e6b",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/FFmpeg-9.0.2-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/946fcce07b6dcd0331c8cc609192aeff5e1924f8/LICENSE.md",
+    "resolvedUrl": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/946fcce07b6dcd0331c8cc609192aeff5e1924f8/LICENSE.md",
+    "bytes": 4473,
+    "sha256": "36f6e2cb63f6a40a72b5c1b6169fb03f338d7eccd336fb3ccd4dcc0b49116dd1",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/libvpl-2.17.0-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/intel/libvpl/v2.17.0/LICENSE",
+    "resolvedUrl": "https://raw.githubusercontent.com/intel/libvpl/v2.17.0/LICENSE",
+    "bytes": 1074,
+    "sha256": "bf1cfac2e2792b6e1e995ce103d70796aecaf2ec7e4c5fe5474f7acec7b4a677",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/ffnvcodec-headers-13.0.19.0-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/FFmpeg/nv-codec-headers/n13.0.19.0/LICENSE",
+    "resolvedUrl": "https://raw.githubusercontent.com/FFmpeg/nv-codec-headers/n13.0.19.0/LICENSE",
+    "bytes": 1067,
+    "sha256": "ee73e7577cfac7f231fb8a35b2404af227d2ed3d038711931ac373bc63a6c956",
+    "status": "ok"
+  },
+  {
+    "file": "licenses/AMF-headers-1.5.3-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/v1.5.3/LICENSE.txt",
+    "resolvedUrl": "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/v1.5.3/LICENSE.txt",
+    "bytes": 1747,
+    "sha256": "eb297397aaa455b5668ab67d216b83828466152dab123fa92384c6ec16b74170",
     "status": "ok"
   }
 ]

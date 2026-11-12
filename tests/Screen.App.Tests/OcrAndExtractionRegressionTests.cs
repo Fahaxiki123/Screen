@@ -125,6 +125,99 @@ public sealed class OcrAndExtractionRegressionTests
         }
     }
 
+    [TestMethod]
+    public async Task PaddleOcrEngineReleasesModelsAfterIdleTimeoutAndReloadsOnNextUseAsync()
+    {
+        var modelRoot = FindBuiltAppModelsDirectory();
+        using var engine = new PaddleOcrEngine(TimeSpan.FromMilliseconds(140), modelRoot);
+        var blank = new PixelBuffer(new byte[48 * 24 * 4], 48, 24, 48 * 4);
+        Array.Fill<byte>(blank.Pixels, 255);
+
+        Assert.IsFalse(engine.IsEngineLoaded);
+        var first = await engine.RecognizeAsync(blank, "auto");
+        Assert.IsNotNull(first);
+        Assert.IsTrue(engine.IsEngineLoaded, "Local OCR engine must be loaded right after recognition.");
+
+        var deadline = DateTime.UtcNow.AddSeconds(4);
+        while (engine.IsEngineLoaded && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(30);
+        }
+        Assert.IsFalse(engine.IsEngineLoaded, "Local OCR engine must release ONNX sessions once idle.");
+
+        var second = await engine.RecognizeAsync(blank, "auto");
+        Assert.IsNotNull(second);
+        Assert.IsTrue(engine.IsEngineLoaded, "Local OCR engine must lazily reload on subsequent recognition.");
+    }
+
+    private static string FindBuiltAppModelsDirectory()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Screen.slnx")))
+        {
+            dir = dir.Parent;
+        }
+        Assert.IsNotNull(dir, "Could not locate repository root.");
+        var appBin = Path.Combine(dir.FullName, "src", "Screen.App", "bin");
+        var clsFiles = Directory.GetFiles(appBin, "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx", SearchOption.AllDirectories);
+        Assert.IsTrue(clsFiles.Length > 0, "Screen.App output models were not found under src/Screen.App/bin.");
+        return Directory.GetParent(Path.GetDirectoryName(clsFiles[0])!)!.FullName;
+    }
+
+    [TestMethod]
+    public async Task HybridScreenCaptureServiceReleasesPrimarySessionAfterIdleTimeoutAsync()
+    {
+        var resets = 0;
+        var primary = new StubScreenCaptureService();
+        var fallback = new StubScreenCaptureService();
+        using var hybrid = new HybridScreenCaptureService(
+            primary,
+            fallback,
+            () => Interlocked.Increment(ref resets),
+            TimeSpan.FromMilliseconds(120));
+
+        var frame = await hybrid.CaptureAtAsync(new PixelPoint(10, 10));
+        Assert.AreEqual(32, frame.Width);
+        Assert.AreEqual(0, Volatile.Read(ref resets));
+
+        var deadline = DateTime.UtcNow.AddSeconds(3);
+        while (Volatile.Read(ref resets) == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+        }
+        Assert.AreEqual(1, Volatile.Read(ref resets), "Idle timer must release cached DXGI duplication session.");
+
+        var nextFrame = await hybrid.CaptureAtAsync(new PixelPoint(10, 10));
+        Assert.AreEqual(32, nextFrame.Width);
+        Assert.AreEqual(2, primary.Calls);
+    }
+
+    private sealed class StubScreenCaptureService : IScreenCaptureService
+    {
+        public int Calls { get; private set; }
+
+        public Task<CaptureFrame> CaptureAtAsync(PixelPoint screenPoint, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            var pixels = new byte[32 * 32 * 4];
+            Array.Fill<byte>(pixels, 200);
+            return Task.FromResult(new CaptureFrame(
+                pixels,
+                32,
+                32,
+                32 * 4,
+                96,
+                96,
+                new PixelRect(0, 0, 32, 32),
+                CaptureColorSpace.Srgb,
+                DateTimeOffset.UtcNow));
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class ThrowingOcrEngine(Exception error) : IOcrEngine
     {
         public int Calls { get; private set; }
