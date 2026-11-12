@@ -10,14 +10,12 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
     private readonly TencentTranslationProvider _tencent;
     private readonly MyMemoryTranslationProvider _myMemory;
     private readonly OpenAiTranslationProvider _openAi;
-    private readonly OpenAiTranslationProvider _openAiRacing;
 
     public OnlineTranslationProvider(HttpClient httpClient)
     {
         _tencent = new TencentTranslationProvider(httpClient);
         _myMemory = new MyMemoryTranslationProvider(httpClient);
         _openAi = new OpenAiTranslationProvider(httpClient);
-        _openAiRacing = new OpenAiTranslationProvider(httpClient);
     }
 
     public async Task<TranslationResult> TranslateAsync(
@@ -68,6 +66,9 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         CancellationToken cancellationToken)
     {
         Exception primaryException;
+        var tencentAlreadyAttempted = false;
+        Exception? tencentException = null;
+
         try
         {
             if (string.IsNullOrWhiteSpace(credentials.ApiKey))
@@ -75,25 +76,43 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
                 throw new InvalidOperationException("尚未配置 AI 自然翻译 API Key");
             }
 
-            var raced = await RaceNaturallyAsync(
-                text,
-                sourceLanguage,
-                profile,
-                credentials,
-                cancellationToken).ConfigureAwait(false);
-            if (raced is not null)
+            var hasAiRacing = profile.EnableRacing
+                              && !string.IsNullOrWhiteSpace(profile.RacingBaseAddress)
+                              && !string.IsNullOrWhiteSpace(profile.RacingModel)
+                              && !string.IsNullOrWhiteSpace(credentials.RacingApiKey);
+            var hasTencent = !string.IsNullOrWhiteSpace(credentials.TencentSecretId)
+                             && !string.IsNullOrWhiteSpace(credentials.TencentSecretKey);
+            var hasFastTmt = profile.EnableFastFallbackRace && hasTencent;
+
+            if (!hasAiRacing && !hasFastTmt)
             {
-                streamingText?.Report(raced.Text);
-                return raced;
+                return await TranslateNaturallyWithRetryAsync(
+                    text,
+                    sourceLanguage,
+                    profile,
+                    credentials.ApiKey,
+                    streamingText,
+                    cancellationToken).ConfigureAwait(false);
             }
 
-            return await TranslateNaturallyWithRetryAsync(
+            var outcome = await RaceNaturallyAsync(
                 text,
                 sourceLanguage,
                 profile,
                 credentials,
+                hasAiRacing,
+                hasFastTmt,
                 streamingText,
                 cancellationToken).ConfigureAwait(false);
+            if (outcome.Winner is not null)
+            {
+                return outcome.Winner;
+            }
+
+            tencentAlreadyAttempted = outcome.TencentAttempted;
+            tencentException = outcome.TencentError;
+            primaryException = outcome.PrimaryError
+                               ?? new InvalidOperationException("AI 自然翻译未返回有效译文。");
         }
         catch (OperationCanceledException)
         {
@@ -104,8 +123,8 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             primaryException = exception;
         }
 
-        Exception? tencentException = null;
-        if (!string.IsNullOrWhiteSpace(credentials.TencentSecretId)
+        if (!tencentAlreadyAttempted
+            && !string.IsNullOrWhiteSpace(credentials.TencentSecretId)
             && !string.IsNullOrWhiteSpace(credentials.TencentSecretKey))
         {
             try
@@ -165,6 +184,13 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
                     $"AI 自然翻译失败：{GetFriendlyMessage(primaryException)}；保底翻译也失败：{GetFriendlyMessage(fallbackException)}",
                     fallbackException);
             }
+        }
+
+        if (tencentException is not null)
+        {
+            throw new InvalidOperationException(
+                $"AI 自然翻译失败：{GetFriendlyMessage(primaryException)}；腾讯翻译也失败：{GetFriendlyMessage(tencentException)}",
+                tencentException);
         }
 
         throw new InvalidOperationException(
@@ -237,40 +263,179 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         return message.Length <= 180 ? message : message[..180] + "…";
     }
 
+    private readonly record struct RaceOutcome(
+        TranslationResult? Winner,
+        Exception? PrimaryError,
+        bool TencentAttempted,
+        Exception? TencentError);
+
+    private sealed class RelayProgress(Action<string> report) : IProgress<string>
+    {
+        public void Report(string value) => report(value);
+    }
+
     /// <summary>
-    /// Races the AI endpoints and, when enabled, a delayed Tencent quick
-    /// translation: the AI models get a head start, and if none of them has
-    /// finished within FastFallbackDelaySeconds the Tencent machine
-    /// translation joins the race so latency stays bounded. Returns null when
-    /// no racer is configured, so the caller falls through to the regular
-    /// retry/fallback chain.
+    /// Races the primary AI endpoint (streaming live to the UI) against an
+    /// optional secondary AI endpoint and/or a delayed Tencent quick fallback.
+    /// If every AI candidate fails before the head-start delay expires, the
+    /// delay is cancelled immediately so Tencent runs without dead wait and
+    /// failed providers are never called a second time.
     /// </summary>
-    private async Task<TranslationResult?> RaceNaturallyAsync(
+    private async Task<RaceOutcome> RaceNaturallyAsync(
         string text,
         string sourceLanguage,
         TranslationProfile profile,
         TranslationCredentials credentials,
+        bool hasAiRacing,
+        bool hasFastTmt,
+        IProgress<string>? streamingText,
         CancellationToken cancellationToken)
     {
-        var hasAiRacing = profile.EnableRacing
-                          && !string.IsNullOrWhiteSpace(profile.RacingBaseAddress)
-                          && !string.IsNullOrWhiteSpace(profile.RacingModel)
-                          && !string.IsNullOrWhiteSpace(credentials.RacingApiKey);
-        var hasFastTmt = profile.EnableFastFallbackRace
-                         && !string.IsNullOrWhiteSpace(credentials.TencentSecretId)
-                         && !string.IsNullOrWhiteSpace(credentials.TencentSecretKey);
-        if (!hasAiRacing && !hasFastTmt)
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var delayWake = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+
+        var winnerLocked = 0;
+        var remainingAiCandidates = hasAiRacing ? 2 : 1;
+        Exception? primaryError = null;
+        var tencentAttempted = false;
+        Exception? tencentError = null;
+
+        IProgress<string>? primaryProgress = streamingText is null
+            ? null
+            : new RelayProgress(chunk =>
+            {
+                if (Volatile.Read(ref winnerLocked) == 0 && !linked.IsCancellationRequested)
+                {
+                    streamingText.Report(chunk);
+                }
+            });
+
+        void MarkAiCandidateFailed()
         {
-            return null;
+            if (Interlocked.Decrement(ref remainingAiCandidates) == 0
+                && Volatile.Read(ref winnerLocked) == 0)
+            {
+                try
+                {
+                    delayWake.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
         }
 
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var candidates = new List<Task<TranslationResult?>>
+        async Task<TranslationResult?> RunPrimaryAiAsync()
         {
-            LabelWinnerAsync(
-                TryNaturalOnceAsync(_openAi, text, sourceLanguage, profile, credentials.ApiKey, linked.Token),
-                $"AI 自然翻译（{profile.Model}）")
-        };
+            try
+            {
+                var result = await TranslateNaturallyWithRetryAsync(
+                    text,
+                    sourceLanguage,
+                    profile,
+                    credentials.ApiKey!,
+                    primaryProgress,
+                    linked.Token).ConfigureAwait(false);
+                if (!IsPlausibleTranslation(text, result.Text))
+                {
+                    throw new InvalidOperationException("AI 自然翻译返回译文过短。");
+                }
+                Interlocked.Exchange(ref winnerLocked, 1);
+                return result with { ProviderName = $"AI 自然翻译（{profile.Model}）" };
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                MarkAiCandidateFailed();
+                return null;
+            }
+            catch (Exception exception) when (IsExpectedProviderFailure(exception))
+            {
+                primaryError = exception;
+                MarkAiCandidateFailed();
+                return null;
+            }
+        }
+
+        async Task<TranslationResult?> RunSecondaryAiAsync(TranslationProfile racingProfile, string racingKey)
+        {
+            try
+            {
+                var result = await _openAi.TranslateAsync(
+                    text,
+                    sourceLanguage,
+                    racingProfile,
+                    new TranslationCredentials(racingKey),
+                    streamingText: null,
+                    linked.Token).ConfigureAwait(false);
+                if (!IsPlausibleTranslation(text, result.Text))
+                {
+                    throw new InvalidOperationException("AI 竞速翻译返回译文过短。");
+                }
+                Interlocked.Exchange(ref winnerLocked, 1);
+                return result with { ProviderName = $"AI 自然翻译（{racingProfile.Model}）" };
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                MarkAiCandidateFailed();
+                return null;
+            }
+            catch (Exception exception) when (IsExpectedProviderFailure(exception))
+            {
+                Interlocked.CompareExchange(ref primaryError, exception, null);
+                MarkAiCandidateFailed();
+                return null;
+            }
+        }
+
+        async Task<TranslationResult?> RunDelayedTencentAsync(int delaySeconds)
+        {
+            var wokenByAiFailure = false;
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), delayWake.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return null;
+            }
+            catch (OperationCanceledException)
+            {
+                // All AI candidates have already faulted; skip the remaining delay.
+                wokenByAiFailure = true;
+            }
+
+            tencentAttempted = true;
+            try
+            {
+                var result = await _tencent.TranslateAsync(
+                    text,
+                    sourceLanguage,
+                    profile,
+                    credentials,
+                    streamingText: null,
+                    linked.Token).ConfigureAwait(false);
+                var failureReason = wokenByAiFailure && Volatile.Read(ref primaryError) is { } aiFailure
+                    ? $"AI 自然翻译：{GetFriendlyMessage(aiFailure)}"
+                    : $"AI 自然翻译超过 {delaySeconds} 秒未完成，已自动切换快速翻译";
+                return result with
+                {
+                    UsedFallback = true,
+                    PrimaryFailure = failureReason
+                };
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+            catch (Exception exception) when (IsExpectedProviderFailure(exception))
+            {
+                tencentError = exception;
+                return null;
+            }
+        }
+
+        var candidates = new List<Task<TranslationResult?>> { RunPrimaryAiAsync() };
         if (hasAiRacing)
         {
             var racingProfile = profile with
@@ -279,20 +444,12 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
                 Model = profile.RacingModel,
                 CredentialName = profile.RacingCredentialName
             };
-            candidates.Add(LabelWinnerAsync(
-                TryNaturalOnceAsync(_openAiRacing, text, sourceLanguage, racingProfile, credentials.RacingApiKey, linked.Token),
-                $"AI 自然翻译（{racingProfile.Model}）"));
+            candidates.Add(RunSecondaryAiAsync(racingProfile, credentials.RacingApiKey!));
         }
         if (hasFastTmt)
         {
             var delaySeconds = Math.Clamp(profile.FastFallbackDelaySeconds, 2, 30);
-            candidates.Add(TryTencentAfterDelayAsync(
-                text,
-                sourceLanguage,
-                profile,
-                credentials,
-                delaySeconds,
-                linked.Token));
+            candidates.Add(RunDelayedTencentAsync(delaySeconds));
         }
 
         while (candidates.Count > 0)
@@ -302,110 +459,33 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             var result = await finished.ConfigureAwait(false);
             if (result is not null)
             {
+                Interlocked.Exchange(ref winnerLocked, 1);
                 linked.Cancel();
-                return result;
+                streamingText?.Report(result.Text);
+                return new RaceOutcome(result, null, tencentAttempted, tencentError);
             }
         }
-        return null;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return new RaceOutcome(null, primaryError, tencentAttempted, tencentError);
     }
 
-    private static async Task<TranslationResult?> LabelWinnerAsync(
-        Task<TranslationResult?> candidate,
-        string label) =>
-        await candidate.ConfigureAwait(false) is { } result
-            ? result with { ProviderName = label }
-            : null;
-
-    private async Task<TranslationResult?> TryTencentAfterDelayAsync(
-        string text,
-        string sourceLanguage,
-        TranslationProfile profile,
-        TranslationCredentials credentials,
-        int delaySeconds,
-        CancellationToken cancellationToken)
+    private static bool IsPlausibleTranslation(string sourceText, string translatedText)
     {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // An AI racer won while this candidate was waiting.
-            return null;
-        }
-
-        try
-        {
-            var result = await _tencent.TranslateAsync(
-                text,
-                sourceLanguage,
-                profile,
-                credentials,
-                streamingText: null,
-                cancellationToken).ConfigureAwait(false);
-            return result with
-            {
-                UsedFallback = true,
-                PrimaryFailure = $"AI 自然翻译超过 {delaySeconds} 秒未完成，已自动切换快速翻译"
-            };
-        }
-        catch (OperationCanceledException)
-        {
-            return null;
-        }
-        catch (Exception exception) when (IsExpectedProviderFailure(exception))
-        {
-            return null;
-        }
-    }
-
-    private static async Task<TranslationResult?> TryNaturalOnceAsync(
-        OpenAiTranslationProvider provider,
-        string text,
-        string sourceLanguage,
-        TranslationProfile profile,
-        string? apiKey,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            return null;
-        }
-        try
-        {
-            var result = await provider.TranslateAsync(
-                text,
-                sourceLanguage,
-                profile,
-                new TranslationCredentials(apiKey),
-                streamingText: null,
-                cancellationToken).ConfigureAwait(false);
-            var visible = result.Text.Count(character => !char.IsWhiteSpace(character));
-            var sourceVisible = Math.Max(1, text.Count(character => !char.IsWhiteSpace(character)));
-            // A winner must return a plausible amount of text; an empty or
-            // truncated answer loses the race.
-            return visible >= Math.Max(1, sourceVisible / 5) ? result : null;
-        }
-        catch (OperationCanceledException)
-        {
-            // Either another racer already won (linked token) or the user
-            // cancelled; in both cases this candidate simply loses.
-            return null;
-        }
-        catch (Exception exception) when (IsExpectedProviderFailure(exception))
-        {
-            return null;
-        }
+        var visible = translatedText.Count(character => !char.IsWhiteSpace(character));
+        var sourceVisible = Math.Max(1, sourceText.Count(character => !char.IsWhiteSpace(character)));
+        return visible >= Math.Max(1, sourceVisible / 5);
     }
 
     private async Task<TranslationResult> TranslateNaturallyWithRetryAsync(
         string text,
         string sourceLanguage,
         TranslationProfile profile,
-        TranslationCredentials credentials,
+        string apiKey,
         IProgress<string>? streamingText,
         CancellationToken cancellationToken)
     {
+        var singleCredentials = new TranslationCredentials(apiKey);
         Exception? lastException = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -415,7 +495,7 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
                     text,
                     sourceLanguage,
                     profile,
-                    credentials,
+                    singleCredentials,
                     streamingText,
                     cancellationToken).ConfigureAwait(false);
             }

@@ -164,8 +164,8 @@ internal sealed partial class CaptureSurface
             .Where(item => item.Kind == AnnotationKind.Mosaic)
             .OrderBy(item => item.ZIndex)
             .ToArray();
-        var region = DirtyMosaicRegion(mosaics, _appliedMosaicSnapshots)
-            .Intersect(new PixelRect(0, 0, _mosaicComposite.Width, _mosaicComposite.Height));
+        var fullBounds = new PixelRect(0, 0, _mosaicComposite.Width, _mosaicComposite.Height);
+        var region = DirtyMosaicRegion(mosaics, _appliedMosaicSnapshots).Intersect(fullBounds);
         _appliedMosaicSnapshots = mosaics
             .Select(item => new MosaicSnapshot(
                 item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness))
@@ -177,15 +177,36 @@ internal sealed partial class CaptureSurface
             return _mosaicComposite;
         }
 
+        // Expand the dirty region to enclose the full bounds of any mosaic it
+        // touches (transitively). Partially clipping a mosaic shifts Pixelate's
+        // block grid origin and truncates BoxBlur's kernel halo, leaving seams
+        // that would remain baked into the cached composite after mouse-up.
+        bool expanded;
+        do
+        {
+            expanded = false;
+            foreach (var mosaic in mosaics)
+            {
+                var mosaicBounds = mosaic.Bounds.Intersect(fullBounds);
+                if (mosaicBounds.IsEmpty || mosaicBounds.Intersect(region).IsEmpty)
+                {
+                    continue;
+                }
+                var union = UnionRegion(region, mosaicBounds);
+                if (union != region)
+                {
+                    region = union;
+                    expanded = true;
+                }
+            }
+        } while (expanded);
+
         CopyRegion(_sourceBuffer, _mosaicComposite, region);
         foreach (var mosaic in mosaics)
         {
-            // Re-apply every mosaic over the dirty region in stacking order so
-            // overlapping mosaics keep compositing correctly.
-            var local = mosaic with { Bounds = mosaic.Bounds.Intersect(region) };
-            if (!local.Bounds.IsEmpty)
+            if (!mosaic.Bounds.Intersect(region).IsEmpty)
             {
-                ApplyMosaic(_mosaicComposite, local);
+                ApplyMosaic(_mosaicComposite, mosaic);
             }
         }
         var stride = _mosaicComposite.Stride;
@@ -267,7 +288,7 @@ internal sealed partial class CaptureSurface
         var freehand = tool == AnnotationKind.Pen || (tool == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush);
         var end = ClampAnnotationPoint(_cursor);
         IReadOnlyList<PixelPoint> points = freehand ? _workingPoints : new[] { _start, end };
-        var bounds = tool == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush
+        var bounds = tool == AnnotationKind.Pen || (tool == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush)
             ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2).Intersect(Selection)
             : RectFromPoints(_start, end);
         var item = new AnnotationItem(Guid.Empty, tool, points, bounds, CurrentStyle, null, null, int.MaxValue);

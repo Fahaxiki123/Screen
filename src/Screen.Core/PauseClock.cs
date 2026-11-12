@@ -10,6 +10,7 @@ namespace Screen.Core;
 /// </summary>
 public sealed class PauseClock
 {
+    private readonly object _gate = new();
     private readonly Func<long> _timestamp;
     private readonly long _zeroTicks;
     private long _pauseOffsetTicks;
@@ -28,29 +29,44 @@ public sealed class PauseClock
         _zeroTicks = timestamp();
     }
 
-    public bool IsPaused => _paused;
+    public bool IsPaused
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _paused;
+            }
+        }
+    }
 
     /// <summary>Recorded duration so far, excluding paused time.</summary>
     public double ElapsedSeconds => ToRecordingSeconds(_timestamp());
 
     public void Pause()
     {
-        if (_paused)
+        lock (_gate)
         {
-            return;
+            if (_paused)
+            {
+                return;
+            }
+            _paused = true;
+            _pauseStartTicks = _timestamp();
         }
-        _paused = true;
-        _pauseStartTicks = _timestamp();
     }
 
     public void Resume()
     {
-        if (!_paused)
+        lock (_gate)
         {
-            return;
+            if (!_paused)
+            {
+                return;
+            }
+            _pauseOffsetTicks += _timestamp() - _pauseStartTicks;
+            _paused = false;
         }
-        _pauseOffsetTicks += _timestamp() - _pauseStartTicks;
-        _paused = false;
     }
 
     /// <summary>
@@ -61,17 +77,20 @@ public sealed class PauseClock
     /// </summary>
     public double ToRecordingSeconds(long rawTicks)
     {
-        var effective = _paused ? Math.Min(rawTicks, _pauseStartTicks) : rawTicks;
-        var ticks = effective - _zeroTicks - _pauseOffsetTicks;
-        if (ticks < 0)
+        lock (_gate)
         {
-            ticks = 0;
+            var effective = _paused ? Math.Min(rawTicks, _pauseStartTicks) : rawTicks;
+            var ticks = effective - _zeroTicks - _pauseOffsetTicks;
+            if (ticks < 0)
+            {
+                ticks = 0;
+            }
+            if (ticks < _lastEmittedTicks)
+            {
+                ticks = _lastEmittedTicks;
+            }
+            _lastEmittedTicks = ticks;
+            return ticks / (double)Stopwatch.Frequency;
         }
-        if (ticks < _lastEmittedTicks)
-        {
-            ticks = _lastEmittedTicks;
-        }
-        _lastEmittedTicks = ticks;
-        return ticks / (double)Stopwatch.Frequency;
     }
 }

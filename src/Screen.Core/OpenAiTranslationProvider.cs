@@ -42,6 +42,10 @@ public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslat
         var apiKey = credentials.ApiKey;
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.BaseAddress);
+        if (TranslationEndpointRules.ValidateBaseAddress(profile.BaseAddress) is { } endpointError)
+        {
+            throw new InvalidOperationException(endpointError);
+        }
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.Model);
         ArgumentException.ThrowIfNullOrWhiteSpace(apiKey);
 

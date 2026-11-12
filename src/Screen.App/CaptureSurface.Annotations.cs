@@ -252,7 +252,7 @@ internal sealed partial class CaptureSurface
             ? MeasureTextBounds(start, text ?? string.Empty, CurrentStyle)
             : kind == AnnotationKind.Number
                 ? new PixelRect((int)start.X, (int)start.Y, 1, 1)
-            : kind == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush
+            : kind == AnnotationKind.Pen || (kind == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush)
                 ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2).Intersect(Selection)
             : RectFromPoints(start, end);
         var annotation = new AnnotationItem(
@@ -480,7 +480,9 @@ internal sealed partial class CaptureSurface
                 Style = style
             };
         }
-        var bounds = item.Kind is AnnotationKind.Pen or AnnotationKind.Mosaic
+        var isFreehandStroke = item.Kind == AnnotationKind.Pen
+                               || (item.Kind == AnnotationKind.Mosaic && item.Style.Variant >= 100);
+        var bounds = isFreehandStroke
             ? BoundsAroundPoints(points, item.Style.Thickness / 2)
             : newBounds;
         _mosaicCompositeDirty = true;

@@ -1,4 +1,76 @@
+using System.Diagnostics;
+using Screen.Core;
+
 namespace Screen.App;
+
+/// <summary>
+/// Shared monotonic unpaused clock for video and audio capture. Remains at
+/// zero until the video capture loop actually begins accepting frames, so
+/// device/encoder warm-up never skews A/V start alignment.
+/// </summary>
+internal sealed class RecordingTimeline(Func<long>? timestamp = null)
+{
+    private readonly Func<long> _timestamp = timestamp ?? Stopwatch.GetTimestamp;
+    private readonly object _gate = new();
+    private PauseClock? _clock;
+    private bool _pausedBeforeStart;
+
+    public bool IsStarted
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _clock is not null;
+            }
+        }
+    }
+
+    public double ElapsedSeconds
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _clock?.ElapsedSeconds ?? 0;
+            }
+        }
+    }
+
+    public void Start()
+    {
+        lock (_gate)
+        {
+            if (_clock is not null)
+            {
+                return;
+            }
+            _clock = new PauseClock(_timestamp);
+            if (_pausedBeforeStart)
+            {
+                _clock.Pause();
+            }
+        }
+    }
+
+    public void Pause()
+    {
+        lock (_gate)
+        {
+            _pausedBeforeStart = true;
+            _clock?.Pause();
+        }
+    }
+
+    public void Resume()
+    {
+        lock (_gate)
+        {
+            _pausedBeforeStart = false;
+            _clock?.Resume();
+        }
+    }
+}
 
 internal sealed class RecordingStopSignal
 {

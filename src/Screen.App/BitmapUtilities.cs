@@ -49,6 +49,7 @@ internal static class BitmapUtilities
     public static void CopyToClipboard(PixelBuffer buffer)
     {
         var bitmap = buffer.ToBitmapSource();
+        Exception? lastError = null;
         for (var attempt = 0; attempt < 5; attempt++)
         {
             try
@@ -56,11 +57,16 @@ internal static class BitmapUtilities
                 Clipboard.SetImage(bitmap);
                 return;
             }
-            catch (System.Runtime.InteropServices.COMException) when (attempt < 4)
+            catch (System.Runtime.InteropServices.ExternalException ex)
             {
-                Thread.Sleep(25 * (attempt + 1));
+                lastError = ex;
+                if (attempt < 4)
+                {
+                    Thread.Sleep(25 * (attempt + 1));
+                }
             }
         }
+        throw new InvalidOperationException("剪贴板正被其他程序占用，复制截图失败，请重试。", lastError);
     }
 
     /// <summary>

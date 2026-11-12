@@ -234,7 +234,15 @@ internal sealed class PinWindow : Window
             };
             if (dialog.ShowDialog(this) == true)
             {
-                BitmapUtilities.SavePng(buffer, dialog.FileName);
+                try
+                {
+                    BitmapUtilities.SavePng(buffer, dialog.FileName);
+                }
+                catch (Exception ex)
+                {
+                    SimpleLogger.LogError("Failed to save pinned image", ex);
+                    MessageBox.Show(this, $"保存贴图失败：{ex.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
         };
         var close = new MenuItem { Header = "关闭" };

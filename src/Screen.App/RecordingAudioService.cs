@@ -12,28 +12,44 @@ namespace Screen.App;
 /// </summary>
 internal sealed class RecordingAudioTrack : IDisposable
 {
+    private static readonly byte[] ZeroChunk = new byte[16384];
+
     private readonly IWaveIn _capture;
     private readonly Stream _stream;
     private readonly object _gate = new();
     private readonly RecordingStopSignal _stopSignal;
+    private readonly RecordingTimeline? _timeline;
+    private readonly int _blockAlign;
     private volatile bool _paused;
     private volatile float _peakLevel;
     private long _bytesWritten;
+    private long _framesWritten;
     private bool _stopped;
     private int _disposed;
 
-    internal RecordingAudioTrack(IWaveIn capture, string rawPath, string ffmpegFormat, int sampleRate, int channels, RecordingStopSignal stopSignal, Stream? output = null)
+    internal RecordingAudioTrack(
+        IWaveIn capture,
+        string rawPath,
+        string ffmpegFormat,
+        int sampleRate,
+        int channels,
+        RecordingStopSignal stopSignal,
+        Stream? output = null,
+        RecordingTimeline? timeline = null)
     {
         _capture = capture;
         _stopSignal = stopSignal;
+        _timeline = timeline;
         _stream = output ?? new FileStream(rawPath, FileMode.Create, FileAccess.Write, FileShare.Read);
         RawPath = rawPath;
         FfmpegFormat = ffmpegFormat;
         SampleRate = sampleRate;
         Channels = channels;
+        var bytesPerSample = ffmpegFormat == "f32le" ? 4 : 2;
+        _blockAlign = Math.Max(1, channels * bytesPerSample);
         _capture.DataAvailable += (_, e) =>
         {
-            if (_paused || e.BytesRecorded <= 0)
+            if (_paused || e.BytesRecorded <= 0 || (_timeline is not null && !_timeline.IsStarted))
             {
                 _peakLevel = 0;
                 return;
@@ -44,11 +60,39 @@ internal sealed class RecordingAudioTrack : IDisposable
                 {
                     return;
                 }
+                if (_timeline is { IsStarted: true } activeTimeline && SampleRate > 0)
+                {
+                    var callbackFrames = e.BytesRecorded / _blockAlign;
+                    var expectedStartFrames = (long)Math.Round(activeTimeline.ElapsedSeconds * SampleRate) - callbackFrames;
+                    var deficitFrames = expectedStartFrames - _framesWritten;
+                    // WASAPI loopback emits no callbacks while the render endpoint
+                    // is silent. Backfill missing silent intervals (> 50 ms) with
+                    // zeros so resumed system audio stays aligned with video.
+                    if (deficitFrames > SampleRate / 20)
+                    {
+                        var padFrames = Math.Min(deficitFrames, SampleRate * 3600L);
+                        WriteSilenceFramesCore(padFrames);
+                    }
+                }
                 _stream.Write(e.Buffer, 0, e.BytesRecorded);
                 _bytesWritten += e.BytesRecorded;
+                _framesWritten += e.BytesRecorded / _blockAlign;
             }
             _peakLevel = MeasurePeak(e.Buffer, e.BytesRecorded, ffmpegFormat);
         };
+    }
+
+    private void WriteSilenceFramesCore(long frames)
+    {
+        var remainingBytes = frames * _blockAlign;
+        while (remainingBytes > 0)
+        {
+            var chunk = (int)Math.Min(remainingBytes, ZeroChunk.Length);
+            _stream.Write(ZeroChunk, 0, chunk);
+            remainingBytes -= chunk;
+        }
+        _bytesWritten += frames * _blockAlign;
+        _framesWritten += frames;
     }
 
     public string RawPath { get; }
@@ -90,7 +134,10 @@ internal sealed class RecordingAudioTrack : IDisposable
     }
 
     /// <summary>Attempts to capture the default render device (system audio loopback).</summary>
-    public static RecordingAudioTrack? TryCreateSystemLoopback(string tempDir, RecordingStopSignal stopSignal)
+    public static RecordingAudioTrack? TryCreateSystemLoopback(
+        string tempDir,
+        RecordingStopSignal stopSignal,
+        RecordingTimeline? timeline = null)
     {
         try
         {
@@ -106,7 +153,8 @@ internal sealed class RecordingAudioTrack : IDisposable
                 format,
                 capture.WaveFormat.SampleRate,
                 capture.WaveFormat.Channels,
-                stopSignal);
+                stopSignal,
+                timeline: timeline);
             capture.StartRecording();
             return track;
         }
@@ -119,7 +167,10 @@ internal sealed class RecordingAudioTrack : IDisposable
     }
 
     /// <summary>Attempts to capture the default microphone.</summary>
-    public static RecordingAudioTrack? TryCreateMicrophone(string tempDir, RecordingStopSignal stopSignal)
+    public static RecordingAudioTrack? TryCreateMicrophone(
+        string tempDir,
+        RecordingStopSignal stopSignal,
+        RecordingTimeline? timeline = null)
     {
         try
         {
@@ -135,7 +186,8 @@ internal sealed class RecordingAudioTrack : IDisposable
                 format,
                 capture.WaveFormat.SampleRate,
                 capture.WaveFormat.Channels,
-                stopSignal);
+                stopSignal,
+                timeline: timeline);
             capture.StartRecording();
             return track;
         }
@@ -269,14 +321,19 @@ internal sealed class RecordingAudioService : IDisposable
         }
     }
 
-    public static RecordingAudioService Start(string tempDir, bool systemAudio, bool microphone, RecordingStopSignal stopSignal)
+    public static RecordingAudioService Start(
+        string tempDir,
+        bool systemAudio,
+        bool microphone,
+        RecordingStopSignal stopSignal,
+        RecordingTimeline? timeline = null)
     {
         var service = new RecordingAudioService();
-        if (systemAudio && RecordingAudioTrack.TryCreateSystemLoopback(tempDir, stopSignal) is { } loopback)
+        if (systemAudio && RecordingAudioTrack.TryCreateSystemLoopback(tempDir, stopSignal, timeline) is { } loopback)
         {
             service._tracks.Add(loopback);
         }
-        if (microphone && RecordingAudioTrack.TryCreateMicrophone(tempDir, stopSignal) is { } mic)
+        if (microphone && RecordingAudioTrack.TryCreateMicrophone(tempDir, stopSignal, timeline) is { } mic)
         {
             service._tracks.Add(mic);
         }

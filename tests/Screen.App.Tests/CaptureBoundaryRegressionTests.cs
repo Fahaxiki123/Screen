@@ -126,6 +126,82 @@ public sealed class CaptureBoundaryRegressionTests
         Assert.AreNotEqual(Cursors.None, surface.Cursor);
     });
 
+    [TestMethod]
+    public void PenStrokeBoundsEncloseCurvedTrajectoryAndClampCleanlyOnDrag() => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        surface.Tool = CaptureTool.Pen;
+        surface.CurrentStyle = new AnnotationStyle(0xFFFF0000, 8, 16);
+        WorkingPoints(surface).AddRange([
+            new PixelPoint(40, 35),
+            new PixelPoint(65, 75),
+            new PixelPoint(90, 35)
+        ]);
+        Invoke(surface, "AddAnnotation", new PixelPoint(40, 35), new PixelPoint(90, 35));
+
+        var pen = Items(surface).Single();
+        Assert.IsGreaterThanOrEqualTo(79, pen.Bounds.Bottom,
+            "Pen bounds must enclose intermediate stroke points plus half-thickness, not just start/end.");
+        Assert.IsLessThanOrEqualTo(Region.Bottom, pen.Bounds.Bottom);
+    });
+
+    [TestMethod]
+    public void RectangleMosaicResizePreservesExactBoundsWithoutBrushInflation() => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        surface.Tool = CaptureTool.Mosaic;
+        surface.MosaicMode = MosaicDrawMode.Rectangle;
+        surface.CurrentStyle = new AnnotationStyle(0xFFFF0000, 28, 16, AnnotationVariants.MosaicPixelate, 0.5);
+        Invoke(surface, "AddAnnotation", new PixelPoint(40, 35), new PixelPoint(80, 65));
+
+        var original = Items(surface).Single();
+        Assert.AreEqual(new PixelRect(40, 35, 40, 30), original.Bounds);
+
+        var firstTarget = new PixelRect(35, 30, 55, 40);
+        var resizedOnce = (AnnotationItem)Invoke(surface, "ResizeAnnotation", original, original.Bounds, firstTarget)!;
+        Assert.AreEqual(firstTarget, resizedOnce.Bounds);
+
+        var secondTarget = new PixelRect(45, 38, 30, 22);
+        var resizedTwice = (AnnotationItem)Invoke(surface, "ResizeAnnotation", resizedOnce, resizedOnce.Bounds, secondTarget)!;
+        Assert.AreEqual(secondTarget, resizedTwice.Bounds);
+    });
+
+    [TestMethod]
+    [DataRow(AnnotationVariants.MosaicPixelate)]
+    [DataRow(AnnotationVariants.MosaicBlur)]
+    public void OverlappingMosaicsProduceSeamlessCompositeMatchingFullRender(int variant) => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        surface.Tool = CaptureTool.Mosaic;
+        surface.MosaicMode = MosaicDrawMode.Rectangle;
+        surface.CurrentStyle = new AnnotationStyle(0xFFFF0000, 20, 16, variant, 0.75);
+
+        Invoke(surface, "AddAnnotation", new PixelPoint(36, 30), new PixelPoint(82, 72));
+        Invoke(surface, "AddAnnotation", new PixelPoint(58, 40), new PixelPoint(102, 78));
+        Render(surface); // Populate initial _mosaicComposite cache.
+
+        // Nudge only the upper mosaic so the incremental dirty rect slices across the lower mosaic.
+        var top = Items(surface)[1];
+        var moved = top with
+        {
+            Bounds = new PixelRect(top.Bounds.X + 5, top.Bounds.Y + 3, top.Bounds.Width, top.Bounds.Height),
+            Points = top.Points.Select(p => new PixelPoint(p.X + 5, p.Y + 3)).ToArray()
+        };
+        Invoke(surface, "ReplaceAnnotation", moved);
+
+        var incremental = Render(surface);
+
+        // Fresh surface with the exact same final annotations rendered from clean pixels.
+        var fresh = CreateSurface();
+        Items(fresh).AddRange(Items(surface));
+        SetField(fresh, "_mosaicCompositeDirty", true);
+        fresh.InvalidateVisual();
+        var groundTruth = Render(fresh);
+
+        CollectionAssert.AreEqual(groundTruth, incremental,
+            "Incremental overlapping mosaic rebuild must match a full clean render without block/halo seams.");
+    });
+
     private static CaptureSurface CreateSurface()
     {
         var resources = new ResourceDictionary();

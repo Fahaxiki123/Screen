@@ -48,7 +48,8 @@ internal sealed class ScrollCaptureController : IDisposable
             var center = new PixelPoint(
                 selection.Bounds.X + selection.Bounds.Width / 2.0,
                 selection.Bounds.Y + selection.Bounds.Height / 2.0);
-            var frame = await capture.CaptureAtAsync(center, token);
+            // Crop on the capture continuation's pool thread, not the UI thread.
+            var frame = await capture.CaptureAtAsync(center, token).ConfigureAwait(false);
             return frame.Crop(selection.Bounds);
         });
     }

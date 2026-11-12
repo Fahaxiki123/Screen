@@ -128,6 +128,19 @@ public partial class SettingsWindow
         try
         {
             var profile = _viewModel.BuildTranslationProfile();
+            if (profile.Provider == TranslationProviderKind.OpenAiCompatible)
+            {
+                if (TranslationEndpointRules.ValidateBaseAddress(profile.BaseAddress) is { } baseAddressError)
+                {
+                    throw new InvalidOperationException(baseAddressError);
+                }
+                if (profile.EnableRacing
+                    && !string.IsNullOrWhiteSpace(profile.RacingBaseAddress)
+                    && TranslationEndpointRules.ValidateBaseAddress(profile.RacingBaseAddress) is { } racingAddressError)
+                {
+                    throw new InvalidOperationException(racingAddressError);
+                }
+            }
             var credentials = _viewModel.BuildTranslationCredentials();
             var provider = new OnlineTranslationProvider(_translationTestClient);
             var result = await provider.TranslateAsync(

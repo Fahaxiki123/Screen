@@ -176,6 +176,127 @@ public sealed class TranslationRegressionTests
         }
     }
 
+    [TestMethod]
+    public async Task PlainHttpBaseAddressIsRejectedBeforeSendingBearerKeyAsync()
+    {
+        var requests = 0;
+        using var client = new HttpClient(new OfflineHandler((_, _) =>
+        {
+            requests++;
+            return Task.FromResult(SseResponse(TextEvent + "data: [DONE]\n\n"));
+        }));
+        var profile = NaturalProfile() with
+        {
+            BaseAddress = "http://ai.example.test/v1",
+            EnableMyMemoryFallback = false
+        };
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            new OpenAiTranslationProvider(client).TranslateAsync(
+                "Hello world",
+                "en-US",
+                profile,
+                new TranslationCredentials(ApiKey: "secret-bearer-key")));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            new OnlineTranslationProvider(client).TranslateAsync(
+                "Hello world",
+                "en-US",
+                profile,
+                new TranslationCredentials(ApiKey: "secret-bearer-key")));
+        Assert.AreEqual(0, requests, "Plain-HTTP endpoints must never transmit the Bearer key.");
+    }
+
+    [TestMethod]
+    public async Task FastFallbackRacePreservesIncrementalStreamingChunksAsync()
+    {
+        var requests = new List<string>();
+        using var client = new HttpClient(new OfflineHandler((request, _) =>
+        {
+            requests.Add(request.RequestUri!.Host);
+            return Task.FromResult(SseResponse(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"第一段、\"}}]}\n\n"
+                + "data: {\"choices\":[{\"delta\":{\"content\":\"第二段、\"}}]}\n\n"
+                + "data: {\"choices\":[{\"delta\":{\"content\":\"第三段\"}}]}\n\n"
+                + "data: [DONE]\n\n"));
+        }));
+        var streamed = new List<string>();
+        var progress = new SynchronousProgress(streamed.Add);
+        var profile = new AppSettings().Translation with
+        {
+            Provider = TranslationProviderKind.OpenAiCompatible,
+            BaseAddress = "https://ai.example.test/v1",
+            Model = "stream-model",
+            EnableFastFallbackRace = true,
+            FastFallbackDelaySeconds = 8,
+            EnableMyMemoryFallback = false
+        };
+
+        var result = await new OnlineTranslationProvider(client).TranslateAsync(
+            "First part, second part, third part.",
+            "en-US",
+            profile,
+            new TranslationCredentials("offline-test-key", "tencent-id", "tencent-secret"),
+            progress);
+
+        Assert.AreEqual("第一段、第二段、第三段", result.Text);
+        Assert.IsFalse(result.UsedFallback);
+        CollectionAssert.AreEqual(new[] { "ai.example.test" }, requests);
+        Assert.IsTrue(
+            streamed.Contains("第一段、") && streamed.Contains("第一段、第二段、"),
+            $"Expected incremental SSE chunks while fast fallback race is enabled, got: [{string.Join(" | ", streamed)}]");
+    }
+
+    [TestMethod]
+    public async Task ImmediateAiAndTencentFailuresDoNotWaitEightSecondsOrDuplicateRequestsAsync()
+    {
+        var requests = new List<string>();
+        using var client = new HttpClient(new OfflineHandler((request, _) =>
+        {
+            var host = request.RequestUri!.Host;
+            lock (requests)
+            {
+                requests.Add(host);
+            }
+            return Task.FromResult(host switch
+            {
+                "ai.example.test" => new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                {
+                    Content = new StringContent("{\"error\":{\"message\":\"invalid key\"}}")
+                },
+                "tmt.tencentcloudapi.com" => new HttpResponseMessage(HttpStatusCode.Forbidden)
+                {
+                    Content = new StringContent("{\"Response\":{\"Error\":{\"Code\":\"AuthFailure\",\"Message\":\"bad secret\"}}}")
+                },
+                _ => MyMemoryResponse()
+            });
+        }));
+        var profile = new AppSettings().Translation with
+        {
+            Provider = TranslationProviderKind.OpenAiCompatible,
+            BaseAddress = "https://ai.example.test/v1",
+            Model = "primary-model",
+            EnableFastFallbackRace = true,
+            FastFallbackDelaySeconds = 8,
+            EnableMyMemoryFallback = true
+        };
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var result = await new OnlineTranslationProvider(client).TranslateAsync(
+            "Hello world",
+            "en-US",
+            profile,
+            new TranslationCredentials("bad-ai-key", "bad-tencent-id", "bad-tencent-secret"));
+
+        Assert.AreEqual("完整的保底译文", result.Text);
+        Assert.IsTrue(result.UsedFallback);
+        StringAssert.Contains(result.PrimaryFailure, "AI 自然翻译");
+        StringAssert.Contains(result.PrimaryFailure, "腾讯机器翻译");
+        Assert.IsTrue(timer.Elapsed < TimeSpan.FromSeconds(1.5), $"Expected immediate fallback without 8s sleep, took {timer.Elapsed.TotalSeconds:F2}s");
+        CollectionAssert.AreEqual(
+            new[] { "ai.example.test", "tmt.tencentcloudapi.com", "api.mymemory.translated.net" },
+            requests);
+    }
+
     private static TranslationProfile NaturalProfile() => new AppSettings().Translation with
     {
         Provider = TranslationProviderKind.OpenAiCompatible,
@@ -195,6 +316,11 @@ public sealed class TranslationRegressionTests
     {
         Content = new StringContent("{\"responseStatus\":200,\"responseData\":{\"translatedText\":\"完整的保底译文\"}}")
     };
+
+    private sealed class SynchronousProgress(Action<string> report) : IProgress<string>
+    {
+        public void Report(string value) => report(value);
+    }
 
     private sealed class OfflineHandler(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler

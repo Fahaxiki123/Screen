@@ -6,11 +6,14 @@ using System.Text.Json;
 namespace Screen.App;
 
 internal sealed class SmartOcrEngine(
-    PaddleOcrEngine local,
+    IOcrEngine local,
     TencentCloudOcrEngine cloud,
     JsonSettingsStore settingsStore,
-    CredentialService credentials) : IOcrEngine, IDisposable
+    CredentialService credentials,
+    Func<string, string?>? readCredential = null) : IOcrEngine, IDisposable
 {
+    private readonly Func<string, string?> _readCredential = readCredential ?? credentials.Read;
+
     public IReadOnlyList<string> AvailableLanguages { get; } = ["auto"];
 
     public bool IsLanguageAvailable(string languageTag) => true;
@@ -29,8 +32,8 @@ internal sealed class SmartOcrEngine(
     {
         var settings = settingsStore.Load();
         var profile = settings.Ocr ?? new OcrProfile();
-        var secretId = credentials.Read(TranslationProfile.TencentSecretIdCredentialName);
-        var secretKey = credentials.Read(TranslationProfile.TencentSecretKeyCredentialName);
+        var secretId = _readCredential(TranslationProfile.TencentSecretIdCredentialName);
+        var secretKey = _readCredential(TranslationProfile.TencentSecretKeyCredentialName);
         var cloudAvailable = profile.Mode != OcrProviderMode.LocalOnly
                              && !string.IsNullOrWhiteSpace(secretId)
                              && !string.IsNullOrWhiteSpace(secretKey);
@@ -39,7 +42,7 @@ internal sealed class SmartOcrEngine(
 
         if (!cloudAvailable)
         {
-            return await local.RecognizeAsync(image, languageTag, purpose, cancellationToken)
+            return await RecognizeLocalAsync(local, image, languageTag, purpose, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -95,8 +98,18 @@ internal sealed class SmartOcrEngine(
             : OcrQualityEvaluator.Fuse(localDocument, enhanced);
     }
 
+    private static Task<OcrDocument> RecognizeLocalAsync(
+        IOcrEngine local,
+        PixelBuffer image,
+        string languageTag,
+        OcrRecognitionPurpose purpose,
+        CancellationToken cancellationToken) =>
+        local is PaddleOcrEngine paddle
+            ? paddle.RecognizeAsync(image, languageTag, purpose, cancellationToken)
+            : local.RecognizeAsync(image, languageTag, cancellationToken);
+
     private static async Task<OcrDocument?> TryLocalAsync(
-        PaddleOcrEngine local,
+        IOcrEngine local,
         PixelBuffer image,
         string languageTag,
         OcrRecognitionPurpose purpose,
@@ -104,29 +117,21 @@ internal sealed class SmartOcrEngine(
     {
         try
         {
-            return await local.RecognizeAsync(image, languageTag, purpose, cancellationToken)
+            return await RecognizeLocalAsync(local, image, languageTag, purpose, cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (Exception exception) when (IsExpectedOcrFailure(exception))
+        catch (Exception exception)
         {
-            // Missing model files, native loader failures, or a disposed engine
-            // must not take down the whole pipeline when a cloud result exists.
+            // Missing model files, ONNX runtime / native loader failures, or a
+            // disposed engine must not discard a valid cloud OCR result.
+            SimpleLogger.LogWarning($"Local OCR failed while cloud fallback is available: {exception.GetType().Name}: {exception.Message}");
             return null;
         }
     }
-
-    private static bool IsExpectedOcrFailure(Exception exception) => exception is
-        FileNotFoundException or
-        DllNotFoundException or
-        ObjectDisposedException or
-        InvalidOperationException or
-        JsonException or
-        HttpRequestException or
-        ArgumentException;
 
     private async Task<OcrDocument?> TryCloudAsync(
         PixelBuffer image,
@@ -142,23 +147,20 @@ internal sealed class SmartOcrEngine(
             return await cloud.RecognizeAsync(image, secretId, secretKey, timeout.Token)
                 .ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
         {
             return null;
         }
-        catch (HttpRequestException)
+        catch (Exception exception)
         {
-            return null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (InvalidOperationException)
-        {
+            SimpleLogger.LogWarning($"Cloud OCR failed, falling back to local result if available: {exception.GetType().Name}: {exception.Message}");
             return null;
         }
     }
 
-    public void Dispose() => local.Dispose();
+    public void Dispose() => (local as IDisposable)?.Dispose();
 }

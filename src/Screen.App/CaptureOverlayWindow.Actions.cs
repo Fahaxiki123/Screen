@@ -328,10 +328,18 @@ internal sealed partial class CaptureOverlayWindow
         {
             return;
         }
-        BitmapUtilities.SavePng(RenderCurrentSelection(), dialog.FileName);
-        settings.SaveDirectory = Path.GetDirectoryName(dialog.FileName) ?? initialDirectory;
-        _settingsStore.Update(latest => latest.SaveDirectory = settings.SaveDirectory);
-        Close();
+        try
+        {
+            BitmapUtilities.SavePng(RenderCurrentSelection(), dialog.FileName);
+            settings.SaveDirectory = Path.GetDirectoryName(dialog.FileName) ?? initialDirectory;
+            _settingsStore.Update(latest => latest.SaveDirectory = settings.SaveDirectory);
+            Close();
+        }
+        catch (Exception ex)
+        {
+            SimpleLogger.LogError("Failed to save screenshot", ex);
+            MessageBox.Show(this, $"保存截图失败：{ex.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void Finish(object sender, RoutedEventArgs e)
@@ -340,8 +348,16 @@ internal sealed partial class CaptureOverlayWindow
         {
             return;
         }
-        BitmapUtilities.CopyToClipboard(RenderCurrentSelection());
-        Close();
+        try
+        {
+            BitmapUtilities.CopyToClipboard(RenderCurrentSelection());
+            Close();
+        }
+        catch (Exception ex)
+        {
+            SimpleLogger.LogError("Failed to copy screenshot to clipboard", ex);
+            MessageBox.Show(this, ex.Message, "Screen", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void StartLongCapture(object sender, RoutedEventArgs e)

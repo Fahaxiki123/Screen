@@ -237,6 +237,41 @@ internal static partial class NativeMethods
 
     internal const int SmCursorWidth = 13;
     internal const int SmCursorHeight = 14;
+    internal const int IdcArrow = 32512;
+    internal const int IdcIBeam = 32513;
+    internal const int IdcCross = 32515;
+
+    [LibraryImport("user32.dll", EntryPoint = "LoadCursorW", SetLastError = true)]
+    internal static partial nint LoadCursor(nint hInstance, nint cursorName);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetIconInfo(nint hIcon, out IconInfo iconInfo);
+
+    [LibraryImport("gdi32.dll", EntryPoint = "GetObjectW")]
+    internal static partial int GetBitmapObject(nint gdiObject, int bufferSize, out NativeBitmap bitmap);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct IconInfo
+    {
+        internal int IsIcon;
+        internal uint XHotspot;
+        internal uint YHotspot;
+        internal nint MaskBitmap;
+        internal nint ColorBitmap;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NativeBitmap
+    {
+        internal int BmType;
+        internal int BmWidth;
+        internal int BmHeight;
+        internal int BmWidthBytes;
+        internal ushort BmPlanes;
+        internal ushort BmBitsPixel;
+        internal nint BmBits;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct BitmapInfoHeader

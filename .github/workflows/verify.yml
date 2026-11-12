@@ -1,0 +1,59 @@
+name: verify
+
+on:
+  push:
+    branches: [main, 'optimize/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (LFS objects restored from cache below)
+        uses: actions/checkout@v4
+
+      # LFS bandwidth on GitHub is metered; cache the objects by their IDs so
+      # unchanged binaries (FFmpeg, runtime DLLs) are downloaded only once.
+      - name: Compute LFS object key
+        id: lfs-key
+        shell: pwsh
+        run: |
+          $ids = git lfs ls-files --long | Sort-Object
+          $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($ids -join "`n"))))
+          "key=lfs-$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Restore LFS cache
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: ${{ steps.lfs-key.outputs.key }}
+
+      - name: Pull LFS objects
+        run: git lfs pull
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore, build, test, format check
+        shell: pwsh
+        run: ./verify.ps1
+
+      - name: Publication flow checks
+        shell: pwsh
+        run: ./tools/Test-PublishFlow.ps1
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/**'
+          if-no-files-found: ignore

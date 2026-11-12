@@ -442,10 +442,191 @@ public sealed class RecordingRegressionTests
         Assert.AreSame(videoError, error);
     }
 
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void SystemCursorsDecodeHotspotTransparencyAndInvertMaskAndCompositeVisibly(bool useNv12)
+    {
+        var region = new PixelRect(100, 100, 96, 96);
+        var cursorPos = new PixelPoint(148, 148);
+
+        foreach (var cursorId in new[] { NativeMethods.IdcIBeam, NativeMethods.IdcCross, NativeMethods.IdcArrow })
+        {
+            var handle = NativeMethods.LoadCursor(0, cursorId);
+            Assert.AreNotEqual(0, handle, $"LoadCursor({cursorId}) failed.");
+            var bitmap = ScreenRecorder.RenderCursorHandle(handle, cursorPos, region);
+            Assert.IsNotNull(bitmap, $"Cursor {cursorId} must decode into a visible CursorBitmap.");
+            var cursor = bitmap.Value;
+
+            if (cursorId is NativeMethods.IdcIBeam or NativeMethods.IdcCross)
+            {
+                Assert.IsTrue(
+                    cursor.Bounds.X < 48 || cursor.Bounds.Y < 48,
+                    $"Cursor {cursorId} must offset its bounds by its hotspot, got {cursor.Bounds}.");
+            }
+
+            var totalPixels = cursor.Bounds.Width * cursor.Bounds.Height;
+            var transparentCount = 0;
+            for (var i = 0; i < totalPixels; i++)
+            {
+                var inverted = cursor.InvertMask is not null && cursor.InvertMask[i];
+                var alpha = cursor.Pixels[i * 4 + 3];
+                if (!inverted && alpha == 0)
+                {
+                    transparentCount++;
+                }
+            }
+            Assert.IsGreaterThan(totalPixels / 4, transparentCount,
+                $"Cursor {cursorId} must preserve transparent background pixels rather than filling an opaque box.");
+
+            foreach (var backgroundLuma in new byte[] { 24, 232 })
+            {
+                var buffer = new ScreenRecorder.FrameBuffer(region.Width, region.Height, useNv12);
+                Array.Fill(buffer.Desktop, backgroundLuma);
+                if (useNv12)
+                {
+                    buffer.Desktop.AsSpan(region.Width * region.Height).Fill(128);
+                }
+                var clean = buffer.Desktop.ToArray();
+                var composited = buffer.GetEncodingFrame(cursor);
+                Assert.IsFalse(
+                    clean.AsSpan().SequenceEqual(composited),
+                    $"Cursor {cursorId} must be visible over background {backgroundLuma} (useNv12={useNv12}).");
+            }
+        }
+    }
+
+    [TestMethod]
+    public void TimelineAlignedAudioDropsPreStartSamplesAndBackfillsSilentLoopbackGaps()
+    {
+        var freq = System.Diagnostics.Stopwatch.Frequency;
+        long nowTicks = 1_000_000;
+        var timeline = new RecordingTimeline(() => nowTicks);
+        var signal = new RecordingStopSignal();
+        var waveIn = new FakeWaveIn();
+        var output = new MemoryStream();
+        const int sampleRate = 48000;
+        const int channels = 2;
+        const int blockAlign = 4; // s16le stereo
+
+        using var track = new RecordingAudioTrack(
+            waveIn, "loopback.raw", "s16le", sampleRate, channels, signal, output, timeline);
+
+        // Pre-start audio before video loop begins must be ignored.
+        waveIn.Emit(new byte[480 * blockAlign]);
+        Assert.AreEqual(0L, track.BytesWritten);
+
+        // Start timeline: 2.0s of silence, 5.0s paused, then 0.5s more silence = 2.5s active silence.
+        timeline.Start();
+        nowTicks += 2 * freq;
+        timeline.Pause();
+        nowTicks += 5 * freq;
+        timeline.Resume();
+        nowTicks += freq / 2;
+
+        // Emit 10ms (480 frames) of non-zero sound ending at 2.51s.
+        nowTicks += freq / 100;
+        var activePacket = Enumerable.Repeat((byte)0x7F, 480 * blockAlign).ToArray();
+        waveIn.Emit(activePacket);
+
+        var written = output.ToArray();
+        const int expectedSilenceBytes = (int)(2.5 * sampleRate) * blockAlign;
+        Assert.AreEqual(expectedSilenceBytes + activePacket.Length, written.Length);
+        Assert.IsTrue(written.AsSpan(0, expectedSilenceBytes).IndexOfAnyExcept((byte)0) < 0,
+            "Backfilled loopback gap must be pure zero PCM.");
+        CollectionAssert.AreEqual(activePacket, written[expectedSilenceBytes..]);
+    }
+
+    [STATestMethod(UseSTASynchronizationContext = true)]
+    public async Task MidRecordingCaptureFaultPreservesSavedSegmentAndSurfacesInterruptionWarning()
+    {
+        var scratch = Directory.CreateDirectory(Path.Combine(_root, "session")).FullName;
+        var source = Path.Combine(scratch, "video.mp4");
+        var destination = Path.Combine(_root, "recording.mp4");
+        File.WriteAllBytes(source, [10, 20, 30, 40]);
+        var stopSignal = new RecordingStopSignal();
+        var capture = new FakeRecordingCapture(() => { })
+        {
+            EncodedDurationSeconds = 1.5,
+            Fault = new InvalidOperationException("DXGI_ERROR_ACCESS_LOST")
+        };
+        using var controller = new RecordingController(
+            capture, new PixelRect(0, 0, 64, 64), destination, scratch, audio: null, border: null, stopSignal);
+
+        await controller.StopAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await controller.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.IsTrue(result.Saved);
+        Assert.IsTrue(File.Exists(destination));
+        Assert.IsNotNull(result.Warning);
+        StringAssert.Contains(result.Warning, "提前中断");
+        StringAssert.Contains(result.Warning, "DXGI_ERROR_ACCESS_LOST");
+    }
+
+    [TestMethod]
+    public void MuxArgumentsIncludeFaststartAndExactEncodedDuration()
+    {
+        var waveIn = new FakeWaveIn();
+        var signal = new RecordingStopSignal();
+        using var track = new RecordingAudioTrack(waveIn, "sys.raw", "f32le", 48000, 2, signal, new MemoryStream());
+        var startInfo = RecordingController.BuildMuxStartInfo(
+            "ffmpeg.exe", "video.mp4", [track], 12.5, "muxed.mp4");
+        var args = startInfo.ArgumentList.ToArray();
+
+        var movflagsIndex = Array.IndexOf(args, "-movflags");
+        Assert.IsGreaterThanOrEqualTo(0, movflagsIndex, "Mux command must include -movflags.");
+        Assert.AreEqual("+faststart", args[movflagsIndex + 1]);
+        CollectionAssert.Contains(args, "apad");
+        CollectionAssert.Contains(args, "12.5");
+    }
+
+    [TestMethod]
+    public void RecordingTempCleanerRetainsRecentRecoveryAndRemovesExpiredOrphans()
+    {
+        var cleanRoot = Directory.CreateDirectory(Path.Combine(_root, "CleanerRoot")).FullName;
+        var now = new DateTime(2026, 11, 12, 12, 0, 0, DateTimeKind.Utc);
+
+        var recentGuid = Directory.CreateDirectory(Path.Combine(cleanRoot, Guid.NewGuid().ToString("N"))).FullName;
+        var recentFile = Path.Combine(recentGuid, "video.mp4");
+        File.WriteAllBytes(recentFile, [1]);
+        File.SetLastWriteTimeUtc(recentFile, now.AddDays(-2));
+
+        var expiredGuid = Directory.CreateDirectory(Path.Combine(cleanRoot, Guid.NewGuid().ToString("N"))).FullName;
+        var expiredFile = Path.Combine(expiredGuid, "video.mp4");
+        File.WriteAllBytes(expiredFile, [1]);
+        File.SetLastWriteTimeUtc(expiredFile, now.AddDays(-15));
+        Directory.SetLastWriteTimeUtc(expiredGuid, now.AddDays(-15));
+
+        var nonGuidFolder = Directory.CreateDirectory(Path.Combine(cleanRoot, "user-notes")).FullName;
+        Directory.SetLastWriteTimeUtc(nonGuidFolder, now.AddDays(-30));
+
+        var oldTrim = Path.Combine(cleanRoot, "trim-old.mp4");
+        File.WriteAllBytes(oldTrim, [2]);
+        File.SetLastWriteTimeUtc(oldTrim, now.AddHours(-2));
+
+        var freshTrim = Path.Combine(cleanRoot, "trim-fresh.mp4");
+        File.WriteAllBytes(freshTrim, [3]);
+        File.SetLastWriteTimeUtc(freshTrim, now.AddMinutes(-10));
+
+        var removed = RecordingTempCleaner.Clean(cleanRoot, now);
+
+        Assert.AreEqual(2, removed);
+        Assert.IsTrue(Directory.Exists(recentGuid));
+        Assert.IsFalse(Directory.Exists(expiredGuid));
+        Assert.IsTrue(Directory.Exists(nonGuidFolder));
+        Assert.IsFalse(File.Exists(oldTrim));
+        Assert.IsTrue(File.Exists(freshTrim));
+
+        var (scaledW, scaledH) = RecordingMediaInfo.FitDecodeSize(3840, 2160, 960, 540);
+        Assert.AreEqual(960, scaledW);
+        Assert.AreEqual(540, scaledH);
+        Assert.AreEqual((1920, 1080), RecordingMediaInfo.FitDecodeSize(1920, 1080, 1800, 1000));
+    }
+
     private sealed class FakeRecordingCapture(Action finalize) : IRecordingCapture
     {
         public bool IsPaused { get; private set; }
-        public Exception? Fault => null;
+        public Exception? Fault { get; init; }
         public double ElapsedSeconds => EncodedDurationSeconds;
         public double EncodedDurationSeconds { get; init; }
         public int FinalizeCalls { get; private set; }

@@ -25,6 +25,7 @@ internal sealed class AppHost : IDisposable
     private RecordingController? _recordingController;
     private bool _recordingFlowActive;
     private bool _settingsLoadFailed;
+    private bool _exiting;
 
     public AppHost()
     {
@@ -63,6 +64,17 @@ internal sealed class AppHost : IDisposable
 
     public void Start()
     {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                RecordingTempCleaner.Clean(RecordingTempCleaner.DefaultRoot, DateTime.UtcNow);
+            }
+            catch (Exception exception)
+            {
+                SimpleLogger.LogWarning($"Recording temp cleanup skipped: {exception.Message}");
+            }
+        });
         _trayIcon = ScreenIconFactory.CreateTrayIcon();
         _notifyIcon.Icon = _trayIcon;
         _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
@@ -267,11 +279,15 @@ internal sealed class AppHost : IDisposable
                 "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
+        if (_exiting)
+        {
+            return;
+        }
         if (result.Warning is not null)
         {
             HintToastWindow.Show(result.RecoveryDirectory is null
-                ? "声音处理失败，已保存无声视频"
-                : $"声音处理失败，已保存无声视频。原始素材保留在：{result.RecoveryDirectory}");
+                ? result.Warning
+                : $"{result.Warning}。原始素材保留在：{result.RecoveryDirectory}");
         }
         try
         {
@@ -288,11 +304,12 @@ internal sealed class AppHost : IDisposable
             {
             }
         }
+        var interrupted = result.Warning?.Contains("提前中断", StringComparison.Ordinal) == true;
         _notifyIcon.ShowBalloonTip(
             5000,
-            "Screen 录制已保存",
+            interrupted ? "Screen 录制提前中断（已保存片段）" : "Screen 录制已保存",
             Path.GetFileName(filePath),
-            Forms.ToolTipIcon.Info);
+            interrupted ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
     }
 
     private Forms.ContextMenuStrip BuildMenu()
@@ -312,8 +329,30 @@ internal sealed class AppHost : IDisposable
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("设置", null, (_, _) => OpenSettings());
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("退出", null, (_, _) => Application.Current.Shutdown());
+        menu.Items.Add("退出", null, (_, _) => _ = ExitAsync());
         return menu;
+    }
+
+    private async Task ExitAsync()
+    {
+        if (_exiting)
+        {
+            return;
+        }
+        _exiting = true;
+        if (_recordingController is { } active)
+        {
+            HintToastWindow.Show("正在保存当前录屏并退出…");
+            try
+            {
+                await active.StopAsync().ConfigureAwait(true);
+            }
+            catch (Exception exception)
+            {
+                SimpleLogger.LogError("Failed to finalize recording during exit", exception);
+            }
+        }
+        Application.Current?.Shutdown();
     }
 
     private void OpenSettings()

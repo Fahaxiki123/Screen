@@ -1,15 +1,28 @@
 ﻿param(
-    [switch]$NoRestart
+    [switch]$NoRestart,
+    # Folder that receives 正式版. Defaults to the parent of a source folder
+    # named 开发工程 (the arranged layout); pass it for any other checkout name.
+    [string]$ProductRoot
 )
 
 # Finish captures/recordings and exit Screen from its tray before replacement.
 # The running app is never killed: an old build has no safe idle/exit protocol.
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
-if ([IO.Path]::GetFileName($projectRoot) -ne '开发工程') {
-    throw 'Run this script from the 开发工程 folder in the arranged Screen directory.'
+if ($ProductRoot) {
+    $productRoot = [IO.Path]::GetFullPath($ProductRoot).TrimEnd('\')
+    if ([string]::Equals($productRoot, $projectRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $productRoot.StartsWith($projectRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'ProductRoot must be outside the source folder.'
+    }
+    New-Item -ItemType Directory -Path $productRoot -Force | Out-Null
 }
-$productRoot = [IO.Path]::GetDirectoryName($projectRoot)
+elseif ([IO.Path]::GetFileName($projectRoot) -ne '开发工程') {
+    throw 'Run this script from the 开发工程 folder in the arranged Screen directory, or pass -ProductRoot <folder for 正式版>.'
+}
+else {
+    $productRoot = [IO.Path]::GetDirectoryName($projectRoot)
+}
 $publishRoot = Join-Path $projectRoot 'artifacts\publish'
 $publishDir = Join-Path $productRoot '正式版'
 $candidateDir = Join-Path $publishRoot '.Screen-staging'
@@ -170,7 +183,7 @@ try {
     }
     Assert-PublishPath $candidateDir
     Write-Host '1/4 Building and checking the new self-contained publication...'
-    dotnet publish (Join-Path $projectRoot 'src\Screen.App\Screen.App.csproj') -c Release -r win-x64 --self-contained true -o $candidateDir -v:q -nologo
+    dotnet publish (Join-Path $projectRoot 'src\Screen.App\Screen.App.csproj') -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -o $candidateDir -v:q -nologo
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed. The official publication was not changed.' }
     Assert-PublicationComplete $candidateDir
 

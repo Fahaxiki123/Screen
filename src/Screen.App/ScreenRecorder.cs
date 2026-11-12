@@ -38,7 +38,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
     private readonly string _filePath;
     private readonly RecordingProfile _profile;
     private readonly CancellationTokenSource _cts = new();
-    private readonly PauseClock _clock = new();
+    private readonly RecordingTimeline _timeline;
     private readonly Task _loop;
     private readonly RecordingStopSignal _stopSignal;
     private readonly object _lifecycleGate = new();
@@ -69,7 +69,12 @@ internal sealed class ScreenRecorder : IRecordingCapture
     private volatile bool _stopRequested;
     private volatile Exception? _fault;
 
-    public ScreenRecorder(string filePath, PixelRect region, RecordingProfile profile, RecordingStopSignal? stopSignal = null)
+    public ScreenRecorder(
+        string filePath,
+        PixelRect region,
+        RecordingProfile profile,
+        RecordingStopSignal? stopSignal = null,
+        RecordingTimeline? timeline = null)
     {
         if (region.Width % 2 != 0 || region.Height % 2 != 0)
         {
@@ -81,6 +86,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
         _filePath = filePath;
         _profile = profile;
         _stopSignal = stopSignal ?? new RecordingStopSignal();
+        _timeline = timeline ?? new RecordingTimeline();
         _loop = Task.Run(Run);
     }
 
@@ -89,7 +95,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
     public Exception? Fault => _fault;
 
     /// <summary>Recorded duration so far, excluding paused time.</summary>
-    public double ElapsedSeconds => _clock.ElapsedSeconds;
+    public double ElapsedSeconds => _timeline.ElapsedSeconds;
     public double EncodedDurationSeconds => Interlocked.Read(ref _framesWritten) / (double)_frameRate;
 
     public void Pause()
@@ -99,7 +105,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
             return;
         }
         _paused = true;
-        _clock.Pause();
+        _timeline.Pause();
     }
 
     public void Resume()
@@ -109,7 +115,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
             return;
         }
         _paused = false;
-        _clock.Resume();
+        _timeline.Resume();
     }
 
     /// <summary>
@@ -126,7 +132,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
             return;
         }
         _stopRequested = true;
-        _clock.Pause();
+        _timeline.Pause();
         _cts.Cancel();
     }
 
@@ -220,31 +226,31 @@ internal sealed class ScreenRecorder : IRecordingCapture
     private void RunLoop(DesktopRegionCapture? desktop)
     {
         var frameIntervalTicks = Stopwatch.Frequency / (double)_frameRate;
-        var stopwatch = Stopwatch.StartNew();
-        long frameIndex = 0;
+        var maxCatchUpDuplicates = Math.Max(1, _frameRate / 4);
+        long slotDebt = 0;
+        _timeline.Start();
 
         while (!_cts.IsCancellationRequested && !_stopSignal.IsRequested)
         {
-            // CFR pacing: each output frame owns a fixed slot on the wall
-            // clock.  Falling behind never bursts — the slot is simply
-            // written as soon as possible.
-            var targetTicks = (long)((frameIndex + 1) * frameIntervalTicks);
-            var waitTicks = targetTicks - stopwatch.ElapsedTicks;
-            if (waitTicks > 0)
+            if (_paused)
             {
-                var waitMs = (int)(waitTicks * 1000 / Stopwatch.Frequency);
-                if (waitMs > 0 && _cts.Token.WaitHandle.WaitOne(Math.Min(waitMs, 200)))
+                if (_cts.Token.WaitHandle.WaitOne(25))
                 {
                     break;
                 }
                 continue;
             }
 
-            frameIndex++;
-            if (_paused)
+            var nextSlotIndex = Interlocked.Read(ref _framesWritten) + slotDebt;
+            var targetSeconds = nextSlotIndex / (double)_frameRate;
+            var waitSeconds = targetSeconds - _timeline.ElapsedSeconds;
+            if (waitSeconds > 0)
             {
-                // Paused ticks produce no output frames at all; the encoder
-                // timeline simply advances when Resume() starts writing again.
+                var waitMs = (int)(waitSeconds * 1000);
+                if (waitMs > 0 && _cts.Token.WaitHandle.WaitOne(Math.Min(waitMs, 200)))
+                {
+                    break;
+                }
                 continue;
             }
 
@@ -262,6 +268,10 @@ internal sealed class ScreenRecorder : IRecordingCapture
             }
             if (_frames is null)
             {
+                if (_cts.Token.WaitHandle.WaitOne(4))
+                {
+                    break;
+                }
                 continue;
             }
             var cursor = _showCursor ? CaptureCursorBitmap() : null;
@@ -270,8 +280,37 @@ internal sealed class ScreenRecorder : IRecordingCapture
             {
                 break;
             }
+
+            var writeStart = Stopwatch.GetTimestamp();
             _pipeline!.WriteVideoFrame(frame);
-            Interlocked.Increment(ref _framesWritten);
+            var writeTicks = Stopwatch.GetTimestamp() - writeStart;
+            var written = Interlocked.Increment(ref _framesWritten);
+
+            // Keep CFR frame count aligned with unpaused recording time across
+            // capture/scheduling jitter, while avoiding extra writes when the
+            // encoder pipe itself is already the bottleneck.
+            var targetFrames = (long)Math.Floor(_timeline.ElapsedSeconds * _frameRate) + 1 - slotDebt;
+            if (written < targetFrames)
+            {
+                if (writeTicks < frameIntervalTicks * 0.8)
+                {
+                    var duplicates = (int)Math.Min(targetFrames - written, maxCatchUpDuplicates);
+                    for (var i = 0; i < duplicates && !_stopSignal.IsRequested && !_cts.IsCancellationRequested && !_paused; i++)
+                    {
+                        var dupStart = Stopwatch.GetTimestamp();
+                        _pipeline.WriteVideoFrame(frame);
+                        written = Interlocked.Increment(ref _framesWritten);
+                        if (Stopwatch.GetTimestamp() - dupStart >= frameIntervalTicks * 0.8)
+                        {
+                            break;
+                        }
+                    }
+                }
+                if (written < targetFrames)
+                {
+                    slotDebt += targetFrames - written;
+                }
+            }
         }
     }
 
@@ -654,7 +693,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
     // Cursor compositing (CPU, into the encoding buffer)
     // ------------------------------------------------------------------
 
-    internal readonly record struct CursorBitmap(byte[] Pixels, PixelRect Bounds);
+    internal readonly record struct CursorBitmap(byte[] Pixels, PixelRect Bounds, bool[]? InvertMask = null);
 
     internal sealed class FrameBuffer(int width, int height, bool useNv12)
     {
@@ -674,18 +713,26 @@ internal sealed class ScreenRecorder : IRecordingCapture
             var bounds = bitmap.Bounds;
             if (useNv12)
             {
-                CompositeCursorNv12(_withCursor, bitmap.Pixels, bounds.Width, bounds.Height, bounds.X, bounds.Y, width, height);
+                CompositeCursorNv12(_withCursor, bitmap.Pixels, bitmap.InvertMask, bounds.Width, bounds.Height, bounds.X, bounds.Y, width, height);
             }
             else
             {
-                CompositeCursorBgra(_withCursor, bitmap.Pixels, bounds.Width, bounds.Height, bounds.X, bounds.Y, width, height);
+                CompositeCursorBgra(_withCursor, bitmap.Pixels, bitmap.InvertMask, bounds.Width, bounds.Height, bounds.X, bounds.Y, width, height);
             }
             return _withCursor;
         }
     }
 
     private static void CompositeCursorBgra(
-        byte[] frame, byte[] pixels, int width, int height, int left, int top, int regionWidth, int regionHeight)
+        byte[] frame,
+        byte[] pixels,
+        bool[]? invertMask,
+        int width,
+        int height,
+        int left,
+        int top,
+        int regionWidth,
+        int regionHeight)
     {
         for (var row = 0; row < height; row++)
         {
@@ -701,13 +748,22 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 {
                     continue;
                 }
-                var source = (row * width + column) * 4;
+                var pixelIndex = row * width + column;
+                var dest = (py * regionWidth + px) * 4;
+                if (invertMask is not null && invertMask[pixelIndex])
+                {
+                    frame[dest] = (byte)(255 - frame[dest]);
+                    frame[dest + 1] = (byte)(255 - frame[dest + 1]);
+                    frame[dest + 2] = (byte)(255 - frame[dest + 2]);
+                    frame[dest + 3] = 255;
+                    continue;
+                }
+                var source = pixelIndex * 4;
                 var alpha = pixels[source + 3];
                 if (alpha == 0)
                 {
                     continue;
                 }
-                var dest = (py * regionWidth + px) * 4;
                 var invAlpha = 255 - alpha;
                 frame[dest] = (byte)Math.Min(255, pixels[source] + frame[dest] * invAlpha / 255);
                 frame[dest + 1] = (byte)Math.Min(255, pixels[source + 1] + frame[dest + 1] * invAlpha / 255);
@@ -718,7 +774,15 @@ internal sealed class ScreenRecorder : IRecordingCapture
     }
 
     private static void CompositeCursorNv12(
-        byte[] nv12, byte[] pixels, int width, int height, int left, int top, int regionWidth, int regionHeight)
+        byte[] nv12,
+        byte[] pixels,
+        bool[]? invertMask,
+        int width,
+        int height,
+        int left,
+        int top,
+        int regionWidth,
+        int regionHeight)
     {
         for (var row = 0; row < height; row++)
         {
@@ -734,7 +798,21 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 {
                     continue;
                 }
-                var source = (row * width + column) * 4;
+                var pixelIndex = row * width + column;
+                if (invertMask is not null && invertMask[pixelIndex])
+                {
+                    var invYIndex = py * regionWidth + px;
+                    var invUvIndex = regionWidth * regionHeight + (py / 2) * regionWidth + (px & ~1);
+                    var (bgR, bgG, bgB) = YuvToRgb(nv12[invYIndex], nv12[invUvIndex], nv12[invUvIndex + 1]);
+                    var invR = (byte)(255 - bgR);
+                    var invG = (byte)(255 - bgG);
+                    var invB = (byte)(255 - bgB);
+                    nv12[invYIndex] = RgbToY(invR, invG, invB);
+                    nv12[invUvIndex] = RgbToU(invR, invG, invB);
+                    nv12[invUvIndex + 1] = RgbToV(invR, invG, invB);
+                    continue;
+                }
+                var source = pixelIndex * 4;
                 var alpha = pixels[source + 3];
                 if (alpha == 0)
                 {
@@ -766,11 +844,22 @@ internal sealed class ScreenRecorder : IRecordingCapture
         {
             return null;
         }
-        var left = info.ScreenPosition.X - _region.X;
-        var top = info.ScreenPosition.Y - _region.Y;
-        var width = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SmCursorWidth));
-        var height = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SmCursorHeight));
-        if (left + width <= 0 || top + height <= 0 || left >= _region.Width || top >= _region.Height)
+        return RenderCursorHandle(
+            info.Cursor,
+            new PixelPoint(info.ScreenPosition.X, info.ScreenPosition.Y),
+            _region);
+    }
+
+    internal static CursorBitmap? RenderCursorHandle(nint cursorHandle, PixelPoint screenPosition, PixelRect region)
+    {
+        if (cursorHandle == 0)
+        {
+            return null;
+        }
+        GetCursorDimensionsAndHotspot(cursorHandle, out var width, out var height, out var hotspotX, out var hotspotY);
+        var left = (int)Math.Round(screenPosition.X) - hotspotX - region.X;
+        var top = (int)Math.Round(screenPosition.Y) - hotspotY - region.Y;
+        if (left + width <= 0 || top + height <= 0 || left >= region.Width || top >= region.Height)
         {
             return null;
         }
@@ -800,17 +889,41 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 return null;
             }
             previousObject = NativeMethods.SelectObject(memDc, dib);
+            var byteLength = checked(width * height * 4);
             unsafe
             {
-                new Span<byte>((void*)bits, width * height * 4).Clear();
+                new Span<byte>((void*)bits, byteLength).Clear();
             }
-            if (!NativeMethods.DrawIconEx(memDc, 0, 0, info.Cursor, width, height, 0, 0, NativeMethods.DiNormal))
+            if (!NativeMethods.DrawIconEx(memDc, 0, 0, cursorHandle, width, height, 0, 0, NativeMethods.DiNormal))
             {
                 return null;
             }
-            var pixels = new byte[width * height * 4];
-            Marshal.Copy(bits, pixels, 0, pixels.Length);
-            return new CursorBitmap(pixels, new PixelRect(left, top, width, height));
+            var onBlack = new byte[byteLength];
+            Marshal.Copy(bits, onBlack, 0, byteLength);
+            if (HasNonZeroAlpha(onBlack))
+            {
+                return new CursorBitmap(onBlack, new PixelRect(left, top, width, height));
+            }
+
+            // Monochrome / XOR cursors (IDC_IBEAM, IDC_CROSS) and legacy masked
+            // cursors leave alpha = 0 across the entire DIB. Render a second pass
+            // over opaque white (0x00FFFFFF) so transparent, opaque, and screen-
+            // inverting pixels are separated cleanly without opaque bounding boxes.
+            unsafe
+            {
+                var span = new Span<uint>((void*)bits, width * height);
+                span.Fill(0x00FFFFFFu);
+            }
+            if (!NativeMethods.DrawIconEx(memDc, 0, 0, cursorHandle, width, height, 0, 0, NativeMethods.DiNormal))
+            {
+                return null;
+            }
+            var onWhite = new byte[byteLength];
+            Marshal.Copy(bits, onWhite, 0, byteLength);
+            var (decodedPixels, invertMask, hasVisible) = DecodeMaskRenderedCursor(onBlack, onWhite);
+            return hasVisible
+                ? new CursorBitmap(decodedPixels, new PixelRect(left, top, width, height), invertMask)
+                : null;
         }
         finally
         {
@@ -825,6 +938,111 @@ internal sealed class ScreenRecorder : IRecordingCapture
             NativeMethods.DeleteDC(memDc);
             NativeMethods.ReleaseDC(0, screenDc);
         }
+    }
+
+    private static void GetCursorDimensionsAndHotspot(
+        nint cursorHandle,
+        out int width,
+        out int height,
+        out int hotspotX,
+        out int hotspotY)
+    {
+        width = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SmCursorWidth));
+        height = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SmCursorHeight));
+        hotspotX = 0;
+        hotspotY = 0;
+
+        if (!NativeMethods.GetIconInfo(cursorHandle, out var iconInfo))
+        {
+            return;
+        }
+        try
+        {
+            hotspotX = (int)iconInfo.XHotspot;
+            hotspotY = (int)iconInfo.YHotspot;
+            var bitmapHandle = iconInfo.ColorBitmap != 0 ? iconInfo.ColorBitmap : iconInfo.MaskBitmap;
+            if (bitmapHandle != 0
+                && NativeMethods.GetBitmapObject(
+                    bitmapHandle,
+                    Marshal.SizeOf<NativeMethods.NativeBitmap>(),
+                    out var bitmap) > 0
+                && bitmap.BmWidth > 0
+                && bitmap.BmHeight > 0)
+            {
+                width = bitmap.BmWidth;
+                // Monochrome cursor masks stack the AND and XOR planes vertically.
+                height = iconInfo.ColorBitmap == 0
+                    ? Math.Max(1, bitmap.BmHeight / 2)
+                    : bitmap.BmHeight;
+            }
+        }
+        finally
+        {
+            if (iconInfo.MaskBitmap != 0)
+            {
+                NativeMethods.DeleteObject(iconInfo.MaskBitmap);
+            }
+            if (iconInfo.ColorBitmap != 0)
+            {
+                NativeMethods.DeleteObject(iconInfo.ColorBitmap);
+            }
+        }
+    }
+
+    private static bool HasNonZeroAlpha(ReadOnlySpan<byte> bgra)
+    {
+        for (var i = 3; i < bgra.Length; i += 4)
+        {
+            if (bgra[i] != 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    internal static (byte[] Pixels, bool[]? InvertMask, bool HasVisiblePixels) DecodeMaskRenderedCursor(
+        ReadOnlySpan<byte> onBlack,
+        ReadOnlySpan<byte> onWhite)
+    {
+        var pixelCount = onBlack.Length / 4;
+        var pixels = new byte[onBlack.Length];
+        bool[]? invertMask = null;
+        var hasVisible = false;
+
+        for (var index = 0; index < pixelCount; index++)
+        {
+            var offset = index * 4;
+            var bB = onBlack[offset];
+            var gB = onBlack[offset + 1];
+            var rB = onBlack[offset + 2];
+            var bW = onWhite[offset];
+            var gW = onWhite[offset + 1];
+            var rW = onWhite[offset + 2];
+
+            // Unchanged over both black and white -> AND=1, XOR=0 (transparent).
+            if (bB == 0 && gB == 0 && rB == 0 && bW == 255 && gW == 255 && rW == 255)
+            {
+                continue;
+            }
+
+            // Flipped over both black and white -> AND=1, XOR=1 (screen invert).
+            if (bB == 255 && gB == 255 && rB == 255 && bW == 0 && gW == 0 && rW == 0)
+            {
+                invertMask ??= new bool[pixelCount];
+                invertMask[index] = true;
+                hasVisible = true;
+                continue;
+            }
+
+            pixels[offset] = bB;
+            pixels[offset + 1] = gB;
+            pixels[offset + 2] = rB;
+            pixels[offset + 3] = 255;
+            hasVisible = true;
+        }
+
+        return (pixels, invertMask, hasVisible);
     }
 
     private static byte RgbToY(byte r, byte g, byte b) =>

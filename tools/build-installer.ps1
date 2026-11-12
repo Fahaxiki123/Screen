@@ -1,17 +1,29 @@
-#requires -Version 7.0
+﻿#requires -Version 7.0
 [CmdletBinding()]
 param(
-    [string]$CompilerPath
+    [string]$CompilerPath,
+    # Folder that holds 正式版 and receives 安装包. Defaults to the parent of a
+    # source folder named 开发工程; must match rebuild-and-restart.ps1 -ProductRoot.
+    [string]$ProductRoot
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
-if ([IO.Path]::GetFileName($repositoryRoot) -ne '开发工程') {
-    throw 'Run this script from the 开发工程\tools folder in the arranged Screen directory.'
+if ($ProductRoot) {
+    $productRoot = [IO.Path]::GetFullPath($ProductRoot).TrimEnd('\')
+    if ([string]::Equals($productRoot, $repositoryRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $productRoot.StartsWith($repositoryRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'ProductRoot must be outside the source folder.'
+    }
 }
-$productRoot = [IO.Path]::GetDirectoryName($repositoryRoot)
+elseif ([IO.Path]::GetFileName($repositoryRoot) -ne '开发工程') {
+    throw 'Run this script from the 开发工程\tools folder in the arranged Screen directory, or pass -ProductRoot <folder holding 正式版>.'
+}
+else {
+    $productRoot = [IO.Path]::GetDirectoryName($repositoryRoot)
+}
 $publishDirectory = Join-Path $productRoot '正式版'
 $installerSources = Join-Path $PSScriptRoot 'installer'
 $runtimeDirectory = Join-Path $installerSources 'runtime\win-x64'

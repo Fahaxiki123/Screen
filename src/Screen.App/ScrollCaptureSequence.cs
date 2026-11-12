@@ -52,19 +52,28 @@ internal sealed class ScrollCaptureSequence
         token.ThrowIfCancellationRequested();
         var crop = await _capture(token);
         token.ThrowIfCancellationRequested();
-        // Stillness belongs to consecutive screen observations, not to the
-        // last viewport admitted by the stitcher. A settled hover/repaint can
-        // remain different from that viewport indefinitely.
-        _stableObservations = _lastObserved is not null && AreNearlyEqual(_lastObserved, crop)
-            ? Math.Min(2, _stableObservations + 1)
-            : 0;
+        // Full-viewport comparisons and seam matching run off the UI thread;
+        // CaptureAsync keeps a single capture in flight, so the stitcher
+        // session still has exactly one writer.
+        var lastObserved = _lastObserved;
+        var (stable, unchanged, failure) = await Task.Run(() =>
+        {
+            // Stillness belongs to consecutive screen observations, not to the
+            // last viewport admitted by the stitcher. A settled hover/repaint
+            // can remain different from that viewport indefinitely.
+            var stableNow = lastObserved is not null && AreNearlyEqual(lastObserved, crop);
+            if (_stitch.LastFrame is { } previous && AreNearlyEqual(previous, crop))
+            {
+                return (stableNow, true, (string?)null);
+            }
+            return (stableNow, false, _stitch.TryAppend(crop, token));
+        }, token);
+        _stableObservations = stable ? Math.Min(2, _stableObservations + 1) : 0;
         _lastObserved = crop;
-        if (_stitch.LastFrame is { } previous && AreNearlyEqual(previous, crop))
+        if (unchanged)
         {
             return new ScrollFrameCapture(ScrollFrameOutcome.Unchanged);
         }
-
-        var failure = await Task.Run(() => _stitch.TryAppend(crop, token), token);
         return failure is null
             ? new ScrollFrameCapture(ScrollFrameOutcome.Added)
             : new ScrollFrameCapture(ScrollFrameOutcome.Rejected, failure);

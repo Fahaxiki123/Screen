@@ -13,7 +13,7 @@ public static class TranslationEndpointRules
     /// that key on the wire unencrypted.
     /// </summary>
     public static string? ValidateBaseAddress(string? baseAddress) =>
-        Uri.TryCreate(baseAddress, UriKind.Absolute, out var uri)
+        Uri.TryCreate(baseAddress?.Trim(), UriKind.Absolute, out var uri)
         && uri.Scheme == Uri.UriSchemeHttps
             ? null
             : "AI 基础地址必须是有效的 HTTPS 地址（HTTP 会以明文发送 API 密钥）。";
