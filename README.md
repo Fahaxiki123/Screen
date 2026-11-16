@@ -2,15 +2,15 @@
 
 个人使用的 Windows 截图、录屏、OCR 与翻译工具，使用 .NET 10 / WPF。
 
-当前源码版本为 **1.0.14**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
+当前源码版本为 **1.0.15**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
 
 ## 下载与本次更新
 
-[下载 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.14/Screen-1.0.14-win-x64-Setup.exe) · [版本说明与 SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.14)
+[下载 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.15/Screen-1.0.15-win-x64-Setup.exe) · [版本说明与 SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.15)
 
 安装器允许在 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64 上安装，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。Windows 10 实机安装与运行待验收。更新前请完成截图或录屏并退出 Screen。
 
-1.0.14 改善启动、托盘和设置保存的稳定性。本次输入的 AI Key 在修改地址后会保留为草稿，确认绑定后才用于新地址。长截图输出失败后可在控制条按 Enter 重试、按 Esc 取消。截图标注支持修改选中对象的样式和删除，原位译图可与普通标注一同导出。新版还改善了长图拼接、OCR 合并和流式翻译显示。
+1.0.15 修复贴图周围的粗边和截图带入系统光标的问题。贴图内容按原图尺寸铺到边缘，保留悬停时的细描边。DXGI 帧可能已经合成系统光标时，截图改用 GDI 取图。
 
 ## 已实现的功能
 

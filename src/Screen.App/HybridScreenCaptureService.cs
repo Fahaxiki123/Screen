@@ -52,10 +52,11 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
         try
         {
             var frame = await _dxgi.CaptureAtAsync(screenPoint, cancellationToken).ConfigureAwait(false);
-            if (frame.ColorSpace != CaptureColorSpace.Srgb)
+            if (frame.MayContainSystemCursor || frame.ColorSpace != CaptureColorSpace.Srgb)
             {
                 // Desktop Duplication's default BGRA8 surface cannot retain HDR values.
-                // GDI supplies the compositor's SDR view and avoids the common washed-out result.
+                // It can also supply a surface that already includes the system cursor.
+                // The GDI copy supplies SDR desktop pixels without drawing the pointer.
                 return await _gdi.CaptureAtAsync(screenPoint, cancellationToken).ConfigureAwait(false);
             }
 
@@ -66,6 +67,7 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
                 await Task.Delay(45, cancellationToken).ConfigureAwait(false);
                 var retry = await _dxgi.CaptureAtAsync(screenPoint, cancellationToken).ConfigureAwait(false);
                 if (retry.ColorSpace == CaptureColorSpace.Srgb
+                    && !retry.MayContainSystemCursor
                     && !CaptureFrameQuality.IsSuspiciouslyBlack(retry))
                 {
                     return retry;

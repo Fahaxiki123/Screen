@@ -213,6 +213,22 @@ public sealed class OcrAndExtractionRegressionTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task HybridScreenshotUsesGdiWhenDxgiMayContainTheCursorAsync(bool mayContainCursor)
+    {
+        var primary = new StubScreenCaptureService(mayContainCursor);
+        var fallback = new StubScreenCaptureService();
+        using var hybrid = new HybridScreenCaptureService(primary, fallback, () => { }, Timeout.InfiniteTimeSpan);
+
+        var frame = await hybrid.CaptureAtAsync(new PixelPoint(10, 10));
+
+        Assert.AreEqual(1, primary.Calls);
+        Assert.AreEqual(mayContainCursor ? 1 : 0, fallback.Calls);
+        Assert.IsFalse(frame.MayContainSystemCursor);
+    }
+
+    [TestMethod]
     public async Task HybridScreenCaptureServiceReleasesPrimarySessionAfterIdleTimeoutAsync()
     {
         var resets = 0;
@@ -240,7 +256,7 @@ public sealed class OcrAndExtractionRegressionTests
         Assert.AreEqual(2, primary.Calls);
     }
 
-    private sealed class StubScreenCaptureService : IScreenCaptureService
+    private sealed class StubScreenCaptureService(bool mayContainCursor = false) : IScreenCaptureService
     {
         public int Calls { get; private set; }
 
@@ -258,7 +274,10 @@ public sealed class OcrAndExtractionRegressionTests
                 96,
                 new PixelRect(0, 0, 32, 32),
                 CaptureColorSpace.Srgb,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow)
+            {
+                MayContainSystemCursor = mayContainCursor
+            });
         }
 
         public void Dispose()

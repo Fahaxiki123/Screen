@@ -52,9 +52,7 @@ internal sealed class PinWindowManager : IPinWindowManager
 
 internal sealed class PinWindow : Window
 {
-    private const double OuterMarginDip = 2;
-    private const double ContentPaddingDip = 9;
-    private const double TotalInsetDip = OuterMarginDip + ContentPaddingDip;
+    private const int MinimumZoomedLongSide = 40;
     private readonly PixelRect _sourceBounds;
     private readonly Rectangle _outline;
     private readonly Button _closeButton;
@@ -65,7 +63,6 @@ internal sealed class PinWindow : Window
     private bool _clickThrough;
     private bool _outlineExplicit;
     private double _zoom = 1;
-    private double _dpi = 96;
 
     public PinWindow(PixelBuffer buffer, PixelRect sourceBounds)
     {
@@ -116,18 +113,8 @@ internal sealed class PinWindow : Window
         _closeButton.SetResourceReference(StyleProperty, "PinCloseButtonStyle");
         _closeButton.Click += (_, _) => Close();
 
-        var imageFrame = new Border
-        {
-            Margin = new Thickness(OuterMarginDip),
-            Padding = new Thickness(ContentPaddingDip),
-            Background = SampleEdgeBrush(buffer),
-            CornerRadius = new CornerRadius(11),
-            ClipToBounds = true,
-            Child = image
-        };
         _outline = new Rectangle
         {
-            Stroke = (Brush)Application.Current.FindResource("Brush.Accent"),
             StrokeThickness = 1.5,
             RadiusX = 12,
             RadiusY = 12,
@@ -136,12 +123,13 @@ internal sealed class PinWindow : Window
             IsHitTestVisible = false,
             Opacity = 0
         };
+        _outline.SetResourceReference(Shape.StrokeProperty, "Brush.Accent");
         var root = new Grid
         {
             Background = Brushes.Transparent,
             ContextMenu = BuildContextMenu(buffer)
         };
-        root.Children.Add(imageFrame);
+        root.Children.Add(image);
         root.Children.Add(_outline);
         root.Children.Add(_closeButton);
         Content = root;
@@ -182,19 +170,18 @@ internal sealed class PinWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
-        _dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
+        var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
             _sourceBounds.X + _sourceBounds.Width / 2,
             _sourceBounds.Y + _sourceBounds.Height / 2));
-        var inset = (int)Math.Ceiling(TotalInsetDip * _dpi / 96.0);
-        Width = _sourceBounds.Width * 96.0 / _dpi + TotalInsetDip * 2;
-        Height = _sourceBounds.Height * 96.0 / _dpi + TotalInsetDip * 2;
+        Width = _sourceBounds.Width * 96.0 / dpi;
+        Height = _sourceBounds.Height * 96.0 / dpi;
         NativeMethods.SetWindowPos(
             handle,
             new nint(-1),
-            _sourceBounds.X - inset,
-            _sourceBounds.Y - inset,
-            _sourceBounds.Width + inset * 2,
-            _sourceBounds.Height + inset * 2,
+            _sourceBounds.X,
+            _sourceBounds.Y,
+            _sourceBounds.Width,
+            _sourceBounds.Height,
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
     }
 
@@ -325,62 +312,16 @@ internal sealed class PinWindow : Window
         {
             return;
         }
+        var scale = Math.Max(_zoom, MinimumZoomedLongSide / (double)Math.Max(_sourceBounds.Width, _sourceBounds.Height));
         NativeMethods.SetWindowPos(
             handle,
             new nint(-1),
             rect.Left,
             rect.Top,
-            Math.Max(40, (int)Math.Round(_sourceBounds.Width * _zoom))
-            + (int)Math.Ceiling(TotalInsetDip * 2 * _dpi / 96.0),
-            Math.Max(40, (int)Math.Round(_sourceBounds.Height * _zoom))
-            + (int)Math.Ceiling(TotalInsetDip * 2 * _dpi / 96.0),
+            Math.Max(1, (int)Math.Round(_sourceBounds.Width * scale)),
+            Math.Max(1, (int)Math.Round(_sourceBounds.Height * scale)),
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
         e.Handled = true;
-    }
-
-    private static Brush SampleEdgeBrush(PixelBuffer buffer)
-    {
-        var red = new int[256];
-        var green = new int[256];
-        var blue = new int[256];
-        var samples = 0;
-        var stepX = Math.Max(1, buffer.Width / 512);
-        var stepY = Math.Max(1, buffer.Height / 512);
-        void Add(int x, int y)
-        {
-            var offset = y * buffer.Stride + x * 4;
-            blue[buffer.Pixels[offset]]++;
-            green[buffer.Pixels[offset + 1]]++;
-            red[buffer.Pixels[offset + 2]]++;
-            samples++;
-        }
-        for (var x = 0; x < buffer.Width; x += stepX)
-        {
-            Add(x, 0);
-            if (buffer.Height > 1)
-                Add(x, buffer.Height - 1);
-        }
-        for (var y = stepY; y < buffer.Height - 1; y += stepY)
-        {
-            Add(0, y);
-            if (buffer.Width > 1)
-                Add(buffer.Width - 1, y);
-        }
-        byte Median(int[] histogram)
-        {
-            var target = Math.Max(1, (samples + 1) / 2);
-            var count = 0;
-            for (var value = 0; value < histogram.Length; value++)
-            {
-                count += histogram[value];
-                if (count >= target)
-                {
-                    return (byte)value;
-                }
-            }
-            return 0;
-        }
-        return new SolidColorBrush(Color.FromRgb(Median(red), Median(green), Median(blue)));
     }
 
     private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject

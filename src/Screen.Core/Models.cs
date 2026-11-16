@@ -46,6 +46,8 @@ public sealed record CaptureFrame(
     CaptureColorSpace ColorSpace,
     DateTimeOffset CapturedAt)
 {
+    public bool MayContainSystemCursor { get; init; }
+
     public PixelBuffer ToPixelBuffer() => new(Pixels, Width, Height, Stride);
 
     public PixelBuffer Crop(PixelRect screenRegion)

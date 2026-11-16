@@ -136,7 +136,8 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
         private readonly double _dpiY;
         private readonly CaptureColorSpace _colorSpace;
         private ID3D11Texture2D? _staging;
-        private PixelBuffer? _lastFrame;
+        private CaptureFrame? _lastFrame;
+        private bool _reportsSeparateCursor;
 
         public CaptureSession(IDXGIAdapter1 adapter, IDXGIOutput output, PixelRect bounds, nint monitor)
         {
@@ -210,18 +211,25 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
         public CaptureFrame Capture(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var acquire = _duplication.AcquireNextFrame(120, out _, out var desktopResource);
+            var acquire = _duplication.AcquireNextFrame(120, out var frameInfo, out var desktopResource);
             if (acquire.Failure)
             {
                 if (acquire == Vortice.DXGI.ResultCode.WaitTimeout && _lastFrame is not null)
                 {
-                    return MakeFrame(_lastFrame);
+                    return _lastFrame with { CapturedAt = DateTimeOffset.UtcNow };
                 }
                 acquire.CheckError();
             }
 
             try
             {
+                // DXGI only supplies pointer position/visibility when the
+                // mouse has been updated. A visible separate pointer is
+                // omitted from the surface; other surfaces may include it.
+                if (frameInfo.LastMouseUpdateTime != 0)
+                {
+                    _reportsSeparateCursor = frameInfo.PointerPosition.Visible;
+                }
                 using (desktopResource)
                 using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                 {
@@ -249,8 +257,12 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
                         {
                             Marshal.Copy(mapped.DataPointer + y * checked((int)mapped.RowPitch), pixels, y * stride, stride);
                         }
-                        _lastFrame = new PixelBuffer(pixels, width, height, stride);
-                        return MakeFrame(_lastFrame);
+                        _lastFrame = new CaptureFrame(pixels, width, height, stride, _dpiX, _dpiY,
+                            Bounds, _colorSpace, DateTimeOffset.UtcNow)
+                        {
+                            MayContainSystemCursor = !_reportsSeparateCursor
+                        };
+                        return _lastFrame;
                     }
                     finally
                     {
@@ -288,17 +300,6 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
                 0,
                 ResourceOptionFlags.None));
         }
-
-        private CaptureFrame MakeFrame(PixelBuffer pixels) => new(
-            pixels.Pixels,
-            pixels.Width,
-            pixels.Height,
-            pixels.Stride,
-            _dpiX,
-            _dpiY,
-            Bounds,
-            _colorSpace,
-            DateTimeOffset.UtcNow);
 
         public void Dispose()
         {

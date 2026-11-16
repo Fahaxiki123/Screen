@@ -19,6 +19,37 @@ public sealed class CaptureBoundaryRegressionTests
     private static readonly PixelRect Region = new(30, 25, 80, 60);
 
     [TestMethod]
+    public void PinRendersSourcePixelsToEveryEdgeWhenNotHovered() => OnSta(() =>
+    {
+        const int width = 48;
+        const int height = 32;
+        const int stride = width * 4;
+        var pixels = new byte[height * stride];
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var offset = y * stride + x * 4;
+                pixels[offset] = (byte)(x * 5);
+                pixels[offset + 1] = (byte)(y * 7);
+                pixels[offset + 2] = 200;
+                pixels[offset + 3] = 255;
+            }
+        }
+
+        var pin = new PinWindow(new PixelBuffer(pixels, width, height, stride), new PixelRect(0, 0, width, height));
+        var content = (FrameworkElement)pin.Content;
+        content.Measure(new Size(width, height));
+        content.Arrange(new Rect(0, 0, width, height));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(content);
+        var actual = new byte[pixels.Length];
+        bitmap.CopyPixels(actual, stride, 0);
+
+        CollectionAssert.AreEqual(pixels, actual);
+    });
+
+    [TestMethod]
     public void SelectionDragIncludesTheLastRowAndColumnInEitherDirection()
     {
         var first = new PixelPoint(0, 0);
