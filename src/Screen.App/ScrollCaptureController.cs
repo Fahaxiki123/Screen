@@ -18,10 +18,12 @@ internal enum ScrollCaptureFinishAction
 
 internal sealed class ScrollCaptureController : IDisposable
 {
-    private readonly ScrollCaptureSequence _sequence;
     private readonly SelectionRegion _selection;
     private readonly JsonSettingsStore _settings;
+    private readonly Func<ScrollCaptureFinishAction, PixelBuffer, (ScrollCaptureFinishAction Action, string? Warning)> _writeOutput;
     private readonly ScrollCaptureBottomDetector _bottomDetector = new();
+    private ScrollCaptureSequence? _sequence;
+    private (ScrollFrameCapture Tail, StitchResult Result)? _pendingOutput;
     private ScrollCaptureControlWindow? _control;
     private RegionBorderWindow? _border;
     private ScrollCapturePreviewWindow? _preview;
@@ -40,10 +42,7 @@ internal sealed class ScrollCaptureController : IDisposable
         IScreenCaptureService capture,
         SelectionRegion selection,
         JsonSettingsStore settings)
-    {
-        _selection = selection;
-        _settings = settings;
-        _sequence = new ScrollCaptureSequence(async token =>
+        : this(selection, settings, new ScrollCaptureSequence(async token =>
         {
             var center = new PixelPoint(
                 selection.Bounds.X + selection.Bounds.Width / 2.0,
@@ -51,7 +50,20 @@ internal sealed class ScrollCaptureController : IDisposable
             // Crop on the capture continuation's pool thread, not the UI thread.
             var frame = await capture.CaptureAtAsync(center, token).ConfigureAwait(false);
             return frame.Crop(selection.Bounds);
-        });
+        }))
+    {
+    }
+
+    internal ScrollCaptureController(
+        SelectionRegion selection,
+        JsonSettingsStore settings,
+        ScrollCaptureSequence sequence,
+        Func<ScrollCaptureFinishAction, PixelBuffer, (ScrollCaptureFinishAction Action, string? Warning)>? writeOutput = null)
+    {
+        _selection = selection;
+        _settings = settings;
+        _sequence = sequence;
+        _writeOutput = writeOutput ?? WriteOutput;
     }
 
     public event EventHandler? Completed;
@@ -59,6 +71,10 @@ internal sealed class ScrollCaptureController : IDisposable
 
     public async Task StartAsync()
     {
+        if (_sequence is not { } sequence)
+        {
+            return;
+        }
         try
         {
             var center = new NativeMethods.NativePoint(
@@ -79,6 +95,7 @@ internal sealed class ScrollCaptureController : IDisposable
             _control.EditRequested += async (_, _) => await FinishAsync(ScrollCaptureFinishAction.Edit);
             _control.SaveRequested += async (_, _) => await FinishAsync(ScrollCaptureFinishAction.Save);
             _control.CancelRequested += (_, _) => Cancel();
+            _control.Closed += (_, _) => Cancel();
             _control.Show();
             _keyboard = new LowLevelKeyboardHook(keyboardTarget);
             _keyboard.EnterPressed += (_, _) => Application.Current.Dispatcher.BeginInvoke(
@@ -92,9 +109,9 @@ internal sealed class ScrollCaptureController : IDisposable
 
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
             _timer.Tick += OnTimerTick;
-            _captureOperation = CaptureChangedFrameAsync();
+            _captureOperation = CaptureChangedFrameAsync(sequence);
             await _captureOperation;
-            if (_ended || _finishing)
+            if (_ended || _finishing || _sequence is null)
             {
                 return;
             }
@@ -107,7 +124,6 @@ internal sealed class ScrollCaptureController : IDisposable
         catch (Exception exception)
         {
             _ended = true;
-            _sequence.Cancel();
             Cleanup();
             MessageBox.Show($"无法开始长截图：{exception.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
             Cancelled?.Invoke(this, EventArgs.Empty);
@@ -116,7 +132,7 @@ internal sealed class ScrollCaptureController : IDisposable
 
     private void SetAutomatic(bool enabled)
     {
-        if (_ended || _finishing)
+        if (_ended || _finishing || _sequence is null)
         {
             return;
         }
@@ -138,7 +154,7 @@ internal sealed class ScrollCaptureController : IDisposable
 
     private async void OnTimerTick(object? sender, EventArgs e)
     {
-        if (_busy || _ended || _finishing)
+        if (_busy || _ended || _finishing || _sequence is not { } sequence)
         {
             return;
         }
@@ -147,10 +163,10 @@ internal sealed class ScrollCaptureController : IDisposable
         {
             // Cover the automatic wheel delay as well as capture with one
             // operation, so completion can drain it before sampling the tail.
-            var operation = CaptureTickAsync();
+            var operation = CaptureTickAsync(sequence);
             _captureOperation = operation;
             var outcome = await operation;
-            if (!_ended && !_finishing && _mode == ScrollCaptureMode.Automatic
+            if (!_ended && !_finishing && _sequence is not null && _mode == ScrollCaptureMode.Automatic
                 && _bottomDetector.Observe(outcome.Outcome))
             {
                 await FinishAsync(ScrollCaptureFinishAction.Copy);
@@ -172,14 +188,14 @@ internal sealed class ScrollCaptureController : IDisposable
         }
     }
 
-    private async Task<ScrollFrameCapture> CaptureTickAsync()
+    private async Task<ScrollFrameCapture> CaptureTickAsync(ScrollCaptureSequence sequence)
     {
         if (_mode == ScrollCaptureMode.Automatic)
         {
             SendScroll();
-            await Task.Delay(180, _sequence.CancellationToken);
+            await Task.Delay(180, sequence.CancellationToken);
         }
-        return await CaptureChangedFrameAsync();
+        return await CaptureChangedFrameAsync(sequence);
     }
 
     private void SendScroll()
@@ -203,9 +219,9 @@ internal sealed class ScrollCaptureController : IDisposable
         }
     }
 
-    private async Task<ScrollFrameCapture> CaptureChangedFrameAsync()
+    private async Task<ScrollFrameCapture> CaptureChangedFrameAsync(ScrollCaptureSequence sequence)
     {
-        var outcome = await _sequence.CaptureAsync();
+        var outcome = await sequence.CaptureAsync();
         if (_ended)
         {
             return outcome;
@@ -213,7 +229,7 @@ internal sealed class ScrollCaptureController : IDisposable
         if (outcome.Outcome == ScrollFrameOutcome.Added)
         {
             _captureStatus = null;
-            RequestPreviewUpdate();
+            RequestPreviewUpdate(sequence);
         }
         else if (outcome.Outcome == ScrollFrameOutcome.Rejected)
         {
@@ -234,26 +250,26 @@ internal sealed class ScrollCaptureController : IDisposable
                 ? "向上滚动的画面已忽略 · 请回到上次位置后继续向下"
                 : "本屏未能可靠对齐 · 请稍向上回到上次位置，再继续向下";
 
-    private void RequestPreviewUpdate()
+    private void RequestPreviewUpdate(ScrollCaptureSequence sequence)
     {
-        if (_ended || _finishing || _sequence.FrameCount == 0
+        if (_ended || _finishing || sequence.FrameCount == 0
             || _previewOperation is { IsCompleted: false })
         {
             return;
         }
-        _previewOperation = UpdatePreviewAsync();
+        _previewOperation = UpdatePreviewAsync(sequence);
     }
 
-    private async Task UpdatePreviewAsync()
+    private async Task UpdatePreviewAsync(ScrollCaptureSequence sequence)
     {
         try
         {
             // New frames coalesce into the next preview update while capture
             // continues matching each accepted viewport.
-            while (!_ended && !_finishing && _previewFrameCount != _sequence.FrameCount)
+            while (!_ended && !_finishing && _sequence is not null && _previewFrameCount != sequence.FrameCount)
             {
-                var preview = await _sequence.UpdatePreviewAsync();
-                if (_ended || _finishing)
+                var preview = await sequence.UpdatePreviewAsync();
+                if (_ended || _finishing || _sequence is null)
                 {
                     return;
                 }
@@ -264,10 +280,10 @@ internal sealed class ScrollCaptureController : IDisposable
                     _preview?.SetStatus(_captureStatus);
                 }
                 _control?.BringToFrontNoActivate();
-                await Task.Delay(120, _sequence.CancellationToken);
+                await Task.Delay(120, sequence.CancellationToken);
             }
         }
-        catch (OperationCanceledException) when (_ended)
+        catch (OperationCanceledException) when (_sequence is null)
         {
         }
         catch (Exception exception)
@@ -280,78 +296,86 @@ internal sealed class ScrollCaptureController : IDisposable
         }
     }
 
-    private async Task FinishAsync(ScrollCaptureFinishAction action)
+    internal async Task FinishAsync(ScrollCaptureFinishAction action)
     {
         if (_ended || _finishing)
         {
             return;
         }
         _finishing = true;
-        _timer?.Stop();
-        _preview?.SetStatus("正在采集最后一屏…");
+        string? warning;
         try
         {
-            if (_captureOperation is not null)
+            if (_sequence is { } sequence)
             {
-                await _captureOperation;
+                _timer?.Stop();
+                _preview?.SetStatus("正在采集最后一屏…");
+                if (_captureOperation is not null)
+                {
+                    await _captureOperation;
+                }
+                var tail = await sequence.FlushAsync();
+                if (_ended)
+                {
+                    return;
+                }
+                // Export only validated content and disclose an omitted tail.
+                _preview?.SetStatus("正在拼接原尺寸长截图…");
+                var result = await sequence.ComposeAsync();
+                if (_ended)
+                {
+                    return;
+                }
+                _pendingOutput = (tail, result);
+                StopAcquisition();
+                _control?.ShowOutputActions();
+                _preview?.SetStatus("已拼接 · 可复制、保存或编辑");
             }
-            var tail = await _sequence.FlushAsync();
+
+            if (_pendingOutput is not { } output)
+            {
+                return;
+            }
+            var (deliveredAction, outputWarning) = _writeOutput(action, output.Result.Image);
             if (_ended)
             {
                 return;
             }
-            // Finish is an explicit request to stop. A changing avatar,
-            // hover style, or unjoinable tail must not trap the user here.
-            // Export only validated content and disclose an omitted tail.
-            _preview?.SetStatus("正在拼接原尺寸长截图…");
-            var result = await _sequence.ComposeAsync();
-            if (_ended)
+            warning = CompletionWarning(output.Tail, output.Result, deliveredAction);
+            if (outputWarning is not null)
             {
-                return;
+                warning = warning is null ? outputWarning : $"{warning} · {outputWarning}";
             }
-            var warning = CompletionWarning(tail, result, action);
             _ended = true;
-            _sequence.Cancel();
+            _pendingOutput = null;
             Cleanup();
-            switch (action)
-            {
-                case ScrollCaptureFinishAction.Edit:
-                    new LongScreenshotEditorWindow(result.Image).Show();
-                    break;
-                case ScrollCaptureFinishAction.Save:
-                    SaveResultAs(result.Image);
-                    break;
-                default:
-                    BitmapUtilities.CopyToClipboard(result.Image);
-                    break;
-            }
-            Completed?.Invoke(this, EventArgs.Empty);
-            if (warning is not null)
-            {
-                HintToastWindow.Show(warning);
-            }
         }
         catch (OperationCanceledException) when (_ended)
         {
+            return;
         }
         catch (Exception exception)
         {
             SimpleLogger.LogError("Scroll capture completion failed", exception);
-            if (_ended)
+            if (_pendingOutput is not null)
             {
-                Cleanup();
-                MessageBox.Show($"长截图输出失败：{exception.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
-                Cancelled?.Invoke(this, EventArgs.Empty);
+                _preview?.SetStatus("输出失败 · 已保留拼接结果");
+                if (_control is { } owner)
+                {
+                    MessageBox.Show(owner, $"长截图输出失败：{exception.Message}\n已保留拼接结果，可重试复制、保存或编辑。",
+                        "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
-            else
+            else if (!_ended)
             {
                 _preview?.SetStatus("本次完成失败，已保留采集画面 · 请重试");
             }
+            return;
         }
         finally
         {
             _finishing = false;
-            if (!_ended)
+            if (!_ended && _sequence is not null)
             {
                 _mode = ScrollCaptureMode.Manual;
                 _bottomDetector.Reset();
@@ -362,6 +386,11 @@ internal sealed class ScrollCaptureController : IDisposable
                 }
                 _timer?.Start();
             }
+        }
+        Completed?.Invoke(this, EventArgs.Empty);
+        if (!string.IsNullOrEmpty(warning))
+        {
+            HintToastWindow.Show(warning);
         }
     }
 
@@ -378,32 +407,67 @@ internal sealed class ScrollCaptureController : IDisposable
         return action == ScrollCaptureFinishAction.Copy ? $"已复制 · {detail}" : detail;
     }
 
-    private void SaveResultAs(PixelBuffer image)
+    private (ScrollCaptureFinishAction Action, string? Warning) WriteOutput(ScrollCaptureFinishAction action, PixelBuffer image)
     {
-        var appSettings = _settings.Load();
+        switch (action)
+        {
+            case ScrollCaptureFinishAction.Edit:
+                new LongScreenshotEditorWindow(image).Show();
+                return (action, null);
+            case ScrollCaptureFinishAction.Save:
+                return SaveResultAs(image);
+            default:
+                BitmapUtilities.CopyToClipboard(image);
+                return (action, null);
+        }
+    }
+
+    private (ScrollCaptureFinishAction Action, string? Warning) SaveResultAs(PixelBuffer image)
+    {
+        string? saveDirectory = null;
+        try
+        {
+            saveDirectory = _settings.Load().SaveDirectory;
+        }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogError("Could not read the last screenshot directory", exception);
+        }
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
             Title = "保存长截图",
             Filter = "PNG 图片 (*.png)|*.png",
             DefaultExt = ".png",
             AddExtension = true,
-            InitialDirectory = Directory.Exists(appSettings.SaveDirectory)
-                ? appSettings.SaveDirectory
+            InitialDirectory = Directory.Exists(saveDirectory)
+                ? saveDirectory
                 : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
             FileName = $"Screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png"
         };
-        if (dialog.ShowDialog() != true)
+        var confirmed = _control is { } owner ? dialog.ShowDialog(owner) : dialog.ShowDialog();
+        if (confirmed != true)
         {
-            // The capture windows are already gone by now; without this the
-            // whole long screenshot would be silently lost on cancel.
+            // Keep the existing clipboard fallback when the user closes Save As.
             BitmapUtilities.CopyToClipboard(image);
-            return;
+            return (ScrollCaptureFinishAction.Copy, null);
         }
-        BitmapUtilities.SavePng(image, dialog.FileName);
-        _settings.Update(latest =>
+        return (ScrollCaptureFinishAction.Save, SavePngAndRememberDirectory(image, dialog.FileName));
+    }
+
+    internal string? SavePngAndRememberDirectory(PixelBuffer image, string path)
+    {
+        BitmapUtilities.SavePng(image, path);
+        try
         {
-            latest.SaveDirectory = Path.GetDirectoryName(dialog.FileName) ?? latest.SaveDirectory;
-        });
+            var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+            _settings.Update(latest => latest.SaveDirectory = directory ?? latest.SaveDirectory);
+            return null;
+        }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogError("Long screenshot saved but the last screenshot directory could not be updated", exception);
+            return "长截图已保存，无法记住保存目录";
+        }
     }
 
     private void Cancel()
@@ -413,7 +477,7 @@ internal sealed class ScrollCaptureController : IDisposable
             return;
         }
         _ended = true;
-        _sequence.Cancel();
+        _pendingOutput = null;
         Cleanup();
         Cancelled?.Invoke(this, EventArgs.Empty);
     }
@@ -427,6 +491,13 @@ internal sealed class ScrollCaptureController : IDisposable
 
     private void Cleanup()
     {
+        StopAcquisition();
+        CloseHelperWindow(ref _control);
+        CloseHelperWindow(ref _preview);
+    }
+
+    private void StopAcquisition()
+    {
         _timer?.Stop();
         _timer = null;
         // The low-level hook swallows Enter/Esc globally while installed, so it
@@ -439,9 +510,10 @@ internal sealed class ScrollCaptureController : IDisposable
         {
         }
         _keyboard = null;
-        CloseHelperWindow(ref _control);
         CloseHelperWindow(ref _border);
-        CloseHelperWindow(ref _preview);
+        var sequence = _sequence;
+        _sequence = null;
+        sequence?.Cancel();
     }
 
     private static void CloseHelperWindow<T>(ref T? window) where T : Window
@@ -779,6 +851,13 @@ internal sealed class ScrollCaptureControlWindow : Window
     {
         _enabled = enabled;
         ApplyAutomaticVisual();
+    }
+
+    public void ShowOutputActions()
+    {
+        SetAutomatic(false);
+        _autoLabel.Text = "已拼接";
+        _autoButton.IsEnabled = false;
     }
 
     public void BringToFrontNoActivate()

@@ -1,3 +1,5 @@
+using System.IO;
+using System.Windows.Media.Imaging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Screen.App;
 using Screen.Core;
@@ -130,6 +132,114 @@ public sealed class ScrollCaptureCompletionRegressionTests
 
         Assert.IsNull(ScrollCaptureController.CompletionWarning(
             new ScrollFrameCapture(ScrollFrameOutcome.Unchanged), result, ScrollCaptureFinishAction.Copy));
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task OutputFailureRetainsTheSameStitchedImageForRetry(bool firstAttemptSaves)
+    {
+        var firstAction = firstAttemptSaves ? ScrollCaptureFinishAction.Save : ScrollCaptureFinishAction.Copy;
+        var document = Document(128, 180);
+        var captures = 0;
+        var sequence = new ScrollCaptureSequence(_ =>
+        {
+            captures++;
+            return Task.FromResult(document);
+        }, (_, _) => Task.CompletedTask);
+        var attempts = new List<(ScrollCaptureFinishAction Action, PixelBuffer Image, bool AcquisitionStopped)>();
+        using var controller = new ScrollCaptureController(
+            new SelectionRegion(new PixelRect(0, 0, document.Width, document.Height), null),
+            new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json")), sequence,
+            (action, image) =>
+            {
+                attempts.Add((action, image, sequence.CancellationToken.IsCancellationRequested));
+                if (attempts.Count == 1)
+                {
+                    throw new IOException("Output unavailable");
+                }
+                return (action, null);
+            });
+        var completions = 0;
+        var cancellations = 0;
+        controller.Completed += (_, _) => completions++;
+        controller.Cancelled += (_, _) => cancellations++;
+
+        await controller.FinishAsync(firstAction);
+
+        Assert.AreEqual(0, completions);
+        Assert.AreEqual(0, cancellations);
+        var captureCountAfterComposition = captures;
+        var retryAction = firstAction == ScrollCaptureFinishAction.Copy
+            ? ScrollCaptureFinishAction.Save : ScrollCaptureFinishAction.Copy;
+        await controller.FinishAsync(retryAction);
+        await controller.FinishAsync(retryAction);
+
+        Assert.HasCount(2, attempts);
+        Assert.AreEqual(firstAction, attempts[0].Action);
+        Assert.AreEqual(retryAction, attempts[1].Action);
+        Assert.IsTrue(attempts.All(attempt => attempt.AcquisitionStopped));
+        Assert.AreSame(attempts[0].Image, attempts[1].Image);
+        CollectionAssert.AreEqual(document.Pixels, attempts[1].Image.Pixels);
+        Assert.AreEqual(captureCountAfterComposition, captures);
+        Assert.AreEqual(1, completions);
+        Assert.AreEqual(0, cancellations);
+    }
+
+    [STATestMethod]
+    public void PngEncodingFailurePreservesExistingDestinationAndSuccessfulRetryReplacesIt()
+    {
+        var directory = Directory.CreateTempSubdirectory("screen-png-");
+        var destination = Path.Combine(directory.FullName, "existing.png");
+        try
+        {
+            BitmapUtilities.SavePng(Document(16, 16), destination);
+            var existingBytes = File.ReadAllBytes(destination);
+            var invalid = new PixelBuffer([], 16, 16, 64);
+
+            Assert.Throws<ArgumentException>(() => BitmapUtilities.SavePng(invalid, destination));
+            CollectionAssert.AreEqual(existingBytes, File.ReadAllBytes(destination));
+            CollectionAssert.AreEqual(new[] { destination }, Directory.GetFiles(directory.FullName));
+
+            var replacement = Document(17, 19);
+            BitmapUtilities.SavePng(replacement, destination);
+            using var file = File.OpenRead(destination);
+            var actual = BitmapDecoder.Create(file, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad)
+                .Frames[0].ToPixelBuffer();
+            Assert.AreEqual(replacement.Width, actual.Width);
+            Assert.AreEqual(replacement.Height, actual.Height);
+            CollectionAssert.AreEqual(replacement.Pixels, actual.Pixels);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [STATestMethod]
+    public void SavingPngSucceedsEvenIfTheLastDirectoryCannotBeRemembered()
+    {
+        var directory = Directory.CreateTempSubdirectory("screen-long-output-");
+        try
+        {
+            var destination = Path.Combine(directory.FullName, "capture.png");
+            var blocker = Path.Combine(directory.FullName, "blocker");
+            File.WriteAllText(blocker, "Settings parent is a file.");
+            var document = Document(16, 16);
+            using var controller = new ScrollCaptureController(
+                new SelectionRegion(new PixelRect(0, 0, document.Width, document.Height), null),
+                new JsonSettingsStore(Path.Combine(blocker, "settings.json")),
+                new ScrollCaptureSequence(_ => Task.FromResult(document)));
+
+            var warning = controller.SavePngAndRememberDirectory(document, destination);
+
+            Assert.IsTrue(File.Exists(destination));
+            Assert.AreEqual("长截图已保存，无法记住保存目录", warning);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
     }
 
     private static PixelBuffer Document(int width, int height)

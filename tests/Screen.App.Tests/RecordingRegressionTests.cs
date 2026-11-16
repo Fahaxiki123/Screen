@@ -168,6 +168,69 @@ public sealed class RecordingRegressionTests
     [STATestMethod(UseSTASynchronizationContext = true)]
     [DataRow(false)]
     [DataRow(true)]
+    public async Task RepeatedStopWaitsForSameSaveResultAndReleasesCaptureOnce(bool commitFails)
+    {
+        var scratch = Directory.CreateDirectory(Path.Combine(_root, "session")).FullName;
+        var video = Path.Combine(scratch, "video.mp4");
+        var saveDirectory = commitFails ? Path.Combine(_root, "unavailable") : _root;
+        var destination = Path.Combine(saveDirectory, "recording.mp4");
+        var enteredFinalization = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFinalization = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var signal = new RecordingStopSignal();
+        var capture = new FakeRecordingCapture(() =>
+        {
+            enteredFinalization.SetResult();
+            releaseFinalization.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            File.WriteAllBytes(video, [1, 2, 3]);
+        });
+        using var controller = new RecordingController(capture, new PixelRect(0, 0, 64, 64),
+            destination, scratch, audio: null, border: null, signal);
+
+        var controlBarStop = controller.StopAsync();
+        Task<RecordingSaveResult> trayExitStop;
+        try
+        {
+            await enteredFinalization.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            trayExitStop = controller.StopAsync();
+
+            Assert.AreSame(controlBarStop, trayExitStop);
+            Assert.AreSame(controller.Completion, trayExitStop);
+            Assert.IsFalse(trayExitStop.IsCompleted);
+            Assert.IsFalse(File.Exists(destination));
+            Assert.IsTrue(signal.IsRequested);
+            Assert.AreEqual(0, capture.DisposeCalls);
+        }
+        finally
+        {
+            releaseFinalization.TrySetResult();
+        }
+
+        var result = await trayExitStop.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreSame(result, await controlBarStop);
+        Assert.AreSame(result, await controller.StopAsync());
+        controller.Dispose();
+        Assert.AreEqual(1, capture.FinalizeCalls);
+        Assert.AreEqual(1, capture.DisposeCalls);
+        Assert.AreEqual(!commitFails, result.Saved);
+
+        if (commitFails)
+        {
+            Assert.AreEqual(scratch, result.RecoveryDirectory);
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, File.ReadAllBytes(video));
+            Assert.IsFalse(File.Exists(destination));
+            StringAssert.Contains(AppHost.GetRecordingSaveNotice(result)!, scratch);
+        }
+        else
+        {
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, File.ReadAllBytes(destination));
+            Assert.IsFalse(Directory.Exists(scratch));
+            Assert.IsNull(AppHost.GetRecordingSaveNotice(result));
+        }
+    }
+
+    [STATestMethod(UseSTASynchronizationContext = true)]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task StopPublishesVideoAndKeepsOriginalAudioIfMuxFails(bool muxFails)
     {
         const int width = 64;
@@ -194,8 +257,7 @@ public sealed class RecordingRegressionTests
         using var controller = new RecordingController(capture, new PixelRect(0, 0, width, height),
             destination, scratch, audio, border: null, signal);
 
-        await controller.StopAsync().WaitAsync(TimeSpan.FromSeconds(15));
-        var result = await controller.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await controller.StopAsync().WaitAsync(TimeSpan.FromSeconds(15));
 
         Assert.IsTrue(result.Saved, result.Error);
         Assert.IsTrue(File.Exists(destination));
@@ -203,6 +265,9 @@ public sealed class RecordingRegressionTests
         {
             StringAssert.Contains(result.Warning ?? string.Empty, "invalid_test_audio_format");
             Assert.AreEqual(scratch, result.RecoveryDirectory);
+            var notice = AppHost.GetRecordingSaveNotice(result)!;
+            StringAssert.Contains(notice, "无声视频");
+            StringAssert.Contains(notice, scratch);
             CollectionAssert.AreEqual(videoBytes, File.ReadAllBytes(destination));
             CollectionAssert.AreEqual(videoBytes, File.ReadAllBytes(source));
             CollectionAssert.AreEqual(audioBytes, File.ReadAllBytes(audioPath));
@@ -630,7 +695,8 @@ public sealed class RecordingRegressionTests
         public double ElapsedSeconds => EncodedDurationSeconds;
         public double EncodedDurationSeconds { get; init; }
         public int FinalizeCalls { get; private set; }
-        public bool WasDisposed { get; private set; }
+        public bool WasDisposed => DisposeCalls != 0;
+        public int DisposeCalls { get; private set; }
         public void Pause() => IsPaused = true;
         public void Resume() => IsPaused = false;
         public void RequestStop() { }
@@ -639,7 +705,7 @@ public sealed class RecordingRegressionTests
             FinalizeCalls++;
             finalize();
         }
-        public void Dispose() => WasDisposed = true;
+        public void Dispose() => DisposeCalls++;
     }
 
     private sealed class FlushFailingStream : MemoryStream

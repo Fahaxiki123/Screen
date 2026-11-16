@@ -19,6 +19,76 @@ public sealed class CaptureBoundaryRegressionTests
     private static readonly PixelRect Region = new(30, 25, 80, 60);
 
     [TestMethod]
+    [DataRow(false, AnnotationVariants.MosaicPixelate)]
+    [DataRow(true, AnnotationVariants.MosaicBlur + 100)]
+    public void MosaicSuppressesWindowTextUntilUndone(bool useBrush, int variant) => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        var target = new WindowTarget(1, "Source", Region);
+        typeof(CaptureSurface).GetProperty(nameof(CaptureSurface.SelectedWindow))!.SetValue(surface, target);
+
+        var start = new PixelPoint(40, 35);
+        var end = new PixelPoint(90, 70);
+        surface.Tool = CaptureTool.Rectangle;
+        Invoke(surface, "AddAnnotation", start, end);
+        Assert.AreSame(target, surface.UnmaskedTextWindow);
+
+        surface.Tool = CaptureTool.Mosaic;
+        surface.MosaicMode = useBrush ? MosaicDrawMode.Brush : MosaicDrawMode.Rectangle;
+        surface.CurrentStyle = new AnnotationStyle(0xFFFF0000, 16, 16, variant);
+        WorkingPoints(surface).AddRange([start, end]);
+        Invoke(surface, "AddAnnotation", start, end);
+        Assert.AreSame(target, surface.SelectedWindow);
+        Assert.IsNull(surface.UnmaskedTextWindow, "The shared direct-text path must skip the target window.");
+
+        surface.Undo();
+        Assert.AreSame(target, surface.UnmaskedTextWindow);
+        surface.Redo();
+        Assert.IsNull(surface.UnmaskedTextWindow);
+    });
+
+    [TestMethod]
+    [DataRow(2)]
+    [DataRow(3)]
+    public void OriginalSizeMosaicScalesBlockWidthAndKeepsOddImageEdges(int factor) => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        DrawExportMosaic(surface, AnnotationVariants.MosaicPixelate);
+        var original = OriginalImage(factor, x => (byte)(x % 256));
+
+        var output = surface.RenderSelection(original, new PixelRect(0, 0, Width * factor, Height * factor), factor);
+
+        Assert.AreEqual(original.Width, output.Width);
+        Assert.AreEqual(original.Height, output.Height);
+        var left = 35 * factor;
+        var block = 14 * factor;
+        var rowOffset = 35 * factor * output.Stride;
+        var firstBlockAverage = (byte)(left + (block - 1) / 2);
+        Assert.AreEqual(firstBlockAverage, output.Pixels[rowOffset + left * 4]);
+        Assert.AreEqual(firstBlockAverage, output.Pixels[rowOffset + (left + block - 1) * 4]);
+        Assert.AreNotEqual(firstBlockAverage, output.Pixels[rowOffset + (left + block) * 4]);
+        Assert.AreEqual(original.Pixels[^4], output.Pixels[^4]);
+    });
+
+    [TestMethod]
+    [DataRow(2)]
+    [DataRow(3)]
+    public void OriginalSizeMosaicScalesBlurRadius(int factor) => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        DrawExportMosaic(surface, AnnotationVariants.MosaicBlur);
+        var pulse = 60 * factor;
+        var original = OriginalImage(factor, x => x == pulse ? byte.MaxValue : (byte)0);
+
+        var output = surface.RenderSelection(original, new PixelRect(0, 0, Width * factor, Height * factor), factor);
+
+        var radius = 7 * factor;
+        var rowOffset = 35 * factor * output.Stride;
+        Assert.AreEqual((byte)(255 / (radius * 2 + 1)), output.Pixels[rowOffset + (pulse - radius) * 4]);
+        Assert.AreEqual((byte)0, output.Pixels[rowOffset + (pulse - radius - 1) * 4]);
+    });
+
+    [TestMethod]
     public void MosaicKeepsNativeCursorWhenBrushCursorCannotBeDrawn() => OnSta(() =>
     {
         var surface = CreateSurface();
@@ -228,6 +298,32 @@ public sealed class CaptureBoundaryRegressionTests
         surface.Measure(new Size(Width, Height));
         surface.Arrange(new Rect(0, 0, Width, Height));
         return surface;
+    }
+
+    private static void DrawExportMosaic(CaptureSurface surface, int variant)
+    {
+        surface.Tool = CaptureTool.Mosaic;
+        surface.MosaicMode = MosaicDrawMode.Rectangle;
+        surface.CurrentStyle = new AnnotationStyle(0xFFFF0000, 16, 16, variant, 0.5);
+        Invoke(surface, "AddAnnotation", new PixelPoint(35, 30), new PixelPoint(95, 80));
+    }
+
+    private static PixelBuffer OriginalImage(int factor, Func<int, byte> blue)
+    {
+        var width = Width * factor - 1;
+        var height = Height * factor - 1;
+        var stride = width * 4;
+        var pixels = new byte[stride * height];
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var offset = y * stride + x * 4;
+                pixels[offset] = blue(x);
+                pixels[offset + 3] = 255;
+            }
+        }
+        return new PixelBuffer(pixels, width, height, stride);
     }
 
     private static byte[] Render(CaptureSurface surface)

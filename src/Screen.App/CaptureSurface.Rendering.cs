@@ -133,7 +133,8 @@ internal sealed partial class CaptureSurface
         PixelRect Bounds,
         int Variant,
         double Intensity,
-        double Thickness);
+        double Thickness,
+        double Scale);
 
     /// <summary>
     /// Returns the full-screen buffer with every committed mosaic applied.
@@ -168,7 +169,7 @@ internal sealed partial class CaptureSurface
         var region = DirtyMosaicRegion(mosaics, _appliedMosaicSnapshots).Intersect(fullBounds);
         _appliedMosaicSnapshots = mosaics
             .Select(item => new MosaicSnapshot(
-                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness))
+                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness, item.Style.MosaicScale))
             .ToList();
         _mosaicCompositeDirty = false;
         if (region.IsEmpty)
@@ -229,7 +230,7 @@ internal sealed partial class CaptureSurface
         foreach (var item in mosaics)
         {
             var current = new MosaicSnapshot(
-                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness);
+                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness, item.Style.MosaicScale);
             if (previousById.Remove(item.Id, out var old))
             {
                 if (old == current)
@@ -439,11 +440,13 @@ internal sealed partial class CaptureSurface
         var localItem = OffsetItem(item, -clipped.X, -clipped.Y);
         if (localItem.Style.Variant % 100 == AnnotationVariants.MosaicBlur)
         {
-            BoxBlur(effected, region, Math.Clamp((int)Math.Round(3 + localItem.Style.Intensity * 8), 3, 12));
+            var radius = Math.Clamp((int)Math.Round(3 + localItem.Style.Intensity * 8), 3, 12);
+            BoxBlur(effected, region, Math.Max(1, (int)Math.Round(radius * localItem.Style.MosaicScale)));
         }
         else
         {
-            Pixelate(effected, region, Math.Clamp((int)Math.Round(6 + localItem.Style.Intensity * 16), 6, 24));
+            var block = Math.Clamp((int)Math.Round(6 + localItem.Style.Intensity * 16), 6, 24);
+            Pixelate(effected, region, Math.Max(1, (int)Math.Round(block * localItem.Style.MosaicScale)));
         }
 
         var mask = BuildMosaicMask(localItem, region);

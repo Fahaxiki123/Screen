@@ -697,9 +697,19 @@ internal sealed class LongScreenshotEditorWindow : Window
 
     private void FinishAndCopy()
     {
-        var selectionOriginal = ScaleRect(_surface.Selection, _currentFactor);
-        BitmapUtilities.CopyToClipboard(
-            _surface.RenderSelection(_originalImage, selectionOriginal, _currentFactor));
+        try
+        {
+            var selectionOriginal = ScaleRect(_surface.Selection, _currentFactor);
+            BitmapUtilities.CopyToClipboard(
+                _surface.RenderSelection(_originalImage, selectionOriginal, _currentFactor));
+        }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogError("Long screenshot editor copy failed", exception);
+            MessageBox.Show(this, $"长截图复制失败，请重试。\n\n{exception.Message}",
+                "Screen", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         Close();
     }
 

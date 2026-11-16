@@ -102,7 +102,10 @@ public sealed record AnnotationStyle(
     double Thickness,
     double FontSize,
     int Variant = 0,
-    double Intensity = 1);
+    double Intensity = 1)
+{
+    public double MosaicScale { get; init; } = 1;
+}
 
 public sealed record AnnotationItem(
     Guid Id,
@@ -163,6 +166,8 @@ public sealed record TranslationProfile(
     string CredentialName,
     string TargetLanguage)
 {
+    public const string ApiKeyCredentialName = "Screen.Translation";
+    public const string RacingApiKeyCredentialName = "Screen.RacingTranslation";
     public const string TencentSecretIdCredentialName = "Screen.Translation.Tencent.SecretId";
     public const string TencentSecretKeyCredentialName = "Screen.Translation.Tencent.SecretKey";
 
@@ -173,7 +178,7 @@ public sealed record TranslationProfile(
     public bool EnableRacing { get; init; }
     public string RacingBaseAddress { get; init; } = string.Empty;
     public string RacingModel { get; init; } = string.Empty;
-    public string RacingCredentialName { get; init; } = "Screen.RacingTranslation";
+    public string RacingCredentialName { get; init; } = RacingApiKeyCredentialName;
     public bool EnableFastFallbackRace { get; init; } = true;
     public int FastFallbackDelaySeconds { get; init; } = 8;
 }
@@ -274,6 +279,6 @@ public sealed class AppSettings
     public string SaveDirectory { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Screenshots");
     public TranslationProfile Translation { get; set; } = new(
-        "https://api.openai.com/v1", "gpt-4.1-mini", "Screen.Translation", "简体中文");
+        "https://api.openai.com/v1", "gpt-4.1-mini", TranslationProfile.ApiKeyCredentialName, "简体中文");
     public TranslationDisplayMode TranslationDisplayMode { get; set; } = TranslationDisplayMode.Card;
 }

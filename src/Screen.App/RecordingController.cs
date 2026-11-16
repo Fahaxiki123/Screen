@@ -191,21 +191,18 @@ internal sealed class RecordingController : IDisposable
         _control.SetPaused(_recorder.IsPaused);
     }
 
-    internal async Task StopAsync()
+    internal Task<RecordingSaveResult> StopAsync()
     {
-        if (_finishTask is not null)
+        _control.Dispatcher.VerifyAccess();
+        if (_finishTask is null)
         {
-            return;
+            _ = CompleteAsync(BeginFinish());
         }
-        try
-        {
-            await BeginFinish();
-        }
-        finally
-        {
-            Dispose();
-        }
+        return Completion;
     }
+
+    private async Task CompleteAsync(Task<RecordingSaveResult> finishTask) =>
+        Complete(await finishTask);
 
     private Task<RecordingSaveResult> BeginFinish()
     {
@@ -217,11 +214,11 @@ internal sealed class RecordingController : IDisposable
         // Both capture paths observe the same stop boundary immediately. In
         // particular, audio must not keep recording while ffmpeg finalizes.
         _stopSignal.Request();
-        _recorder.RequestStop();
         _finishTask = Task.Run(() =>
         {
             try
             {
+                _recorder.RequestStop();
                 var audioError = RecordingStopCoordinator.FinalizeCapture(
                     () => _audio?.Stop(), _recorder.StopAndFinalize);
                 var interruptionWarning = _recorder.Fault is { } fault
@@ -406,39 +403,42 @@ internal sealed class RecordingController : IDisposable
 
     public void Dispose()
     {
+        _control.Dispatcher.VerifyAccess();
+        if (_disposed)
+        {
+            return;
+        }
+        // The tray awaits StopAsync while the dispatcher is running. If WPF
+        // is already shutting down, wait only for the worker, never its UI continuation.
+        Complete(BeginFinish().GetAwaiter().GetResult());
+    }
+
+    private void Complete(RecordingSaveResult result)
+    {
         if (_disposed)
         {
             return;
         }
         _disposed = true;
-        RecordingSaveResult result;
         try
         {
-            var finishTask = BeginFinish();
-            if (finishTask.IsCompleted || finishTask.Wait(TimeSpan.FromSeconds(5)))
-            {
-                result = finishTask.GetAwaiter().GetResult();
-            }
-            else
-            {
-                SimpleLogger.LogWarning($"Recording finalization exceeded synchronous teardown budget; recovery directory: {_tempDir}");
-                result = new RecordingSaveResult(false, null, "程序退出时录屏仍在后台收尾，原始素材已保留。", _tempDir);
-            }
-        }
-        catch (Exception exception)
-        {
-            SimpleLogger.LogError($"Recording recovery directory: {_tempDir}", exception);
-            result = new RecordingSaveResult(false, null, exception.Message, _tempDir);
-        }
-        try
-        {
-            _timer.Stop();
             _mouseHook?.Dispose();
             _hook?.Dispose();
             _audio?.Dispose();
             _recorder.Dispose();
+        }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogError("Recording resource cleanup failed after finalization", exception);
+        }
+        try
+        {
             _control.Close();
             _border?.Close();
+        }
+        catch (InvalidOperationException exception)
+        {
+            SimpleLogger.LogError("Recording windows could not be closed after finalization", exception);
         }
         finally
         {

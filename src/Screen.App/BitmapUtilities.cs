@@ -39,11 +39,31 @@ internal static class BitmapUtilities
 
     public static void SavePng(PixelBuffer buffer, string path)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var file = File.Create(path);
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(buffer.ToBitmapSource()));
-        encoder.Save(file);
+        var destination = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(destination)!;
+        Directory.CreateDirectory(directory);
+        var temporary = Path.Combine(directory, $".screen-image-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(buffer.ToBitmapSource()));
+                encoder.Save(file);
+                file.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
     }
 
     public static void CopyToClipboard(PixelBuffer buffer)

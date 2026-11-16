@@ -214,11 +214,7 @@ internal sealed partial class CaptureOverlayWindow
                 sourceText,
                 document.LanguageTag,
                 settings.Translation with { TargetLanguage = targetLanguage },
-                new TranslationCredentials(
-                    _credentialService.Read(settings.Translation.CredentialName),
-                    _credentialService.Read(TranslationProfile.TencentSecretIdCredentialName),
-                    _credentialService.Read(TranslationProfile.TencentSecretKeyCredentialName),
-                    _credentialService.Read(settings.Translation.RacingCredentialName)),
+                TranslationCredentialStore.ReadSaved(settings.Translation, _credentialService),
                 progress,
                 cancellationToken);
             if (operation.IsCancellationRequested)
@@ -283,7 +279,7 @@ internal sealed partial class CaptureOverlayWindow
             selection.Width,
             selection.Height);
         return DirectTextExtractor.TryExtractAsync(
-            _surface.SelectedWindow,
+            _surface.UnmaskedTextWindow,
             screenSelection,
             cancellationToken);
     }

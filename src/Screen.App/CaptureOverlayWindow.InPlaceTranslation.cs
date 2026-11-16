@@ -172,11 +172,7 @@ internal sealed partial class CaptureOverlayWindow
             return;
         }
         SetInPlaceStatus($"正在翻译 · 0/{regions.Count}");
-        var credentials = new TranslationCredentials(
-            _credentialService.Read(settings.Translation.CredentialName),
-            _credentialService.Read(TranslationProfile.TencentSecretIdCredentialName),
-            _credentialService.Read(TranslationProfile.TencentSecretKeyCredentialName),
-            _credentialService.Read(settings.Translation.RacingCredentialName));
+        var credentials = TranslationCredentialStore.ReadSaved(settings.Translation, _credentialService);
         using var batch = CancellationTokenSource.CreateLinkedTokenSource(token);
         using var slots = new SemaphoreSlim(3);
         var completed = 0;

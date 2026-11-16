@@ -169,6 +169,10 @@ internal sealed class AppHost : IDisposable
 
     private bool RecordingActive()
     {
+        if (_exiting)
+        {
+            return true;
+        }
         if (!_recordingFlowActive)
         {
             return false;
@@ -185,6 +189,11 @@ internal sealed class AppHost : IDisposable
 
     private async Task RunRecordingAsync(PixelRect? region, RecordingBorderWindow? persistentBorder = null)
     {
+        if (_exiting)
+        {
+            persistentBorder?.Close();
+            return;
+        }
         if (_recordingFlowActive)
         {
             persistentBorder?.Close();
@@ -273,21 +282,18 @@ internal sealed class AppHost : IDisposable
             persistentBorder?.Close();
         }
 
-        if (!result.Saved)
-        {
-            MessageBox.Show($"录屏失败：{result.Error}\n录制素材已保留，可从以下位置恢复：\n{result.RecoveryDirectory}",
-                "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
-        }
         if (_exiting)
         {
             return;
         }
-        if (result.Warning is not null)
+        if (GetRecordingSaveNotice(result) is { } notice)
         {
-            HintToastWindow.Show(result.RecoveryDirectory is null
-                ? result.Warning
-                : $"{result.Warning}。原始素材保留在：{result.RecoveryDirectory}");
+            if (!result.Saved)
+            {
+                MessageBox.Show(notice, "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+            HintToastWindow.Show(notice);
         }
         try
         {
@@ -342,17 +348,39 @@ internal sealed class AppHost : IDisposable
         _exiting = true;
         if (_recordingController is { } active)
         {
-            HintToastWindow.Show("正在保存当前录屏并退出…");
             try
             {
-                await active.StopAsync().ConfigureAwait(true);
+                HintToastWindow.Show("正在保存当前录屏并退出…");
+            }
+            catch (Exception exception)
+            {
+                SimpleLogger.LogError("Unable to show the recording exit hint", exception);
+            }
+            try
+            {
+                var result = await active.StopAsync();
+                if (GetRecordingSaveNotice(result) is { } notice)
+                {
+                    MessageBox.Show(notice, "Screen", MessageBoxButton.OK,
+                        result.Saved ? MessageBoxImage.Warning : MessageBoxImage.Error);
+                }
             }
             catch (Exception exception)
             {
                 SimpleLogger.LogError("Failed to finalize recording during exit", exception);
+                MessageBox.Show($"退出时无法完成录屏保存：{exception.Message}",
+                    "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         Application.Current?.Shutdown();
+    }
+
+    internal static string? GetRecordingSaveNotice(RecordingSaveResult result)
+    {
+        var notice = result.Saved ? result.Warning : $"录屏失败：{result.Error}";
+        return result.RecoveryDirectory is { } directory
+            ? $"{notice}\n录制素材已保留，可从以下位置恢复：\n{directory}"
+            : notice;
     }
 
     private void OpenSettings()

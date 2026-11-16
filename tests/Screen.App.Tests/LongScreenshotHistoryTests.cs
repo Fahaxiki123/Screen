@@ -153,6 +153,19 @@ public sealed class LongScreenshotHistoryTests
         Assert.AreEqual(0, result.History.Undo.Length);
     }
 
+    [TestMethod]
+    public void CropAndExportKeepMosaicScaleFromTheOriginalWorkingImage()
+    {
+        var mosaic = new AnnotationItem(Guid.NewGuid(), AnnotationKind.Mosaic, [new PixelPoint(15, 15)],
+            new PixelRect(10, 10, 40, 40), new AnnotationStyle(0xFF000000, 16, 22, AnnotationVariants.MosaicPixelate),
+            null, null, 0);
+        var result = LongScreenshotHistory.RebaseAnnotations(new AnnotationSnapshot([mosaic], 1),
+            new PixelRect(0, 0, 120, 120), previousFactor: 3, nextFactor: 2);
+        var rebased = result.Current.Items[0];
+        Assert.AreEqual(1.5, rebased.Style.MosaicScale);
+        Assert.AreEqual(3.0, CaptureSurface.ScaleItem(rebased, 2).Style.MosaicScale);
+    }
+
     private static LongScreenshotEditState StateAt(int x) => new(
         new PixelRect(x, 0, 100, 100),
         new AnnotationEditingState(new AnnotationSnapshot([], 1), AnnotationHistoryState.Empty, null),

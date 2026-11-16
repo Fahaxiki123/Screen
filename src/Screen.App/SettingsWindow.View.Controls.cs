@@ -204,6 +204,20 @@ public partial class SettingsWindow
             Password = password ?? string.Empty
         };
         passwordBox.PasswordChanged += (_, _) => ApplyCredentialValue(propertyName, passwordBox.Password);
+        if (propertyName is nameof(SettingsViewModel.ApiKey) or nameof(SettingsViewModel.RacingApiKey))
+        {
+            _viewModel.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == propertyName)
+                {
+                    var key = propertyName == nameof(SettingsViewModel.ApiKey) ? _viewModel.ApiKey : _viewModel.RacingApiKey;
+                    if (passwordBox.Password != key)
+                    {
+                        passwordBox.Password = key;
+                    }
+                }
+            };
+        }
         return passwordBox;
     }
 

@@ -10,6 +10,10 @@ namespace Screen.App;
 /// </summary>
 internal sealed partial class CaptureSurface
 {
+    internal WindowTarget? UnmaskedTextWindow => _annotations.Any(item => item.Kind == AnnotationKind.Mosaic)
+        ? null
+        : SelectedWindow;
+
     public void ClearAnnotationSelection() => SelectAnnotation(null);
 
     public void ApplyStyleToSelected(AnnotationStyle style)
@@ -159,6 +163,7 @@ internal sealed partial class CaptureSurface
     /// </summary>
     internal PixelBuffer RenderSelection(PixelBuffer baseImage, PixelRect selectionInBaseImage, double coordinateScale)
     {
+        selectionInBaseImage = selectionInBaseImage.Intersect(new PixelRect(0, 0, baseImage.Width, baseImage.Height));
         if (selectionInBaseImage.IsEmpty)
         {
             throw new InvalidOperationException("请先选择截图区域。");
@@ -204,7 +209,8 @@ internal sealed partial class CaptureSurface
         Style = item.Style with
         {
             Thickness = item.Style.Thickness * scale,
-            FontSize = item.Style.FontSize * scale
+            FontSize = item.Style.FontSize * scale,
+            MosaicScale = item.Kind == AnnotationKind.Mosaic ? item.Style.MosaicScale * scale : item.Style.MosaicScale
         }
     };
 

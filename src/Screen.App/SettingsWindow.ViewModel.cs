@@ -19,7 +19,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     private readonly Func<bool, bool>? _setHotKeyPriority;
     private readonly DispatcherTimer _saveTimer;
     private readonly AppSettings _settings;
-    private readonly Dictionary<string, string> _pendingCredentials = new();
+    private readonly Dictionary<string, (string Secret, string? EndpointScope)> _pendingCredentials = new();
 
     private bool _dirty;
     private bool _disposed;
@@ -38,10 +38,11 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         _setHotKeyPriority = setHotKeyPriority;
         _settings = store.Load();
 
-        _tencentSecretId = credentials.Read(TranslationProfile.TencentSecretIdCredentialName) ?? string.Empty;
-        _tencentSecretKey = credentials.Read(TranslationProfile.TencentSecretKeyCredentialName) ?? string.Empty;
-        _apiKey = credentials.Read(_settings.Translation.CredentialName) ?? string.Empty;
-        _racingApiKey = credentials.Read(_settings.Translation.RacingCredentialName) ?? string.Empty;
+        var savedCredentials = TranslationCredentialStore.ReadSaved(_settings.Translation, credentials);
+        _tencentSecretId = savedCredentials.TencentSecretId ?? string.Empty;
+        _tencentSecretKey = savedCredentials.TencentSecretKey ?? string.Empty;
+        _apiKey = savedCredentials.ApiKey ?? string.Empty;
+        _racingApiKey = savedCredentials.RacingApiKey ?? string.Empty;
 
         _saveTimer = new DispatcherTimer
         {
@@ -400,7 +401,9 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             {
                 return;
             }
+            var oldAddress = _settings.Translation.BaseAddress;
             _settings.Translation = _settings.Translation with { BaseAddress = value };
+            RefreshApiKey(ref _apiKey, TranslationProfile.ApiKeyCredentialName, oldAddress, value, nameof(ApiKey));
             OnPropertyChanged();
             QueueSave();
         }
@@ -445,7 +448,9 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             {
                 return;
             }
+            var oldAddress = _settings.Translation.RacingBaseAddress;
             _settings.Translation = _settings.Translation with { RacingBaseAddress = value };
+            RefreshApiKey(ref _racingApiKey, TranslationProfile.RacingApiKeyCredentialName, oldAddress, value, nameof(RacingApiKey));
             OnPropertyChanged();
             QueueSave();
         }
@@ -539,13 +544,15 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public string ApiKey
     {
         get => _apiKey;
-        set => SetCredential(ref _apiKey, value, _settings.Translation.CredentialName);
+        set => SetCredential(ref _apiKey, value, TranslationProfile.ApiKeyCredentialName,
+            TranslationCredentialStore.EndpointScope(BaseAddress));
     }
 
     public string RacingApiKey
     {
         get => _racingApiKey;
-        set => SetCredential(ref _racingApiKey, value, _settings.Translation.RacingCredentialName);
+        set => SetCredential(ref _racingApiKey, value, TranslationProfile.RacingApiKeyCredentialName,
+            TranslationCredentialStore.EndpointScope(RacingBaseAddress));
     }
 
     public void SetStatus(string text, bool isError)
@@ -559,10 +566,10 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public TranslationProfile BuildTranslationProfile() => _settings.Translation;
 
     public TranslationCredentials BuildTranslationCredentials() => new(
-        string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
+        TranslationCredentialStore.EndpointScope(BaseAddress) is not null && !string.IsNullOrWhiteSpace(_apiKey) ? _apiKey : null,
         string.IsNullOrWhiteSpace(_tencentSecretId) ? null : _tencentSecretId,
         string.IsNullOrWhiteSpace(_tencentSecretKey) ? null : _tencentSecretKey,
-        string.IsNullOrWhiteSpace(_racingApiKey) ? null : _racingApiKey);
+        TranslationCredentialStore.EndpointScope(RacingBaseAddress) is not null && !string.IsNullOrWhiteSpace(_racingApiKey) ? _racingApiKey : null);
 
     public void SaveNow()
     {
@@ -572,9 +579,10 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        // A validation or write failure in one store must not block the other.
-        var credentialError = SavePendingCredentials();
+        // AI credentials may only be written for a committed address. Other
+        // settings errors must still allow changes to an already bound key.
         var settingsError = _dirty ? SaveSettings() : null;
+        var credentialError = SavePendingCredentials();
         var error = credentialError ?? settingsError;
         if (credentialError is not null && settingsError is not null)
         {
@@ -600,15 +608,27 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             // Merge into the latest on-disk settings instead of overwriting the whole
             // document: runtime writers may have updated SaveDirectory or the
             // click-through hint flag while the dialog was open.
+            var translation = _settings.Translation with
+            {
+                CredentialName = TranslationProfile.ApiKeyCredentialName,
+                RacingCredentialName = TranslationProfile.RacingApiKeyCredentialName
+            };
             _store.Update(latest =>
             {
+                if (latest.Translation.BaseAddress != translation.BaseAddress
+                    || latest.Translation.RacingBaseAddress != translation.RacingBaseAddress
+                    || latest.Translation.CredentialName != translation.CredentialName
+                    || latest.Translation.RacingCredentialName != translation.RacingCredentialName)
+                {
+                    TranslationCredentialStore.BindLegacyKeys(_credentials, latest.Translation);
+                }
                 latest.StartWithWindows = _settings.StartWithWindows;
                 latest.HotKey = _settings.HotKey;
                 latest.PreferScreenHotKeys = _settings.PreferScreenHotKeys;
                 latest.ClickThroughRecoveryHotKey = _settings.ClickThroughRecoveryHotKey;
                 latest.RecordHotKey = _settings.RecordHotKey;
                 latest.Ocr = _settings.Ocr;
-                latest.Translation = _settings.Translation;
+                latest.Translation = translation;
                 latest.TranslationDisplayMode = _settings.TranslationDisplayMode;
                 latest.Recording = _settings.Recording;
             });
@@ -635,14 +655,26 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public static string[] TranslationLanguages() =>
         ["简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch"];
 
-    private void SetCredential(ref string field, string value, string targetName, [CallerMemberName] string? propertyName = null)
+    private void RefreshApiKey(ref string field, string slot, string? oldAddress, string? newAddress, string propertyName)
+    {
+        if (TranslationCredentialStore.EndpointScope(oldAddress) == TranslationCredentialStore.EndpointScope(newAddress))
+        {
+            return;
+        }
+        _pendingCredentials.Remove(slot);
+        field = TranslationCredentialStore.ReadKey(_credentials, slot, newAddress) ?? string.Empty;
+        OnPropertyChanged(propertyName);
+    }
+
+    private void SetCredential(ref string field, string value, string targetName,
+        string? endpointScope = null, [CallerMemberName] string? propertyName = null)
     {
         if (string.Equals(field, value, StringComparison.Ordinal))
         {
             return;
         }
         field = value;
-        _pendingCredentials[targetName] = value;
+        _pendingCredentials[targetName] = (value, endpointScope);
         OnPropertyChanged(propertyName);
         ScheduleSave();
     }
@@ -650,17 +682,29 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     private string? SavePendingCredentials()
     {
         string? error = null;
-        foreach (var (targetName, secret) in _pendingCredentials.ToArray())
+        foreach (var (targetName, pending) in _pendingCredentials.ToArray())
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(secret))
+                if (targetName is TranslationProfile.ApiKeyCredentialName or TranslationProfile.RacingApiKeyCredentialName)
+                {
+                    var saved = _store.Load().Translation;
+                    var savedAddress = targetName == TranslationProfile.ApiKeyCredentialName
+                        ? saved.BaseAddress : saved.RacingBaseAddress;
+                    if (pending.EndpointScope is null || pending.EndpointScope != TranslationCredentialStore.EndpointScope(savedAddress))
+                    {
+                        error ??= "凭据保存失败：请先保存该密钥对应的 HTTPS 基础地址。";
+                        continue;
+                    }
+                    TranslationCredentialStore.SaveKey(_credentials, targetName, pending.Secret, pending.EndpointScope);
+                }
+                else if (string.IsNullOrWhiteSpace(pending.Secret))
                 {
                     _credentials.Delete(targetName);
                 }
                 else
                 {
-                    _credentials.Write(targetName, secret);
+                    _credentials.Write(targetName, pending.Secret);
                 }
                 _pendingCredentials.Remove(targetName);
             }
