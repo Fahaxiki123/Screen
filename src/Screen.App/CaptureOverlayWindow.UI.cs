@@ -205,7 +205,7 @@ internal sealed partial class CaptureOverlayWindow
         };
     }
 
-    private void ConfigureStylePanel(CaptureTool tool)
+    private void ConfigureStylePanel(CaptureTool tool, bool applyToSelection = false)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         if (tool == CaptureTool.Mosaic)
@@ -213,21 +213,23 @@ internal sealed partial class CaptureOverlayWindow
             row.Children.Add(ToggleIcon(LucideIconKind.Grid2x2, "像素马赛克", _mosaicVariant == AnnotationVariants.MosaicPixelate, () =>
             {
                 _mosaicVariant = AnnotationVariants.MosaicPixelate;
-                ConfigureStylePanel(tool);
+                ConfigureStylePanel(tool, applyToSelection: true);
             }));
             row.Children.Add(ToggleIcon(LucideIconKind.Droplet, "模糊", _mosaicVariant == AnnotationVariants.MosaicBlur, () =>
             {
                 _mosaicVariant = AnnotationVariants.MosaicBlur;
-                ConfigureStylePanel(tool);
+                ConfigureStylePanel(tool, applyToSelection: true);
             }));
             row.Children.Add(Separator());
             row.Children.Add(ToggleIcon(LucideIconKind.Paintbrush, "涂抹笔刷", _surface.MosaicMode == MosaicDrawMode.Brush, () =>
             {
+                _surface.ClearAnnotationSelection();
                 _surface.MosaicMode = MosaicDrawMode.Brush;
                 ConfigureStylePanel(tool);
             }));
             row.Children.Add(ToggleIcon(LucideIconKind.SquareDashed, "矩形区域", _surface.MosaicMode == MosaicDrawMode.Rectangle, () =>
             {
+                _surface.ClearAnnotationSelection();
                 _surface.MosaicMode = MosaicDrawMode.Rectangle;
                 ConfigureStylePanel(tool);
             }));
@@ -235,7 +237,7 @@ internal sealed partial class CaptureOverlayWindow
             AddSizeDots(row, new[] { 20d, 32d, 48d }, _mosaicSize, 0.5, size =>
             {
                 _mosaicSize = size;
-                ConfigureStylePanel(tool);
+                ConfigureStylePanel(tool, applyToSelection: true);
             });
             row.Children.Add(new TextBlock
             {
@@ -255,7 +257,7 @@ internal sealed partial class CaptureOverlayWindow
             slider.ValueChanged += (_, _) =>
             {
                 _mosaicIntensity = slider.Value;
-                UpdateStyle();
+                UpdateStyle(applyToSelection: true);
             };
             row.Children.Add(slider);
         }
@@ -281,10 +283,20 @@ internal sealed partial class CaptureOverlayWindow
                 if (fontSize.SelectedItem is ComboBoxItem item)
                 {
                     _fontSize = (double)item.Tag;
-                    UpdateStyle();
+                    UpdateStyle(applyToSelection: true);
                 }
             };
             row.Children.Add(fontSize);
+            AddColorSwatches(row);
+        }
+        else if (tool == CaptureTool.Number)
+        {
+            AddSizeDots(row, new[] { 24d, 32d, 44d }, _numberSize, 0.55, size =>
+            {
+                _numberSize = size;
+                ConfigureStylePanel(tool, applyToSelection: true);
+            });
+            row.Children.Add(Separator());
             AddColorSwatches(row);
         }
         else
@@ -292,13 +304,13 @@ internal sealed partial class CaptureOverlayWindow
             AddSizeDots(row, new[] { 2d, 4d, 7d }, _thickness, 2, size =>
             {
                 _thickness = size;
-                ConfigureStylePanel(tool);
+                ConfigureStylePanel(tool, applyToSelection: true);
             });
             row.Children.Add(Separator());
             AddColorSwatches(row);
         }
         _stylePanel.Child = row;
-        UpdateStyle();
+        UpdateStyle(applyToSelection);
     }
 
     private Popup BuildTranslationPopup()
@@ -469,7 +481,7 @@ internal sealed partial class CaptureOverlayWindow
         button.Click += (_, _) =>
         {
             _textVariant = variant;
-            ConfigureStylePanel(tool);
+            ConfigureStylePanel(tool, applyToSelection: true);
         };
         return button;
     }
@@ -551,7 +563,7 @@ internal sealed partial class CaptureOverlayWindow
             button.Click += (_, _) =>
             {
                 _color = color;
-                ConfigureStylePanel(_surface.Tool);
+                ConfigureStylePanel(_surface.Tool, applyToSelection: true);
             };
             row.Children.Add(button);
         }

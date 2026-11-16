@@ -113,6 +113,25 @@ public sealed class ScrollCaptureSequenceTests
     }
 
     [TestMethod]
+    public async Task IncrementalPreviewPreservesEarlierRowsWhenAHeaderBecomesFixed()
+    {
+        const int height = 300;
+        var source = Document(height: 570);
+        int[] offsets = [0, 230, 270];
+        var frames = offsets.Select(offset => source.Crop(new PixelRect(0, offset, source.Width, height))).ToArray();
+        frames[1].Pixels.AsSpan(0, 100 * source.Stride).CopyTo(frames[2].Pixels);
+        var index = 0;
+        var sequence = new ScrollCaptureSequence(_ => Task.FromResult(frames[index++]));
+        for (var count = 0; count < frames.Length; count++)
+        {
+            Assert.AreEqual(ScrollFrameOutcome.Added, (await sequence.CaptureAsync()).Outcome);
+            var preview = await sequence.UpdatePreviewAsync();
+            var expected = source.Crop(new PixelRect(0, 0, source.Width, height + offsets[count]));
+            CollectionAssert.AreEqual(expected.Pixels, preview.Image.ToPixelBuffer().Pixels);
+        }
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task FinishWaitsForPendingFirstOrLastFrame(bool seedFirst)

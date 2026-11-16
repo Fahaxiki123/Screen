@@ -63,10 +63,12 @@ internal sealed partial class CaptureOverlayWindow : Window
     private uint _color = 0xFFFF4D4F;
     private double _thickness = 4;
     private double _fontSize = 16;
+    private double _numberSize = 24;
     private int _textVariant = AnnotationVariants.TextRegular;
     private int _mosaicVariant = AnnotationVariants.MosaicPixelate;
     private double _mosaicSize = 32;
     private double _mosaicIntensity = 0.7;
+    private bool _applyingSelectedStyle;
 
     /// <summary>Raised in recording mode when the user confirms the region via the setup panel.</summary>
     public event EventHandler<RecordingSelection>? RecordingRegionConfirmed;
@@ -109,7 +111,7 @@ internal sealed partial class CaptureOverlayWindow : Window
             windowSnapService.GetWindows(frame.ScreenBounds),
             windowSnapService);
         _surface.SelectionChanged += (_, _) => OnCaptureSelectionChanged();
-        _surface.AnnotationContentChanged += (_, _) => CancelTextOperations();
+        _surface.AnnotationContentChanged += (_, _) => OnCaptureAnnotationsChanged();
         _surface.SelectionCommitted += (_, _) => OnSelectionCommitted();
         _root.Children.Add(_surface);
 
@@ -155,6 +157,7 @@ internal sealed partial class CaptureOverlayWindow : Window
         _ocrCard.IsVisibleChanged += (_, _) => PositionFloatingPanels();
         _translationPopup = BuildTranslationPopup();
         InitializeInPlaceTranslation();
+        _surface.SelectedAnnotationChanged += (_, _) => SyncSelectedStyle();
         _ocrCard.RecognitionStateChanged += (_, _) => UpdateProcessingIndicator();
         _ocrCard.IsVisibleChanged += (_, _) =>
         {

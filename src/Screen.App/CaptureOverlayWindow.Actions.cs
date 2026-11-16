@@ -17,7 +17,13 @@ internal sealed partial class CaptureOverlayWindow
         {
             return;
         }
-        CancelTextOperations();
+        CancelTextOperations(keepInPlace: _inPlaceResult is not null);
+        _surface.ClearAnnotationSelection();
+        ShowAnnotationTool(tool);
+    }
+
+    private void ShowAnnotationTool(CaptureTool tool)
+    {
         _surface.Tool = tool;
         _stylePanel.Visibility = Visibility.Visible;
         ConfigureStylePanel(tool);
@@ -40,7 +46,51 @@ internal sealed partial class CaptureOverlayWindow
         PositionFloatingPanels();
     }
 
-    private void UpdateStyle()
+    private void SyncSelectedStyle()
+    {
+        if (_applyingSelectedStyle || _surface.SelectedAnnotationStyle is not { } style
+            || _surface.SelectedAnnotationKind is not { } kind)
+        {
+            return;
+        }
+
+        var scale = Math.Max(1.0, _frame.DpiX / 96.0);
+        _color = style.Argb;
+        switch (kind)
+        {
+            case AnnotationKind.Number:
+                _numberSize = style.FontSize / scale;
+                break;
+            case AnnotationKind.Text:
+                _fontSize = style.FontSize / scale;
+                _textVariant = style.Variant;
+                break;
+            case AnnotationKind.Mosaic:
+                _mosaicSize = style.Thickness / scale;
+                _mosaicIntensity = style.Intensity;
+                _mosaicVariant = style.Variant % 100;
+                _surface.MosaicMode = style.Variant >= 100 ? MosaicDrawMode.Brush : MosaicDrawMode.Rectangle;
+                break;
+            default:
+                _thickness = style.Thickness / scale;
+                break;
+        }
+
+        ShowAnnotationTool(kind switch
+        {
+            AnnotationKind.Rectangle => CaptureTool.Rectangle,
+            AnnotationKind.Ellipse => CaptureTool.Ellipse,
+            AnnotationKind.Line => CaptureTool.Line,
+            AnnotationKind.Arrow => CaptureTool.Arrow,
+            AnnotationKind.Pen => CaptureTool.Pen,
+            AnnotationKind.Text => CaptureTool.Text,
+            AnnotationKind.Number => CaptureTool.Number,
+            AnnotationKind.Mosaic => CaptureTool.Mosaic,
+            _ => CaptureTool.Select
+        });
+    }
+
+    private void UpdateStyle(bool applyToSelection = false)
     {
         var pixelScale = Math.Max(1.0, _frame.DpiX / 96.0);
         var thickness = (_surface.Tool == CaptureTool.Mosaic ? _mosaicSize : _thickness) * pixelScale;
@@ -50,7 +100,30 @@ internal sealed partial class CaptureOverlayWindow
             CaptureTool.Text => _textVariant,
             _ => 0
         };
-        _surface.CurrentStyle = new AnnotationStyle(_color, thickness, _fontSize * pixelScale, variant, _mosaicIntensity);
+        var fontSize = (_surface.Tool == CaptureTool.Number ? _numberSize : _fontSize) * pixelScale;
+        var style = new AnnotationStyle(_color, thickness, fontSize, variant, _mosaicIntensity);
+        _surface.CurrentStyle = style;
+        if (!applyToSelection || _surface.SelectedAnnotationStyle is not { } selected)
+        {
+            return;
+        }
+
+        var updated = _surface.SelectedAnnotationKind switch
+        {
+            AnnotationKind.Number => selected with { Argb = style.Argb, FontSize = style.FontSize },
+            AnnotationKind.Text => selected with { Argb = style.Argb, FontSize = style.FontSize, Variant = style.Variant },
+            AnnotationKind.Mosaic => selected with { Thickness = style.Thickness, Variant = style.Variant, Intensity = style.Intensity },
+            _ => selected with { Argb = style.Argb, Thickness = style.Thickness }
+        };
+        _applyingSelectedStyle = true;
+        try
+        {
+            _surface.ApplyStyleToSelected(updated);
+        }
+        finally
+        {
+            _applyingSelectedStyle = false;
+        }
     }
 
     private void CopyCurrentColor()
@@ -127,6 +200,7 @@ internal sealed partial class CaptureOverlayWindow
             return;
         _ocrCard.CancelRecognition();
         _ocrCard.Visibility = Visibility.Collapsed;
+        _surface.ClearAnnotationSelection();
         _surface.Tool = CaptureTool.Select;
         foreach (var button in _toolButtons.Values)
         {
@@ -290,7 +364,7 @@ internal sealed partial class CaptureOverlayWindow
         {
             return;
         }
-        var image = RenderCurrentSelection();
+        var image = _surface.RenderSelection();
         var region = _surface.Selection;
         _pinManager.Pin(image, new PixelRect(
             _frame.ScreenBounds.X + region.X,
@@ -326,7 +400,7 @@ internal sealed partial class CaptureOverlayWindow
         }
         try
         {
-            BitmapUtilities.SavePng(RenderCurrentSelection(), dialog.FileName);
+            BitmapUtilities.SavePng(_surface.RenderSelection(), dialog.FileName);
             settings.SaveDirectory = Path.GetDirectoryName(dialog.FileName) ?? initialDirectory;
             _settingsStore.Update(latest => latest.SaveDirectory = settings.SaveDirectory);
             Close();
@@ -346,7 +420,7 @@ internal sealed partial class CaptureOverlayWindow
         }
         try
         {
-            BitmapUtilities.CopyToClipboard(RenderCurrentSelection());
+            BitmapUtilities.CopyToClipboard(_surface.RenderSelection());
             Close();
         }
         catch (Exception ex)
@@ -491,6 +565,10 @@ internal sealed partial class CaptureOverlayWindow
         if (e.Key == Key.Escape)
         {
             Close();
+            e.Handled = true;
+        }
+        else if ((e.Key is Key.Delete or Key.Back) && Keyboard.Modifiers == ModifierKeys.None && _surface.DeleteSelectedAnnotation())
+        {
             e.Handled = true;
         }
         else if (e.Key == Key.Enter || (e.Key == Key.C && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)))

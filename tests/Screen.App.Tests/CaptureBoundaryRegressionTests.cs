@@ -19,6 +19,92 @@ public sealed class CaptureBoundaryRegressionTests
     private static readonly PixelRect Region = new(30, 25, 80, 60);
 
     [TestMethod]
+    public void SelectionDragIncludesTheLastRowAndColumnInEitherDirection()
+    {
+        var first = new PixelPoint(0, 0);
+        var last = new PixelPoint(1919, 1079);
+        var full = new PixelRect(0, 0, 1920, 1080);
+
+        Assert.AreEqual(full, CaptureSurface.SelectionFromDrag(first, last));
+        Assert.AreEqual(full, CaptureSurface.SelectionFromDrag(last, first));
+    }
+
+    [TestMethod]
+    public void DeletingASelectedMarkPreservesOtherMarksAndUndoOrder() => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        surface.Tool = CaptureTool.Rectangle;
+        Invoke(surface, "AddAnnotation", new PixelPoint(40, 32), new PixelPoint(74, 61));
+        Invoke(surface, "AddAnnotation", new PixelPoint(57, 44), new PixelPoint(85, 71));
+        var first = Items(surface)[0];
+        var second = Items(surface)[1];
+        Invoke(surface, "SelectAnnotation", first.Id);
+
+        Assert.IsTrue(surface.DeleteSelectedAnnotation());
+        Assert.AreEqual(second, Items(surface).Single());
+        Assert.IsNull(surface.SelectedAnnotationStyle);
+        Assert.IsFalse(surface.DeleteSelectedAnnotation());
+
+        Invoke(surface, "AddAnnotation", new PixelPoint(63, 47), new PixelPoint(98, 73));
+        Assert.IsGreaterThan(second.ZIndex, Items(surface)[1].ZIndex);
+        surface.Undo();
+        surface.Undo();
+        CollectionAssert.AreEqual(new[] { first, second }, Items(surface));
+        surface.Redo();
+        Assert.AreEqual(second, Items(surface).Single());
+    });
+
+    [TestMethod]
+    public void TranslatedPreviewAndExportKeepEditableAnnotationsAboveTheTranslation() => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        var translation = FillSelection(0xFF204C88);
+        surface.SetTranslatedSelection(translation);
+        surface.Tool = CaptureTool.Rectangle;
+        surface.CurrentStyle = new AnnotationStyle(0xFFFF0000, 6, 24);
+        Invoke(surface, "AddAnnotation", new PixelPoint(40, 40), new PixelPoint(90, 70));
+        var annotation = Items(surface).Single();
+
+        surface.Tool = CaptureTool.Arrow;
+        Assert.IsTrue(surface.IsShowingTranslation);
+        var exported = surface.RenderSelection();
+        var preview = Render(surface);
+        Assert.AreEqual(0xFFFF0000u, PixelAt(exported.Pixels, exported.Stride, 30, 15));
+        Assert.AreEqual(0xFFFF0000u, PixelAt(preview, Width * 4, 60, 40));
+        Assert.AreEqual(0xFF204C88u, PixelAt(preview, Width * 4, 60, 55));
+
+        Invoke(surface, "SelectAnnotation", annotation.Id);
+        Assert.IsTrue(surface.DeleteSelectedAnnotation());
+        exported = surface.RenderSelection();
+        Assert.AreEqual(0xFF204C88u, PixelAt(exported.Pixels, exported.Stride, 30, 15));
+
+        surface.SetTranslatedSelection(null);
+        Assert.IsFalse(surface.IsShowingTranslation);
+        CollectionAssert.AreEqual(surface.RenderOriginalSelection().Pixels, surface.RenderSelection().Pixels);
+    });
+
+    [TestMethod]
+    public void WhiteNumberRemainsReadableAndItsSizeChangesTheRenderedBadge() => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        surface.SetTranslatedSelection(FillSelection(0xFF204C88));
+        surface.Tool = CaptureTool.Number;
+        surface.CurrentStyle = new AnnotationStyle(0xFFFFFFFF, 4, 24);
+        Invoke(surface, "AddAnnotation", new PixelPoint(70, 55), new PixelPoint(70, 55));
+        var small = surface.RenderSelection();
+        Assert.AreEqual(0xFF204C88u, PixelAt(small.Pixels, small.Stride, 58, 30));
+
+        var item = Items(surface).Single();
+        Invoke(surface, "SelectAnnotation", item.Id);
+        surface.ApplyStyleToSelected(item.Style with { FontSize = 44 });
+        var large = surface.RenderSelection();
+        Assert.AreEqual(0xFFFFFFFFu, PixelAt(large.Pixels, large.Stride, 58, 30));
+        Assert.IsTrue(Enumerable.Range(21, 18).Any(y => Enumerable.Range(33, 14)
+            .Any(x => PixelAt(large.Pixels, large.Stride, x, y) == 0xFF000000u)),
+            "The digit must contrast against the white badge rather than disappearing.");
+    });
+
+    [TestMethod]
     [DataRow(false, AnnotationVariants.MosaicPixelate)]
     [DataRow(true, AnnotationVariants.MosaicBlur + 100)]
     public void MosaicSuppressesWindowTextUntilUndone(bool useBrush, int variant) => OnSta(() =>
@@ -299,6 +385,22 @@ public sealed class CaptureBoundaryRegressionTests
         surface.Arrange(new Rect(0, 0, Width, Height));
         return surface;
     }
+
+    private static PixelBuffer FillSelection(uint argb)
+    {
+        var pixels = new byte[Region.Width * Region.Height * 4];
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = (byte)argb;
+            pixels[i + 1] = (byte)(argb >> 8);
+            pixels[i + 2] = (byte)(argb >> 16);
+            pixels[i + 3] = (byte)(argb >> 24);
+        }
+        return new PixelBuffer(pixels, Region.Width, Region.Height, Region.Width * 4);
+    }
+
+    private static uint PixelAt(byte[] pixels, int stride, int x, int y) =>
+        BitConverter.ToUInt32(pixels, y * stride + x * 4);
 
     private static void DrawExportMosaic(CaptureSurface surface, int variant)
     {

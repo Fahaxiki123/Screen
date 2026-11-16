@@ -203,7 +203,7 @@ internal sealed partial class CaptureSurface
         }
         else if (_draggingSelection && e.LeftButton == MouseButtonState.Pressed)
         {
-            Selection = RectFromPoints(_start, _cursor).Intersect(new PixelRect(0, 0, _frame.Width, _frame.Height));
+            Selection = SelectionFromDrag(_start, _cursor);
             SelectionChanged?.Invoke(this, EventArgs.Empty);
         }
         else if (_drawing && e.LeftButton == MouseButtonState.Pressed
@@ -306,7 +306,8 @@ internal sealed partial class CaptureSurface
         else if (_draggingSelection)
         {
             _draggingSelection = false;
-            if (Selection.Width < 3 || Selection.Height < 3)
+            Selection = SelectionFromDrag(_start, _cursor);
+            if (Math.Abs(_cursor.X - _start.X) <= 2 || Math.Abs(_cursor.Y - _start.Y) <= 2)
             {
                 var target = _snapService.HitTest(
                     _windows,

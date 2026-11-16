@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using NAudio.Wave;
 using Screen.Core;
@@ -510,39 +511,41 @@ public sealed class RecordingRegressionTests
     [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
-    public void SystemCursorsDecodeHotspotTransparencyAndInvertMaskAndCompositeVisibly(bool useNv12)
+    public void NativeCursorMaskDecodesHotspotTransparencyAndInversion(bool useNv12)
     {
+        const int width = 32;
+        const int height = 32;
+        const int hotX = 12;
+        const int hotY = 14;
+        // System cursor IDs can resolve to transparent cursors in the current
+        // session. A private native cursor keeps this test independent of that.
+        var andMask = new byte[width * height / 8];
+        Array.Fill(andMask, (byte)0xff);
+        var xorMask = new byte[andMask.Length];
+        SetMaskBit(andMask, 4, 5, false);
+        SetMaskBit(andMask, 24, 25, false);
+        SetMaskBit(xorMask, 24, 25, true);
+        SetMaskBit(xorMask, 13, 14, true);
+
         var region = new PixelRect(100, 100, 96, 96);
         var cursorPos = new PixelPoint(148, 148);
-
-        foreach (var cursorId in new[] { NativeMethods.IdcIBeam, NativeMethods.IdcCross, NativeMethods.IdcArrow })
+        var handle = CreateTestCursor(0, hotX, hotY, width, height, andMask, xorMask);
+        Assert.AreNotEqual(0, handle, "The private cursor could not be created.");
+        try
         {
-            var handle = NativeMethods.LoadCursor(0, cursorId);
-            Assert.AreNotEqual(0, handle, $"LoadCursor({cursorId}) failed.");
             var bitmap = ScreenRecorder.RenderCursorHandle(handle, cursorPos, region);
-            Assert.IsNotNull(bitmap, $"Cursor {cursorId} must decode into a visible CursorBitmap.");
+            Assert.IsNotNull(bitmap, "The private cursor must decode into a visible CursorBitmap.");
             var cursor = bitmap.Value;
 
-            if (cursorId is NativeMethods.IdcIBeam or NativeMethods.IdcCross)
-            {
-                Assert.IsTrue(
-                    cursor.Bounds.X < 48 || cursor.Bounds.Y < 48,
-                    $"Cursor {cursorId} must offset its bounds by its hotspot, got {cursor.Bounds}.");
-            }
+            Assert.AreEqual(new PixelRect(48 - hotX, 48 - hotY, width, height), cursor.Bounds);
+            Assert.AreEqual((byte)0, cursor.Pixels[3], "Transparent padding must remain transparent.");
+            CollectionAssert.AreEqual(new byte[] { 0, 0, 0, 255 }, PixelAt(4, 5).ToArray());
+            CollectionAssert.AreEqual(new byte[] { 255, 255, 255, 255 }, PixelAt(24, 25).ToArray());
+            Assert.IsNotNull(cursor.InvertMask);
+            Assert.IsTrue(cursor.InvertMask[14 * width + 13]);
+            Assert.IsFalse(cursor.InvertMask[0]);
 
-            var totalPixels = cursor.Bounds.Width * cursor.Bounds.Height;
-            var transparentCount = 0;
-            for (var i = 0; i < totalPixels; i++)
-            {
-                var inverted = cursor.InvertMask is not null && cursor.InvertMask[i];
-                var alpha = cursor.Pixels[i * 4 + 3];
-                if (!inverted && alpha == 0)
-                {
-                    transparentCount++;
-                }
-            }
-            Assert.IsGreaterThan(totalPixels / 4, transparentCount,
-                $"Cursor {cursorId} must preserve transparent background pixels rather than filling an opaque box.");
+            ReadOnlySpan<byte> PixelAt(int x, int y) => cursor.Pixels.AsSpan((y * width + x) * 4, 4);
 
             foreach (var backgroundLuma in new byte[] { 24, 232 })
             {
@@ -556,10 +559,28 @@ public sealed class RecordingRegressionTests
                 var composited = buffer.GetEncodingFrame(cursor);
                 Assert.IsFalse(
                     clean.AsSpan().SequenceEqual(composited),
-                    $"Cursor {cursorId} must be visible over background {backgroundLuma} (useNv12={useNv12}).");
+                    $"Cursor must be visible over background {backgroundLuma} (useNv12={useNv12}).");
             }
         }
+        finally
+        {
+            DestroyTestCursor(handle);
+        }
+
+        static void SetMaskBit(byte[] mask, int x, int y, bool enabled)
+        {
+            var index = y * (width / 8) + x / 8;
+            var bit = 0x80 >> (x % 8);
+            mask[index] = enabled ? (byte)(mask[index] | bit) : (byte)(mask[index] & ~bit);
+        }
     }
+
+    [DllImport("user32.dll", EntryPoint = "CreateCursor")]
+    private static extern nint CreateTestCursor(
+        nint instance, int hotX, int hotY, int width, int height, byte[] andMask, byte[] xorMask);
+
+    [DllImport("user32.dll", EntryPoint = "DestroyCursor")]
+    private static extern bool DestroyTestCursor(nint cursor);
 
     [TestMethod]
     public void TimelineAlignedAudioDropsPreStartSamplesAndBackfillsSilentLoopbackGaps()

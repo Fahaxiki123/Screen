@@ -7,12 +7,12 @@ namespace Screen.App;
 
 internal sealed partial class CaptureOverlayWindow
 {
-    private readonly Image _inPlaceImage = new() { IsHitTestVisible = false, Stretch = Stretch.Fill, Visibility = Visibility.Collapsed };
     private readonly Border _inPlaceStatusBar = new() { Visibility = Visibility.Collapsed };
     private readonly TextBlock _inPlaceStatus = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     private Button _originalToggle = null!;
     private Button _copyTranslation = null!;
     private PixelBuffer? _inPlaceResult;
+    private AnnotationItem[] _inPlaceMosaics = [];
     private PixelRect _textSelection;
     private string _inPlaceText = string.Empty;
     private bool _inPlaceMode;
@@ -21,14 +21,12 @@ internal sealed partial class CaptureOverlayWindow
 
     private void InitializeInPlaceTranslation()
     {
-        _root.Children.Add(_inPlaceImage);
-        Panel.SetZIndex(_inPlaceImage, 1);
         var row = new DockPanel { LastChildFill = true };
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         _originalToggle = CreateInlineButton("查看原文", (_, _) =>
         {
-            var showingTranslation = _inPlaceImage.Visibility == Visibility.Visible;
-            _inPlaceImage.Visibility = showingTranslation ? Visibility.Collapsed : Visibility.Visible;
+            var showingTranslation = _surface.IsShowingTranslation;
+            _surface.SetTranslatedSelection(showingTranslation ? null : _inPlaceResult);
             _originalToggle.Content = showingTranslation ? "查看译文" : "查看原文";
         });
         _copyTranslation = CreateInlineButton("复制译文", (_, _) =>
@@ -87,25 +85,31 @@ internal sealed partial class CaptureOverlayWindow
         UpdateProcessingIndicator();
     }
 
-    private void CancelTextOperations()
+    private void CancelTextOperations(bool keepInPlace = false)
     {
         CancelTranslation();
         _ocrCard.CancelRecognition();
         _ocrCard.Visibility = Visibility.Collapsed;
         _translationCard.Visibility = Visibility.Collapsed;
-        ClearInPlaceTranslation();
+        if (!keepInPlace)
+        {
+            ClearInPlaceTranslation();
+        }
         if (!_captureClosed)
             PositionFloatingPanels();
     }
+
+    private void OnCaptureAnnotationsChanged() => CancelTextOperations(keepInPlace:
+        _inPlaceResult is not null && _surface.GetMosaicAnnotations().SequenceEqual(_inPlaceMosaics));
 
     private void UpdateProcessingIndicator() =>
         _surface.SetProcessing(!_captureClosed && (_translationBusy || _ocrCard.IsRecognizing));
 
     private void ClearInPlaceTranslation()
     {
-        _inPlaceImage.Source = null;
-        _inPlaceImage.Visibility = Visibility.Collapsed;
+        _surface.SetTranslatedSelection(null);
         _inPlaceResult = null;
+        _inPlaceMosaics = [];
         _inPlaceText = string.Empty;
         _inPlaceStatusBar.Visibility = Visibility.Collapsed;
         if (_originalToggle is not null)
@@ -130,10 +134,6 @@ internal sealed partial class CaptureOverlayWindow
             return;
         var sx = ActualWidth / _frame.Width;
         var sy = ActualHeight / _frame.Height;
-        _inPlaceImage.Width = selection.Width * sx;
-        _inPlaceImage.Height = selection.Height * sy;
-        Canvas.SetLeft(_inPlaceImage, selection.X * sx);
-        Canvas.SetTop(_inPlaceImage, selection.Y * sy);
         if (_inPlaceStatusBar.Visibility != Visibility.Visible)
             return;
         _inPlaceStatusBar.Width = Math.Min(Math.Max(400, selection.Width * sx), Math.Max(1, ActualWidth - 16));
@@ -150,11 +150,6 @@ internal sealed partial class CaptureOverlayWindow
         Canvas.SetLeft(_inPlaceStatusBar, Math.Clamp(selection.X * sx, 8, Math.Max(8, ActualWidth - _inPlaceStatusBar.Width - 8)));
         Canvas.SetTop(_inPlaceStatusBar, top);
     }
-
-    private PixelBuffer RenderCurrentSelection() =>
-        _inPlaceResult is not null && _inPlaceImage.Visibility == Visibility.Visible
-            ? _inPlaceResult
-            : _surface.RenderSelection();
 
     private async Task TranslateInPlaceAsync(AppSettings settings, string targetLanguage, CancellationTokenSource operation)
     {
@@ -205,9 +200,11 @@ internal sealed partial class CaptureOverlayWindow
             return;
         // Replace the selection only once the complete batch succeeds. Failure
         // leaves the original readable and never shows an incomplete translation.
-        _inPlaceResult = InPlaceTranslationRenderer.Render(source, translated);
-        _inPlaceImage.Source = _inPlaceResult.ToBitmapSource();
-        _inPlaceImage.Visibility = Visibility.Visible;
+        // Keep editable annotations out of the translated base. They are drawn
+        // over both the original and translated versions by the capture surface.
+        _inPlaceResult = InPlaceTranslationRenderer.Render(_surface.RenderOriginalSelection(), translated);
+        _inPlaceMosaics = _surface.GetMosaicAnnotations();
+        _surface.SetTranslatedSelection(_inPlaceResult);
         _inPlaceText = string.Join(Environment.NewLine + Environment.NewLine, translated.Select(region => region.Text));
         _originalToggle.Visibility = _copyTranslation.Visibility = Visibility.Visible;
         SetInPlaceStatus(usedFallback ? "原位翻译完成 · 已使用备用服务" : "原位翻译完成");

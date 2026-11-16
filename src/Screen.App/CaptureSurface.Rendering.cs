@@ -23,7 +23,7 @@ internal sealed partial class CaptureSurface
         // can meet the boundary or outlive a later selection resize.
         dc.DrawImage(_source, new Rect(0, 0, ActualWidth, ActualHeight));
         var hasMosaic = _annotations.Any(item => item.Kind == AnnotationKind.Mosaic);
-        PixelBuffer compositedSource;
+        PixelBuffer? compositedSource = null;
         if (hasMosaic)
         {
             compositedSource = GetMosaicComposite();
@@ -32,16 +32,17 @@ internal sealed partial class CaptureSurface
         {
             // Every mosaic was undone — drop the full-screen composite buffers
             // instead of carrying them until the window closes.
-            _mosaicComposite = null;
-            _mosaicCompositeSource = null;
-            _appliedMosaicSnapshots = null;
-            compositedSource = _sourceBuffer;
+            ResetMosaicComposite();
         }
         dc.PushTransform(new ScaleTransform(ActualWidth / _frame.Width, ActualHeight / _frame.Height));
         dc.PushClip(new RectangleGeometry(ToRect(Selection)));
         if (hasMosaic)
         {
             dc.DrawImage(_mosaicCompositeSource!, new Rect(0, 0, _frame.Width, _frame.Height));
+        }
+        else if (_translatedSelectionSource is { } translation)
+        {
+            dc.DrawImage(translation, ToRect(Selection));
         }
         DrawAnnotations(
             dc,
@@ -136,6 +137,48 @@ internal sealed partial class CaptureSurface
         double Thickness,
         double Scale);
 
+    internal bool IsShowingTranslation => _translatedSelection is not null;
+
+    internal void SetTranslatedSelection(PixelBuffer? image)
+    {
+        if (ReferenceEquals(image, _translatedSelection))
+        {
+            return;
+        }
+        _translatedSelection = image;
+        _translatedSelectionSource = image?.ToBitmapSource();
+        _translatedFrame = null;
+        ResetMosaicComposite();
+        InvalidateVisual();
+    }
+
+    private void ResetMosaicComposite()
+    {
+        _mosaicComposite = null;
+        _mosaicCompositeSource = null;
+        _appliedMosaicSnapshots = null;
+    }
+
+    private PixelBuffer CompositingSource()
+    {
+        if (_translatedSelection is not { } translation)
+        {
+            return _sourceBuffer;
+        }
+        if (_translatedFrame is null)
+        {
+            _translatedFrame = _sourceBuffer with { Pixels = (byte[])_sourceBuffer.Pixels.Clone() };
+            var rowBytes = translation.Width * 4;
+            for (var y = 0; y < translation.Height; y++)
+            {
+                var offset = (Selection.Y + y) * _translatedFrame.Stride + Selection.X * 4;
+                translation.Pixels.AsSpan(y * translation.Stride, rowBytes)
+                    .CopyTo(_translatedFrame.Pixels.AsSpan(offset, rowBytes));
+            }
+        }
+        return _translatedFrame;
+    }
+
     /// <summary>
     /// Returns the full-screen buffer with every committed mosaic applied.
     /// Rebuilds are incremental: only the union of regions whose mosaics
@@ -144,12 +187,10 @@ internal sealed partial class CaptureSurface
     /// </summary>
     private PixelBuffer GetMosaicComposite()
     {
+        var source = CompositingSource();
         if (_mosaicComposite is null)
         {
-            var pixels = new byte[_sourceBuffer.Pixels.Length];
-            _sourceBuffer.Pixels.AsSpan().CopyTo(pixels);
-            _mosaicComposite = new PixelBuffer(
-                pixels, _sourceBuffer.Width, _sourceBuffer.Height, _sourceBuffer.Stride);
+            _mosaicComposite = source with { Pixels = (byte[])source.Pixels.Clone() };
             _mosaicCompositeSource = new WriteableBitmap(
                 _sourceBuffer.Width, _sourceBuffer.Height, 96, 96, PixelFormats.Bgra32, null);
             _appliedMosaicSnapshots = null;
@@ -202,7 +243,7 @@ internal sealed partial class CaptureSurface
             }
         } while (expanded);
 
-        CopyRegion(_sourceBuffer, _mosaicComposite, region);
+        CopyRegion(source, _mosaicComposite, region);
         foreach (var mosaic in mosaics)
         {
             if (!mosaic.Bounds.Intersect(region).IsEmpty)
@@ -274,7 +315,7 @@ internal sealed partial class CaptureSurface
         }
     }
 
-    private void DrawWorkingAnnotation(DrawingContext dc, PixelBuffer compositedSource)
+    private void DrawWorkingAnnotation(DrawingContext dc, PixelBuffer? compositedSource)
     {
         var tool = Tool switch
         {
@@ -295,7 +336,7 @@ internal sealed partial class CaptureSurface
         var item = new AnnotationItem(Guid.Empty, tool, points, bounds, CurrentStyle, null, null, int.MaxValue);
         if (tool == AnnotationKind.Mosaic)
         {
-            DrawMosaicPreview(dc, compositedSource, item);
+            DrawMosaicPreview(dc, compositedSource ?? CompositingSource(), item);
         }
         else
         {
@@ -382,21 +423,27 @@ internal sealed partial class CaptureSurface
                 dc.DrawText(formatted, rect.TopLeft);
                 break;
             case AnnotationKind.Number:
-                var radius = Math.Max(12, item.Style.FontSize * 0.62);
-                var center = rect.TopLeft;
-                dc.DrawEllipse(brush, null, center, radius, radius);
+                var radius = NumberRadius(item.Style);
+                var numberPoint = item.Points.Count > 0 ? PointAt(0) : new PixelPoint(rect.X, rect.Y);
+                var center = new Point(numberPoint.X, numberPoint.Y);
+                var luminance = 0.2126 * color.ScR + 0.7152 * color.ScG + 0.0722 * color.ScB;
+                var numberBrush = luminance > 0.179 ? Brushes.Black : Brushes.White;
+                var outline = color == Colors.White ? new Pen(numberBrush, 1) : null;
+                dc.DrawEllipse(brush, outline, center, radius, radius);
                 var numberText = new FormattedText(
                     item.Number?.ToString() ?? string.Empty,
                     System.Globalization.CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight,
                     new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
                     radius,
-                    Brushes.White,
+                    numberBrush,
                     1.0);
                 dc.DrawText(numberText, new Point(center.X - numberText.Width / 2, center.Y - numberText.Height / 2));
                 break;
         }
     }
+
+    private static double NumberRadius(AnnotationStyle style) => Math.Max(5, style.FontSize / 2);
 
     private static void DrawArrow(DrawingContext dc, Pen pen, Point start, Point end)
     {

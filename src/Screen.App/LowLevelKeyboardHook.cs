@@ -6,6 +6,7 @@ namespace Screen.App;
 
 internal sealed class LowLevelKeyboardHook : IDisposable
 {
+    private static readonly Func<int, bool> IsKeyDown = key => NativeMethods.GetAsyncKeyState(key) < 0;
     private readonly NativeMethods.KeyboardHookProc _callback;
     private readonly nint _targetWindow;
     private readonly bool _requireForegroundWindow;
@@ -61,9 +62,8 @@ internal sealed class LowLevelKeyboardHook : IDisposable
             return NativeMethods.CallNextHookEx(_hook, code, wParam, lParam);
         }
 
-        const int llkhfInjected = 0x10;
         var flags = Marshal.ReadInt32(lParam, 8);
-        if ((flags & llkhfInjected) != 0
+        if (!IsPlainKeyPress(flags, IsKeyDown)
             || (_requireForegroundWindow
                 && (_targetWindow == 0 || NativeMethods.GetForegroundWindow() != _targetWindow)))
         {
@@ -95,6 +95,18 @@ internal sealed class LowLevelKeyboardHook : IDisposable
             EscapePressed?.Invoke(this, EventArgs.Empty);
         }
         return 1;
+    }
+
+    internal static bool IsPlainKeyPress(int flags, Func<int, bool> isKeyDown)
+    {
+        const int llkhfInjected = 0x10;
+        const int llkhfAltDown = 0x20;
+        return (flags & (llkhfInjected | llkhfAltDown)) == 0
+            && !isKeyDown(0x10) // Shift
+            && !isKeyDown(0x11) // Ctrl
+            && !isKeyDown(0x12) // Alt
+            && !isKeyDown(0x5B) // Left Windows
+            && !isKeyDown(0x5C); // Right Windows
     }
 
     public void Dispose()

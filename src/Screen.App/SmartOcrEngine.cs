@@ -1,7 +1,4 @@
 using Screen.Core;
-using System.Net.Http;
-using System.Runtime.InteropServices;
-using System.Text.Json;
 
 namespace Screen.App;
 
@@ -58,20 +55,12 @@ internal sealed class SmartOcrEngine(
             await Task.WhenAll(localTask, cloudTask).ConfigureAwait(false);
             var localResult = await localTask.ConfigureAwait(false);
             var cloudResult = await cloudTask.ConfigureAwait(false);
-            if (cloudResult is null)
-            {
-                return localResult is null
-                    ? throw new InvalidOperationException("本地 OCR 与云端 OCR 均不可用。")
-                    : localResult with { ProviderName = "PP-OCRv6 本地（云端已回退）" };
-            }
-            return localResult is null
-                ? cloudResult
-                : OcrQualityEvaluator.Fuse(localResult, cloudResult);
+            return MergeResults(localResult, cloudResult);
         }
 
-        var localDocument = await TryLocalAsync(local, image, languageTag, purpose, cancellationToken)
+        var localAttempt = await TryLocalAsync(local, image, languageTag, purpose, cancellationToken)
             .ConfigureAwait(false);
-        if (localDocument is not null
+        if (localAttempt.Document is { } localDocument
             && !OcrQualityEvaluator.NeedsCloudEnhancement(
                 localDocument,
                 image,
@@ -87,15 +76,24 @@ internal sealed class SmartOcrEngine(
                 profile.CloudTimeoutMilliseconds,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (enhanced is null)
+        return MergeResults(localAttempt, enhanced);
+    }
+
+    private static OcrDocument MergeResults(RecognitionAttempt local, RecognitionAttempt cloud)
+    {
+        if (local.Document is { } localDocument)
         {
-            return localDocument is null
-                ? throw new InvalidOperationException("本地 OCR 与云端 OCR 均不可用。")
+            return cloud.Document is { } cloudDocument
+                ? OcrQualityEvaluator.Fuse(localDocument, cloudDocument)
                 : localDocument with { ProviderName = "PP-OCRv6 本地（云端已回退）" };
         }
-        return localDocument is null
-            ? enhanced
-            : OcrQualityEvaluator.Fuse(localDocument, enhanced);
+        if (cloud.Document is { } onlyCloud)
+        {
+            return onlyCloud;
+        }
+        throw new InvalidOperationException(
+            $"本地 OCR：{local.Error!.Message}；腾讯云 OCR：{cloud.Error!.Message}",
+            new AggregateException(local.Error, cloud.Error));
     }
 
     private static Task<OcrDocument> RecognizeLocalAsync(
@@ -108,7 +106,7 @@ internal sealed class SmartOcrEngine(
             ? paddle.RecognizeAsync(image, languageTag, purpose, cancellationToken)
             : local.RecognizeAsync(image, languageTag, cancellationToken);
 
-    private static async Task<OcrDocument?> TryLocalAsync(
+    private static async Task<RecognitionAttempt> TryLocalAsync(
         IOcrEngine local,
         PixelBuffer image,
         string languageTag,
@@ -117,8 +115,8 @@ internal sealed class SmartOcrEngine(
     {
         try
         {
-            return await RecognizeLocalAsync(local, image, languageTag, purpose, cancellationToken)
-                .ConfigureAwait(false);
+            return new(await RecognizeLocalAsync(local, image, languageTag, purpose, cancellationToken)
+                .ConfigureAwait(false), null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -129,11 +127,11 @@ internal sealed class SmartOcrEngine(
             // Missing model files, ONNX runtime / native loader failures, or a
             // disposed engine must not discard a valid cloud OCR result.
             SimpleLogger.LogWarning($"Local OCR failed while cloud fallback is available: {exception.GetType().Name}: {exception.Message}");
-            return null;
+            return new(null, exception);
         }
     }
 
-    private async Task<OcrDocument?> TryCloudAsync(
+    private async Task<RecognitionAttempt> TryCloudAsync(
         PixelBuffer image,
         string secretId,
         string secretKey,
@@ -144,23 +142,25 @@ internal sealed class SmartOcrEngine(
         timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(timeoutMilliseconds, 800, 8000)));
         try
         {
-            return await cloud.RecognizeAsync(image, secretId, secretKey, timeout.Token)
-                .ConfigureAwait(false);
+            return new(await cloud.RecognizeAsync(image, secretId, secretKey, timeout.Token)
+                .ConfigureAwait(false), null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            return null;
+            return new(null, new TimeoutException("识别请求已超时。", exception));
         }
         catch (Exception exception)
         {
             SimpleLogger.LogWarning($"Cloud OCR failed, falling back to local result if available: {exception.GetType().Name}: {exception.Message}");
-            return null;
+            return new(null, exception);
         }
     }
 
     public void Dispose() => (local as IDisposable)?.Dispose();
+
+    private sealed record RecognitionAttempt(OcrDocument? Document, Exception? Error);
 }

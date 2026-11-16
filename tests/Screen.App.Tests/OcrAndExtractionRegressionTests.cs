@@ -2,6 +2,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Screen.Core;
 
@@ -126,6 +127,53 @@ public sealed class OcrAndExtractionRegressionTests
     }
 
     [TestMethod]
+    public async Task CloudOcrEncodesAHighEntropyImageAsJpegWhenPngWouldExceedTheBase64LimitAsync()
+    {
+        const int side = 1400;
+        var pixels = new byte[side * side * 4];
+        new Random(1).NextBytes(pixels);
+        for (var alpha = 3; alpha < pixels.Length; alpha += 4)
+        {
+            pixels[alpha] = 255;
+        }
+        using var http = new HttpClient(new StubHandler("""{"Response":{}}""", payload =>
+        {
+            using var json = JsonDocument.Parse(payload);
+            var encoded = json.RootElement.GetProperty("ImageBase64").GetString()!;
+            Assert.IsTrue(encoded.Length <= 7_000_000);
+            var bytes = Convert.FromBase64String(encoded);
+            Assert.AreEqual(0xFF, (int)bytes[0]);
+            Assert.AreEqual(0xD8, (int)bytes[1], "The upload must use JPEG when PNG exceeds the encoded limit.");
+        }));
+
+        var image = new PixelBuffer(pixels, side, side, side * 4);
+        var document = await new TencentCloudOcrEngine(http).RecognizeAsync(image, "offline-id", "offline-key");
+
+        Assert.IsTrue(document.UsedOnlineService);
+    }
+
+    [TestMethod]
+    public async Task OcrCardPreservesBothErrorsWhenLocalAndCloudRecognitionFailAsync()
+    {
+        var settings = new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"Screen.Ocr.Tests-{Guid.NewGuid():N}.json"));
+        using var http = new HttpClient(new StubHandler(
+            """{"Response":{"Error":{"Code":"AuthFailure","Message":"denied"}}}"""));
+        using var smart = new SmartOcrEngine(
+            new ThrowingOcrEngine(new InvalidOperationException("Missing local model")),
+            new TencentCloudOcrEngine(http),
+            settings,
+            new CredentialService(),
+            _ => "offline-credential");
+        var image = new PixelBuffer(new byte[32 * 32 * 4], 32, 32, 32 * 4);
+
+        var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            OcrCard.RecognizeAutomaticallyAsync(smart, image));
+
+        StringAssert.Contains(exception.Message, "Missing local model");
+        StringAssert.Contains(exception.Message, "AuthFailure");
+    }
+
+    [TestMethod]
     public async Task PaddleOcrEngineReleasesModelsAfterIdleTimeoutAndReloadsOnNextUseAsync()
     {
         var modelRoot = FindBuiltAppModelsDirectory();
@@ -230,12 +278,18 @@ public sealed class OcrAndExtractionRegressionTests
         }
     }
 
-    private sealed class StubHandler(string json) : HttpMessageHandler
+    private sealed class StubHandler(string json, Action<string>? inspect = null) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (inspect is not null)
+            {
+                inspect(await request.Content!.ReadAsStringAsync(cancellationToken));
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+            };
+        }
     }
 }

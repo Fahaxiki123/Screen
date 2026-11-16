@@ -69,12 +69,20 @@ internal static class BitmapUtilities
     public static void CopyToClipboard(PixelBuffer buffer)
     {
         var bitmap = buffer.ToBitmapSource();
+        WriteClipboardWithRetry(() => Clipboard.SetImage(bitmap), "剪贴板正被其他程序占用，复制截图失败，请重试。");
+    }
+
+    public static void SetClipboardTextWithRetry(string text) =>
+        WriteClipboardWithRetry(() => Clipboard.SetText(text), "剪贴板正被其他程序占用，复制失败，请重试。");
+
+    internal static void WriteClipboardWithRetry(Action write, string failureMessage)
+    {
         Exception? lastError = null;
         for (var attempt = 0; attempt < 5; attempt++)
         {
             try
             {
-                Clipboard.SetImage(bitmap);
+                write();
                 return;
             }
             catch (System.Runtime.InteropServices.ExternalException ex)
@@ -86,28 +94,6 @@ internal static class BitmapUtilities
                 }
             }
         }
-        throw new InvalidOperationException("剪贴板正被其他程序占用，复制截图失败，请重试。", lastError);
-    }
-
-    /// <summary>
-    /// Clipboard contention (CLIPBRD_E_CANT_OPEN while another process holds
-    /// it) is transient; retry briefly instead of letting the failure escape
-    /// to the global handler as an "unhandled error" dialog.
-    /// </summary>
-    public static void SetClipboardTextWithRetry(string text)
-    {
-        for (var attempt = 0; attempt < 5; attempt++)
-        {
-            try
-            {
-                Clipboard.SetText(text);
-                return;
-            }
-            catch (System.Runtime.InteropServices.ExternalException) when (attempt < 4)
-            {
-                Thread.Sleep(25 * (attempt + 1));
-            }
-        }
-        throw new InvalidOperationException("剪贴板正被其他程序占用，复制失败，请重试。");
+        throw new InvalidOperationException(failureMessage, lastError);
     }
 }

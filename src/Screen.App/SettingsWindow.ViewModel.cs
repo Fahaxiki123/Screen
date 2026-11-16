@@ -20,6 +20,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     private readonly DispatcherTimer _saveTimer;
     private readonly AppSettings _settings;
     private readonly Dictionary<string, (string Secret, string? EndpointScope)> _pendingCredentials = new();
+    private readonly HashSet<string> _editedApiKeys = new();
 
     private bool _dirty;
     private bool _disposed;
@@ -544,15 +545,31 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public string ApiKey
     {
         get => _apiKey;
-        set => SetCredential(ref _apiKey, value, TranslationProfile.ApiKeyCredentialName,
-            TranslationCredentialStore.EndpointScope(BaseAddress));
+        set => SetApiKey(ref _apiKey, value, racing: false);
     }
 
     public string RacingApiKey
     {
         get => _racingApiKey;
-        set => SetCredential(ref _racingApiKey, value, TranslationProfile.RacingApiKeyCredentialName,
-            TranslationCredentialStore.EndpointScope(RacingBaseAddress));
+        set => SetApiKey(ref _racingApiKey, value, racing: true);
+    }
+
+    public bool CanBindApiKey => CanBindDraftKey(racing: false);
+    public bool CanBindRacingApiKey => CanBindDraftKey(racing: true);
+
+    public void BindDraftKey(bool racing)
+    {
+        var slot = ApiKeySlot(racing);
+        var scope = TranslationCredentialStore.EndpointScope(ApiKeyAddress(racing));
+        if (scope is null || !HasUnboundDraft(slot))
+        {
+            return;
+        }
+
+        var pending = _pendingCredentials[slot];
+        _pendingCredentials[slot] = (pending.Secret, scope);
+        OnPropertyChanged(racing ? nameof(CanBindRacingApiKey) : nameof(CanBindApiKey));
+        ScheduleSave();
     }
 
     public void SetStatus(string text, bool isError)
@@ -566,10 +583,10 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public TranslationProfile BuildTranslationProfile() => _settings.Translation;
 
     public TranslationCredentials BuildTranslationCredentials() => new(
-        TranslationCredentialStore.EndpointScope(BaseAddress) is not null && !string.IsNullOrWhiteSpace(_apiKey) ? _apiKey : null,
+        GetApiKeyForRequest(_apiKey, racing: false),
         string.IsNullOrWhiteSpace(_tencentSecretId) ? null : _tencentSecretId,
         string.IsNullOrWhiteSpace(_tencentSecretKey) ? null : _tencentSecretKey,
-        TranslationCredentialStore.EndpointScope(RacingBaseAddress) is not null && !string.IsNullOrWhiteSpace(_racingApiKey) ? _racingApiKey : null);
+        GetApiKeyForRequest(_racingApiKey, racing: true));
 
     public void SaveNow()
     {
@@ -582,14 +599,14 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         // AI credentials may only be written for a committed address. Other
         // settings errors must still allow changes to an already bound key.
         var settingsError = _dirty ? SaveSettings() : null;
-        var credentialError = SavePendingCredentials();
+        var credentialError = SavePendingCredentials(out var retryCredentials);
         var error = credentialError ?? settingsError;
         if (credentialError is not null && settingsError is not null)
         {
             error = $"{credentialError} · {settingsError}";
         }
         SetStatus(error ?? $"已自动保存 · {DateTime.Now:HH:mm:ss}", isError: error is not null);
-        if (error is not null && !_disposed)
+        if (!_disposed && (_dirty || retryCredentials))
         {
             _saveTimer.Start();
         }
@@ -661,10 +678,83 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         {
             return;
         }
-        _pendingCredentials.Remove(slot);
-        field = TranslationCredentialStore.ReadKey(_credentials, slot, newAddress) ?? string.Empty;
+        if (_editedApiKeys.Contains(slot) && !string.IsNullOrWhiteSpace(field))
+        {
+            // Keep input from this dialog even if the save timer already ran.
+            // Changing the address still requires a fresh binding decision.
+            _pendingCredentials[slot] = (field, null);
+        }
+        else
+        {
+            _pendingCredentials.Remove(slot);
+            _editedApiKeys.Remove(slot);
+            field = TranslationCredentialStore.ReadKey(_credentials, slot, newAddress) ?? string.Empty;
+        }
         OnPropertyChanged(propertyName);
+        OnPropertyChanged(slot == TranslationProfile.ApiKeyCredentialName ? nameof(CanBindApiKey) : nameof(CanBindRacingApiKey));
     }
+
+    private string? GetApiKeyForRequest(string field, bool racing)
+    {
+        var scope = TranslationCredentialStore.EndpointScope(ApiKeyAddress(racing));
+        return scope is not null
+               && (!_pendingCredentials.TryGetValue(ApiKeySlot(racing), out var pending) || pending.EndpointScope == scope)
+               && !string.IsNullOrWhiteSpace(field)
+            ? field
+            : null;
+    }
+
+    private void SetApiKey(ref string field, string value, bool racing)
+    {
+        // Programmatic PasswordBox updates echo the current value.
+        if (string.Equals(field, value, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var slot = ApiKeySlot(racing);
+        var address = ApiKeyAddress(racing);
+        var property = racing ? nameof(RacingApiKey) : nameof(ApiKey);
+        var unbound = HasUnboundDraft(slot);
+        var clearing = string.IsNullOrWhiteSpace(value);
+        if (clearing)
+        {
+            _editedApiKeys.Remove(slot);
+        }
+        else
+        {
+            _editedApiKeys.Add(slot);
+        }
+        if (unbound && clearing)
+        {
+            _pendingCredentials.Remove(slot);
+            field = TranslationCredentialStore.ReadKey(_credentials, slot, address) ?? string.Empty;
+            OnPropertyChanged(property);
+            if (_dirty || _pendingCredentials.Count != 0)
+            {
+                ScheduleSave();
+            }
+            else
+            {
+                SetStatus("已放弃 Key 草稿", isError: false);
+            }
+        }
+        else
+        {
+            SetCredential(ref field, value, slot, unbound ? null : TranslationCredentialStore.EndpointScope(address), property);
+        }
+        OnPropertyChanged(racing ? nameof(CanBindRacingApiKey) : nameof(CanBindApiKey));
+    }
+
+    private bool CanBindDraftKey(bool racing) => HasUnboundDraft(ApiKeySlot(racing))
+        && TranslationCredentialStore.EndpointScope(ApiKeyAddress(racing)) is not null;
+
+    private bool HasUnboundDraft(string slot) => _pendingCredentials.TryGetValue(slot, out var pending)
+        && pending.EndpointScope is null && !string.IsNullOrWhiteSpace(pending.Secret);
+
+    private string ApiKeyAddress(bool racing) => racing ? RacingBaseAddress : BaseAddress;
+
+    private static string ApiKeySlot(bool racing) => racing ? TranslationProfile.RacingApiKeyCredentialName : TranslationProfile.ApiKeyCredentialName;
 
     private void SetCredential(ref string field, string value, string targetName,
         string? endpointScope = null, [CallerMemberName] string? propertyName = null)
@@ -679,8 +769,9 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         ScheduleSave();
     }
 
-    private string? SavePendingCredentials()
+    private string? SavePendingCredentials(out bool retry)
     {
+        retry = false;
         string? error = null;
         foreach (var (targetName, pending) in _pendingCredentials.ToArray())
         {
@@ -688,12 +779,37 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             {
                 if (targetName is TranslationProfile.ApiKeyCredentialName or TranslationProfile.RacingApiKeyCredentialName)
                 {
+                    if (pending.EndpointScope is null)
+                    {
+                        // Ignore a deletion made against an invalid/unbound address.
+                        if (string.IsNullOrWhiteSpace(pending.Secret))
+                        {
+                            _pendingCredentials.Remove(targetName);
+                            continue;
+                        }
+
+                        bool racing = targetName == TranslationProfile.RacingApiKeyCredentialName;
+                        if (_settings.Translation.Provider == TranslationProviderKind.OpenAiCompatible
+                            && (!racing || EnableRacing))
+                        {
+                            error ??= CanBindDraftKey(racing)
+                                ? "已保留 Key 草稿，请绑定到当前地址。"
+                                : "已保留 Key 草稿，请输入有效的 HTTPS 地址后绑定。";
+                        }
+                        continue;
+                    }
+
                     var saved = _store.Load().Translation;
                     var savedAddress = targetName == TranslationProfile.ApiKeyCredentialName
                         ? saved.BaseAddress : saved.RacingBaseAddress;
-                    if (pending.EndpointScope is null || pending.EndpointScope != TranslationCredentialStore.EndpointScope(savedAddress))
+                    if (pending.EndpointScope != TranslationCredentialStore.EndpointScope(savedAddress))
                     {
-                        error ??= "凭据保存失败：请先保存该密钥对应的 HTTPS 基础地址。";
+                        if (_settings.Translation.Provider == TranslationProviderKind.OpenAiCompatible
+                            && (targetName != TranslationProfile.RacingApiKeyCredentialName || EnableRacing))
+                        {
+                            error ??= "凭据保存失败：请先保存该密钥对应的 HTTPS 基础地址。";
+                            retry = true;
+                        }
                         continue;
                     }
                     TranslationCredentialStore.SaveKey(_credentials, targetName, pending.Secret, pending.EndpointScope);
@@ -711,6 +827,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             catch (Exception exception)
             {
                 error ??= $"凭据保存失败：{exception.Message}";
+                retry = true;
             }
         }
         return error;
@@ -761,6 +878,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         // The racing endpoint carries the same Bearer credential; empty means
         // the race is dormant, which is fine.
         if (_settings.Translation.Provider == TranslationProviderKind.OpenAiCompatible
+            && _settings.Translation.EnableRacing
             && !string.IsNullOrWhiteSpace(_settings.Translation.RacingBaseAddress)
             && TranslationEndpointRules.ValidateBaseAddress(_settings.Translation.RacingBaseAddress) is { } racingAddressError)
         {
@@ -771,7 +889,8 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         {
             return "AI 模型不能为空。";
         }
-        if (_settings.Translation.EnableFastFallbackRace
+        if (_settings.Translation.Provider == TranslationProviderKind.OpenAiCompatible
+            && _settings.Translation.EnableFastFallbackRace
             && (_settings.Translation.FastFallbackDelaySeconds < 2 || _settings.Translation.FastFallbackDelaySeconds > 30))
         {
             return "快速翻译等待秒数需要在 2 到 30 之间。";

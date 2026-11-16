@@ -240,6 +240,31 @@ public partial class SettingsWindow
         }
     }
 
+    private FrameworkElement CreateApiKeyInput(bool racing)
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(CreateCredentialPasswordBox(
+            racing ? nameof(SettingsViewModel.RacingApiKey) : nameof(SettingsViewModel.ApiKey),
+            password: racing ? _viewModel.RacingApiKey : _viewModel.ApiKey));
+
+        var bind = CreateSecondaryButton("绑定 Key 到当前地址");
+        bind.HorizontalAlignment = HorizontalAlignment.Right;
+        bind.SetBinding(VisibilityProperty, new Binding(racing
+            ? nameof(SettingsViewModel.CanBindRacingApiKey) : nameof(SettingsViewModel.CanBindApiKey))
+        {
+            Source = _viewModel,
+            Converter = new BooleanToVisibilityConverter()
+        });
+        bind.SetBinding(ToolTipProperty, new Binding(racing
+            ? nameof(SettingsViewModel.RacingBaseAddress) : nameof(SettingsViewModel.BaseAddress))
+        {
+            Source = _viewModel
+        });
+        bind.Click += (_, _) => _viewModel.BindDraftKey(racing);
+        panel.Children.Add(bind);
+        return panel;
+    }
+
     private ComboBox CreateBoundComboBox(string propertyName, IReadOnlyList<string> items, double width = 280)
     {
         var comboBox = new ComboBox

@@ -56,7 +56,7 @@ internal sealed class ScrollCaptureSequence
         // CaptureAsync keeps a single capture in flight, so the stitcher
         // session still has exactly one writer.
         var lastObserved = _lastObserved;
-        var (stable, unchanged, failure) = await Task.Run(() =>
+        var (stable, added, failure) = await Task.Run(() =>
         {
             // Stillness belongs to consecutive screen observations, not to the
             // last viewport admitted by the stitcher. A settled hover/repaint
@@ -64,19 +64,16 @@ internal sealed class ScrollCaptureSequence
             var stableNow = lastObserved is not null && AreNearlyEqual(lastObserved, crop);
             if (_stitch.LastFrame is { } previous && AreNearlyEqual(previous, crop))
             {
-                return (stableNow, true, (string?)null);
+                return (stableNow, false, (string?)null);
             }
-            return (stableNow, false, _stitch.TryAppend(crop, token));
+            var (addedFrame, failureReason) = _stitch.TryAppend(crop, token);
+            return (stableNow, addedFrame, failureReason);
         }, token);
         _stableObservations = stable ? Math.Min(2, _stableObservations + 1) : 0;
         _lastObserved = crop;
-        if (unchanged)
-        {
-            return new ScrollFrameCapture(ScrollFrameOutcome.Unchanged);
-        }
-        return failure is null
-            ? new ScrollFrameCapture(ScrollFrameOutcome.Added)
-            : new ScrollFrameCapture(ScrollFrameOutcome.Rejected, failure);
+        return failure is not null
+            ? new ScrollFrameCapture(ScrollFrameOutcome.Rejected, failure)
+            : new ScrollFrameCapture(added ? ScrollFrameOutcome.Added : ScrollFrameOutcome.Unchanged);
     }
 
     /// <summary>

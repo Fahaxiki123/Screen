@@ -22,6 +22,7 @@ internal sealed class AppHost : IDisposable
     private readonly ITranslationProvider _translationProvider;
     private AppSettings _settings;
     private Icon? _trayIcon;
+    private SettingsWindow? _settingsWindow;
     private RecordingController? _recordingController;
     private bool _recordingFlowActive;
     private bool _settingsLoadFailed;
@@ -79,7 +80,7 @@ internal sealed class AppHost : IDisposable
         _notifyIcon.Icon = _trayIcon;
         _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
         _notifyIcon.Visible = true;
-        _notifyIcon.DoubleClick += (_, _) =>
+        _notifyIcon.DoubleClick += async (_, _) =>
         {
             if (_pinWindowManager.HasClickThroughWindows)
             {
@@ -88,7 +89,7 @@ internal sealed class AppHost : IDisposable
             }
             if (!RecordingActive())
             {
-                _ = _coordinator.StartCaptureAsync();
+                await _coordinator.StartCaptureAsync();
             }
         };
 
@@ -100,43 +101,8 @@ internal sealed class AppHost : IDisposable
             }
         };
         _hotKeyWindow.ClickThroughRecoveryRequested += (_, _) => RecoverClickThrough(showConfirmation: true);
-        _hotKeyWindow.RecordRequested += (_, _) => _ = StartRecordingSelectionAsync();
-        if (!_hotKeyWindow.TrySetPriority(_settings.PreferScreenHotKeys))
-        {
-            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键", "无法启用优先模式，已使用普通快捷键注册。", Forms.ToolTipIcon.Warning);
-        }
-        if (!_hotKeyWindow.RegisterRecordHotKey(_settings.RecordHotKey))
-        {
-            _notifyIcon.ShowBalloonTip(
-                5000,
-                "Screen 快捷键冲突",
-                $"录屏快捷键 {_settings.RecordHotKey} 已被其他程序占用，可在设置中重新指定。",
-                Forms.ToolTipIcon.Warning);
-        }
-        if (!_hotKeyWindow.RegisterCaptureHotKey(_settings.HotKey))
-        {
-            var failed = _settings.HotKey;
-            _settings.HotKey = AppSettings.DefaultHotKey;
-            _settingsStore.Update(latest => latest.HotKey = _settings.HotKey);
-            _hotKeyWindow.RegisterCaptureHotKey(_settings.HotKey);
-            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键冲突", $"{failed} 已被其他程序占用，已回退为 {_settings.HotKey}。", Forms.ToolTipIcon.Warning);
-        }
-        if (!_hotKeyWindow.RegisterClickThroughRecoveryHotKey(_settings.ClickThroughRecoveryHotKey))
-        {
-            var failed = _settings.ClickThroughRecoveryHotKey;
-            var fallback = string.Equals(
-                failed,
-                AppSettings.DefaultClickThroughRecoveryHotKey,
-                StringComparison.OrdinalIgnoreCase)
-                ? "Ctrl+Shift+F1"
-                : AppSettings.DefaultClickThroughRecoveryHotKey;
-            _settings.ClickThroughRecoveryHotKey = fallback;
-            _settingsStore.Update(latest => latest.ClickThroughRecoveryHotKey = fallback);
-            var fallbackRegistered = _hotKeyWindow.RegisterClickThroughRecoveryHotKey(fallback);
-            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键冲突", fallbackRegistered
-                ? $"恢复贴图穿透快捷键 {failed} 已被占用，已回退为 {fallback}。"
-                : $"{failed} 和备用快捷键 {fallback} 均被占用，请从设置中重新指定；仍可从托盘恢复。", Forms.ToolTipIcon.Warning);
-        }
+        _hotKeyWindow.RecordRequested += async (_, _) => await StartRecordingSelectionAsync();
+        RegisterConfiguredShortcuts();
         _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
         _notifyIcon.ContextMenuStrip = BuildMenu();
 
@@ -322,20 +288,20 @@ internal sealed class AppHost : IDisposable
     {
         var menu = new Forms.ContextMenuStrip();
         GraphiteToolStripRenderer.ApplyTo(menu);
-        menu.Items.Add($"截图  {_settings.HotKey}", null, (_, _) =>
+        menu.Items.Add($"截图  {_settings.HotKey}", null, async (_, _) =>
         {
             if (!RecordingActive())
             {
-                _ = _coordinator.StartCaptureAsync();
+                await _coordinator.StartCaptureAsync();
             }
         });
-        menu.Items.Add($"录屏  {_settings.RecordHotKey}", null, (_, _) => _ = StartRecordingSelectionAsync());
+        menu.Items.Add($"录屏  {_settings.RecordHotKey}", null, async (_, _) => await StartRecordingSelectionAsync());
         menu.Items.Add($"解除全部贴图穿透  {_settings.ClickThroughRecoveryHotKey}", null, (_, _) => RecoverClickThrough(showConfirmation: false));
         menu.Items.Add("关闭全部贴图", null, (_, _) => _pinWindowManager.CloseAll());
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("设置", null, (_, _) => OpenSettings());
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("退出", null, (_, _) => _ = ExitAsync());
+        menu.Items.Add("退出", null, async (_, _) => await ExitAsync());
         return menu;
     }
 
@@ -385,10 +351,19 @@ internal sealed class AppHost : IDisposable
 
     private void OpenSettings()
     {
+        if (_exiting)
+        {
+            return;
+        }
+        if (_settingsWindow is { } existing)
+        {
+            existing.Activate();
+            return;
+        }
         var window = new SettingsWindow(
             _settingsStore,
             _credentialService,
-            _startupService,
+            _startupService.SetEnabled,
             // Live registration: new hotkeys take effect the moment they are
             // captured in the dialog, and occupied combinations fail loudly
             // right there instead of being silently reverted on close.
@@ -396,6 +371,7 @@ internal sealed class AppHost : IDisposable
             hotKey => _hotKeyWindow.RegisterClickThroughRecoveryHotKey(hotKey),
             hotKey => _hotKeyWindow.RegisterRecordHotKey(hotKey),
             _hotKeyWindow.TrySetPriority);
+        _settingsWindow = window;
         window.SourceInitialized += (_, _) =>
             _hotKeyWindow.SettingsWindowHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
         try
@@ -405,26 +381,40 @@ internal sealed class AppHost : IDisposable
         finally
         {
             _hotKeyWindow.SettingsWindowHandle = 0;
+            _settingsWindow = null;
+        }
+        if (_exiting)
+        {
+            return;
         }
 
         // Settings are auto-saved while the window is open, so always reload and
         // re-register hot keys after the window closes.
         _settings = _settingsStore.Load();
-        _hotKeyWindow.TrySetPriority(_settings.PreferScreenHotKeys);
+        RegisterConfiguredShortcuts();
+        _notifyIcon.ContextMenuStrip?.Dispose();
+        _notifyIcon.ContextMenuStrip = BuildMenu();
+        _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
+    }
+
+    private void RegisterConfiguredShortcuts()
+    {
+        if (!_hotKeyWindow.TrySetPriority(_settings.PreferScreenHotKeys))
+        {
+            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键", "无法启用优先模式，已使用普通快捷键注册。", Forms.ToolTipIcon.Warning);
+        }
         void RefreshShortcut(string description, string key, Func<string, bool> register)
         {
             if (!register(key))
             {
                 _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键冲突",
                     $"{description}快捷键 {key} 无法注册，仍可使用托盘菜单。", Forms.ToolTipIcon.Warning);
+                SimpleLogger.LogWarning($"{description} shortcut could not be registered: {key}");
             }
         }
         RefreshShortcut("截图", _settings.HotKey, _hotKeyWindow.RegisterCaptureHotKey);
         RefreshShortcut("恢复贴图", _settings.ClickThroughRecoveryHotKey, _hotKeyWindow.RegisterClickThroughRecoveryHotKey);
         RefreshShortcut("录屏", _settings.RecordHotKey, _hotKeyWindow.RegisterRecordHotKey);
-        _notifyIcon.ContextMenuStrip?.Dispose();
-        _notifyIcon.ContextMenuStrip = BuildMenu();
-        _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
     }
 
     private void ShowFirstClickThroughHint()

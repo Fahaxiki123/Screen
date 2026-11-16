@@ -65,8 +65,16 @@ public static class OcrQualityEvaluator
 
         var merged = new List<OcrLine>();
         var usedLocal = new HashSet<int>();
-        foreach (var cloudLine in cloud.Lines)
+        var usedCloud = new HashSet<int>();
+        MergeSplitLines(cloud.Lines, local.Lines, usedCloud, usedLocal, merged);
+        MergeSplitLines(local.Lines, cloud.Lines, usedLocal, usedCloud, merged);
+        for (var index = 0; index < cloud.Lines.Count; index++)
         {
+            if (usedCloud.Contains(index))
+            {
+                continue;
+            }
+            var cloudLine = cloud.Lines[index];
             var match = FindBestMatch(cloudLine, local.Lines, usedLocal);
             if (match < 0)
             {
@@ -103,6 +111,78 @@ public static class OcrQualityEvaluator
             UsedOnlineService = true
         };
     }
+
+    private static void MergeSplitLines(
+        IReadOnlyList<OcrLine> spanningLines,
+        IReadOnlyList<OcrLine> splitLines,
+        HashSet<int> usedSpanning,
+        HashSet<int> usedSplit,
+        List<OcrLine> merged)
+    {
+        for (var index = 0; index < spanningLines.Count; index++)
+        {
+            if (usedSpanning.Contains(index))
+            {
+                continue;
+            }
+
+            var spanning = spanningLines[index];
+            var parts = Enumerable.Range(0, splitLines.Count)
+                .Where(part => !usedSplit.Contains(part) && CoversLine(spanning.Bounds, splitLines[part].Bounds))
+                .OrderBy(part => splitLines[part].Bounds.Y)
+                .ThenBy(part => splitLines[part].Bounds.X)
+                .ToArray();
+            if (parts.Length < 2)
+            {
+                continue;
+            }
+
+            // Confirm that the boxes cover the same text before discarding
+            // anything. Prefer the split boxes when they retain all text.
+            var wholeText = WithoutWhitespace(spanning.Text);
+            var matchedParts = new List<int>(parts.Length);
+            var offset = 0;
+            var matchedLength = 0;
+            foreach (var part in parts)
+            {
+                var partText = WithoutWhitespace(splitLines[part].Text);
+                var match = partText.Length == 0 ? -1 : wholeText.IndexOf(partText, offset, StringComparison.OrdinalIgnoreCase);
+                if (match < 0)
+                {
+                    continue;
+                }
+                offset = match + partText.Length;
+                matchedLength += partText.Length;
+                matchedParts.Add(part);
+            }
+            if (matchedParts.Count < 2 || matchedLength < 0.72 * wholeText.Length)
+            {
+                continue;
+            }
+
+            usedSpanning.Add(index);
+            usedSplit.UnionWith(matchedParts);
+            if (matchedLength == wholeText.Length)
+            {
+                merged.AddRange(matchedParts.Select(part => splitLines[part]));
+            }
+            else
+            {
+                merged.Add(spanning);
+            }
+        }
+    }
+
+    private static bool CoversLine(PixelRect spanning, PixelRect part)
+    {
+        var overlap = spanning.Intersect(part);
+        var partArea = part.Width * (double)part.Height;
+        return !overlap.IsEmpty && overlap.Width * (double)overlap.Height >= 0.72 * partArea
+            && partArea < 0.85 * (spanning.Width * (double)spanning.Height);
+    }
+
+    private static string WithoutWhitespace(string text) =>
+        string.Concat(text.Where(character => !char.IsWhiteSpace(character)));
 
     public static string DetectLanguage(string text)
     {

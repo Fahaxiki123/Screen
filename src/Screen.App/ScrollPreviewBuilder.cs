@@ -10,11 +10,9 @@ internal sealed class ScrollPreviewBuilder
     private const int MaxHeight = 4096;
     private byte[] _pixels = [];
     private SourceRow[] _sourceRows = [];
+    private int[] _frameForRow = [];
     private int _frameCount;
-    private int _fullHeight;
     private int _factor;
-    private int _header;
-    private int _footer;
 
     // The returned pixels belong to this builder. The caller copies them into
     // a frozen bitmap before starting another update.
@@ -27,13 +25,19 @@ internal sealed class ScrollPreviewBuilder
         var height = DivideRoundUp(fullHeight, factor);
         var stride = width * 4;
         var firstDirtyRow = 0;
-        if (_factor == factor && _header == layout.FixedHeader && _footer == layout.FixedFooter)
+        if (_factor == factor && _frameCount > 0)
         {
-            // New viewports can replace part of the old overlap. The previous
-            // footer must also be repainted even when no new frame covers it.
-            firstDirtyRow = _frameCount == layout.Frames.Length
-                ? height
-                : Math.Min(_fullHeight - _footer, layout.Origins[_frameCount] + _header) / factor;
+            firstDirtyRow = height;
+            if (_frameCount < layout.Frames.Length)
+            {
+                var oldTail = _frameCount - 1;
+                var firstDirtySourceRow = layout.Origins[oldTail] + layout.ContentBottom(oldTail);
+                for (var index = _frameCount; index < layout.Frames.Length; index++)
+                {
+                    firstDirtySourceRow = Math.Min(firstDirtySourceRow, layout.Origins[index] + layout.ContentTop(index));
+                }
+                firstDirtyRow = firstDirtySourceRow / factor;
+            }
         }
 
         var required = stride * height;
@@ -47,8 +51,8 @@ internal sealed class ScrollPreviewBuilder
             _sourceRows = new SourceRow[rowsPerBlock];
         }
 
+        UpdateRowCoverage(layout, Math.Min(firstDirtyRow * factor, fullHeight));
         var firstPixel = layout.Frames[0].Pixels;
-        var frameIndex = 0;
         for (var y = firstDirtyRow; y < height; y++)
         {
             token.ThrowIfCancellationRequested();
@@ -56,7 +60,12 @@ internal sealed class ScrollPreviewBuilder
             var rowCount = Math.Min(factor, fullHeight - startY);
             for (var row = 0; row < rowCount; row++)
             {
-                _sourceRows[row] = GetSourceRow(layout, startY + row, ref frameIndex);
+                var yInLayout = startY + row;
+                var frameIndex = _frameForRow[yInLayout];
+                _sourceRows[row] = frameIndex < 0
+                    ? default
+                    : new SourceRow(layout.Frames[frameIndex].Pixels,
+                        (yInLayout - layout.Origins[frameIndex]) * layout.Frames[frameIndex].Stride);
             }
             var destination = _pixels.AsSpan(y * stride, stride);
             if (factor == 1)
@@ -79,34 +88,28 @@ internal sealed class ScrollPreviewBuilder
         }
 
         _frameCount = layout.Frames.Length;
-        _fullHeight = fullHeight;
         _factor = factor;
-        _header = layout.FixedHeader;
-        _footer = layout.FixedFooter;
         return new PixelBuffer(_pixels, width, height, stride);
     }
 
-    private static SourceRow GetSourceRow(VerticalScrollStitcher.Layout layout, int y, ref int frameIndex)
+    private void UpdateRowCoverage(VerticalScrollStitcher.Layout layout, int firstDirty)
     {
-        var frames = layout.Frames;
-        var origins = layout.Origins;
-        if (y < layout.FixedHeader)
+        if (_frameForRow.Length < layout.Height)
         {
-            return new SourceRow(frames[0].Pixels, y * frames[0].Stride);
+            Array.Resize(ref _frameForRow, Math.Max(layout.Height, _frameForRow.Length * 2));
         }
-        if (y >= layout.Height - layout.FixedFooter)
+        _frameForRow.AsSpan(firstDirty, layout.Height - firstDirty).Fill(-1);
+        // Paint the dirty ranges in capture order, just like final composition.
+        // Header changes can make adjacent ranges overlap in either order.
+        for (var index = 0; index < layout.Frames.Length; index++)
         {
-            return new SourceRow(frames[^1].Pixels, (y - origins[^1]) * frames[^1].Stride);
+            var start = Math.Max(firstDirty, layout.Origins[index] + layout.ContentTop(index));
+            var end = layout.Origins[index] + layout.ContentBottom(index);
+            if (start < end)
+            {
+                _frameForRow.AsSpan(start, end - start).Fill(index);
+            }
         }
-        while (frameIndex + 1 < frames.Length && origins[frameIndex + 1] + layout.FixedHeader <= y)
-        {
-            frameIndex++;
-        }
-        var frame = frames[frameIndex];
-        var localY = y - origins[frameIndex];
-        return localY < frame.Height - layout.FixedFooter
-            ? new SourceRow(frame.Pixels, localY * frame.Stride)
-            : default;
     }
 
     private static void FilterRow(

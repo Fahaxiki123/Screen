@@ -1,4 +1,5 @@
 using System.Windows;
+using Forms = System.Windows.Forms;
 
 namespace Screen.App;
 
@@ -25,39 +26,24 @@ public partial class App : Application
 
         DispatcherUnhandledException += (_, args) =>
         {
-            var errorKey = $"{args.Exception.GetType().Name}:{args.Exception.Message}";
-            SimpleLogger.LogError("Unhandled dispatcher exception", args.Exception);
-
-            // Deduplicate: show each unique error at most once per 60 seconds
-            var now = DateTime.Now;
-            if (_shownErrors.Contains(errorKey) && (now - _lastErrorTime).TotalSeconds < 60)
-            {
-                args.Handled = true;
-                return;
-            }
-
-            _shownErrors.Add(errorKey);
-            _lastErrorTime = now;
-
-            MessageBox.Show(
-                $"发生未处理的错误，程序将继续运行：{args.Exception.Message}\n\n详细日志已保存到 %LocalAppData%\\Screen\\logs\\",
-                "Screen",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
             args.Handled = true;
+            ReportDesktopException("Unhandled dispatcher exception", args.Exception);
         };
-        _singleInstance = new SingleInstanceCoordinator();
-        if (!_singleInstance.TryBecomePrimary())
-        {
-            var isWindowsStartup = e.Args.Any(argument =>
-                string.Equals(argument, "--startup", StringComparison.OrdinalIgnoreCase));
-            SingleInstanceCoordinator.NotifyPrimary(requestCapture: !isWindowsStartup);
-            Shutdown();
-            return;
-        }
 
         try
         {
+            _singleInstance = new SingleInstanceCoordinator();
+            if (!_singleInstance.TryBecomePrimary())
+            {
+                var isWindowsStartup = e.Args.Any(argument =>
+                    string.Equals(argument, "--startup", StringComparison.OrdinalIgnoreCase));
+                SingleInstanceCoordinator.NotifyPrimary(requestCapture: !isWindowsStartup);
+                Shutdown();
+                return;
+            }
+
+            Forms.Application.SetUnhandledExceptionMode(Forms.UnhandledExceptionMode.CatchException, threadScope: true);
+            Forms.Application.ThreadException += OnTrayThreadException;
             _host = new AppHost();
             _host.Start();
             Host = _host;
@@ -73,21 +59,60 @@ public partial class App : Application
             // The tray icon is the app's only entry point; running on after a
             // failed startup would leave an invisible process without hotkeys
             // that the user can only kill from Task Manager. Fail fast instead.
-            MessageBox.Show(
-                $"Screen 启动失败，即将退出：{exception.Message}",
-                "Screen",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            Shutdown(-1);
+            try
+            {
+                MessageBox.Show(
+                    $"Screen 启动失败，即将退出：{exception.Message}",
+                    "Screen",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                Shutdown(-1);
+            }
+        }
+    }
+
+    private void OnTrayThreadException(object sender, ThreadExceptionEventArgs e) =>
+        ReportDesktopException("Unhandled tray window exception", e.Exception);
+
+    private void ReportDesktopException(string source, Exception exception)
+    {
+        SimpleLogger.LogError(source, exception);
+        var errorKey = $"{exception.GetType().Name}:{exception.Message}";
+        var now = DateTime.Now;
+        if (_shownErrors.Contains(errorKey) && (now - _lastErrorTime).TotalSeconds < 60)
+        {
             return;
         }
+        _shownErrors.Add(errorKey);
+        _lastErrorTime = now;
+        MessageBox.Show(
+            $"发生未处理的错误，程序将继续运行：{exception.Message}\n\n详细日志已保存到 %LocalAppData%\\Screen\\logs\\",
+            "Screen",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _readyEvent?.Dispose();
-        _host?.Dispose();
-        _singleInstance?.Dispose();
-        base.OnExit(e);
+        Forms.Application.ThreadException -= OnTrayThreadException;
+        try
+        {
+            _readyEvent?.Dispose();
+            _host?.Dispose();
+        }
+        finally
+        {
+            try
+            {
+                _singleInstance?.Dispose();
+            }
+            finally
+            {
+                base.OnExit(e);
+            }
+        }
     }
 }

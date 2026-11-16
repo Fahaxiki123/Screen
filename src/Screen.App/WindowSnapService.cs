@@ -6,6 +6,8 @@ namespace Screen.App;
 
 internal sealed class WindowSnapService
 {
+    private const long ClickThroughLayeredStyle = 0x00080000 | NativeMethods.WsExTransparent;
+
     public IReadOnlyList<WindowTarget> GetWindows(PixelRect displayBounds, nint excludedWindow = 0)
     {
         var result = new List<WindowTarget>();
@@ -15,6 +17,7 @@ internal sealed class WindowSnapService
                 || !NativeMethods.IsWindowVisible(handle)
                 || NativeMethods.IsIconic(handle)
                 || NativeMethods.GetAncestor(handle, NativeMethods.GaRoot) != handle
+                || (NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlExStyle).ToInt64() & ClickThroughLayeredStyle) == ClickThroughLayeredStyle
                 || IsCloaked(handle))
             {
                 return true;

@@ -33,7 +33,7 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         string? failureReason = null;
         for (var index = 1; index < frames.Count; index++)
         {
-            failureReason = session.TryAppend(frames[index], cancellationToken);
+            (_, failureReason) = session.TryAppend(frames[index], cancellationToken);
             if (failureReason is not null)
             {
                 break;
@@ -42,11 +42,26 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         return Compose(session.Snapshot(), cancellationToken, failureReason);
     }
 
+    internal readonly record struct FixedBands(int Header, int Footer);
+
     internal sealed record Layout(
-        PixelBuffer[] Frames, int[] Origins, StitchSeam[] Seams, int FixedHeader, int FixedFooter)
+        PixelBuffer[] Frames, int[] Origins, StitchSeam[] Seams, FixedBands[] Bands)
     {
         public int Width => Frames[0].Width;
-        public int Height => checked(Origins[^1] + Frames[0].Height);
+        public int FrameHeight => Frames[0].Height;
+        public int Height => checked(Origins[^1] + FrameHeight);
+        public int FirstHeader => Bands.Length == 0 ? 0 : Bands[0].Header;
+        public int LastFooter => Bands.Length == 0 ? 0 : Bands[^1].Footer;
+
+        // Each join trims its incoming header and outgoing footer. Applying a
+        // later, larger header to already placed viewports can leave uncovered rows.
+        public int ContentTop(int index) => index == 0
+            ? 0
+            : Math.Max(Bands[index - 1].Header, FirstHeader - Origins[index]);
+
+        public int ContentBottom(int index) => index == Frames.Length - 1
+            ? FrameHeight
+            : FrameHeight - Bands[index].Footer;
     }
 
     /// <summary>Matches each new viewport once. One writer admits frames while preview can take snapshots.</summary>
@@ -56,10 +71,9 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         private readonly List<PixelBuffer> _frames = [];
         private readonly List<int> _origins = [];
         private readonly List<StitchSeam> _seams = [];
+        private readonly List<FixedBands> _bands = [];
         private byte[]? _previousSamples;
         private long _inputBytes;
-        private int _fixedHeader;
-        private int _fixedFooter;
 
         public int Count
         {
@@ -75,28 +89,28 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         {
             lock (_gate)
             {
-                return new Layout(_frames.ToArray(), _origins.ToArray(), _seams.ToArray(), _fixedHeader, _fixedFooter);
+                return new Layout(_frames.ToArray(), _origins.ToArray(), _seams.ToArray(), _bands.ToArray());
             }
         }
 
-        public string? TryAppend(PixelBuffer current, CancellationToken cancellationToken)
+        public (bool Added, string? FailureReason) TryAppend(PixelBuffer current, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var height = current.Height;
             var width = current.Width;
             var nextInputBytes = checked(_inputBytes + (long)current.Stride * height);
-            if (nextInputBytes > MaximumInputBytes)
-            {
-                return "The long screenshot input-frame memory limit was reached.";
-            }
             if (_frames.Count == 0)
             {
+                if (nextInputBytes > MaximumInputBytes)
+                {
+                    return (false, "The long screenshot input-frame memory limit was reached.");
+                }
                 if (ExceedsOutputLimit(width, height, nextInputBytes))
                 {
-                    return "The long screenshot memory limit was reached.";
+                    return (false, "The long screenshot memory limit was reached.");
                 }
                 AddFirstFrame(current, cancellationToken);
-                return null;
+                return (true, null);
             }
 
             var previous = _frames[^1];
@@ -105,6 +119,17 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
             {
                 throw new ArgumentException("All frames must have the same BGRA dimensions.", nameof(current));
             }
+            var currentSamples = SampleRows(current);
+            var previousSamples = _previousSamples!;
+            var sampleWidth = Math.Min(width, HorizontalSamples);
+            var (stationaryError, hasStationaryAgreement) = CompareStationary(previousSamples, currentSamples);
+            if (stationaryError == 0)
+            {
+                return HasVerticalDetail(previousSamples, sampleWidth)
+                    ? (false, null)
+                    : (false, $"Frame {index + 1} could not be joined reliably (too little vertical detail).");
+            }
+
             var fixedHeader = DetectFixedBand(previous, current, fromTop: true);
             var fixedFooter = DetectFixedBand(previous, current, fromTop: false);
             if (fixedHeader + fixedFooter > height / 2)
@@ -113,40 +138,44 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
                 fixedFooter = 0;
             }
 
-            var currentSamples = SampleRows(current);
-            var previousSamples = _previousSamples!;
-            var sampleWidth = Math.Min(width, HorizontalSamples);
             var match = FindBestOverlap(previousSamples, currentSamples, sampleWidth, height, fixedHeader, fixedFooter, reverse: false, cancellationToken);
             // An exact, unambiguous downward match cannot be improved by an
             // upward search. This is the common browser-scrolling path.
             var reverseMatch = match.Overlap >= MinimumOverlap && match.Error == 0
                 ? (Overlap: 0, Error: double.MaxValue)
                 : FindBestOverlap(previousSamples, currentSamples, sampleWidth, height, fixedHeader, fixedFooter, reverse: true, cancellationToken);
+            // Local animation can change viewport pixels without scrolling. A
+            // shifted candidate must beat the unshifted viewport convincingly.
+            if (hasStationaryAgreement && stationaryError <= MaximumAcceptedError
+                && stationaryError - Math.Min(match.Error, reverseMatch.Error) <= AmbiguityMargin(stationaryError))
+            {
+                return (false, null);
+            }
             if (reverseMatch.Overlap >= MinimumOverlap
                 && reverseMatch.Error <= MaximumAcceptedError
                 && (match.Overlap < MinimumOverlap
                     || match.Error > MaximumAcceptedError
                     || reverseMatch.Error + AmbiguityMargin(reverseMatch.Error) < match.Error))
             {
-                return $"Frame {index + 1} moved upward; scroll capture only accepts downward movement.";
+                return (false, $"Frame {index + 1} moved upward; scroll capture only accepts downward movement.");
             }
             if (match.Overlap < MinimumOverlap || match.Error > MaximumAcceptedError)
             {
-                return $"Frame {index + 1} could not be joined reliably (error {match.Error:F1}).";
+                return (false, $"Frame {index + 1} could not be joined reliably (error {match.Error:F1}).");
             }
 
             var previousContentBottom = height - fixedFooter;
             var scrollDistance = previousContentBottom - match.Overlap - fixedHeader;
-            if (scrollDistance <= 0)
+            if (nextInputBytes > MaximumInputBytes)
             {
-                return $"Frame {index + 1} did not add new content.";
+                return (false, "The long screenshot input-frame memory limit was reached.");
             }
 
             var origin = checked(_origins[^1] + scrollDistance);
             var outputHeight = checked(origin + height);
             if (ExceedsOutputLimit(width, outputHeight, nextInputBytes))
             {
-                return "The long screenshot memory limit was reached.";
+                return (false, "The long screenshot memory limit was reached.");
             }
 
             lock (_gate)
@@ -155,12 +184,11 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
                 _frames.Add(current);
                 _origins.Add(origin);
                 _seams.Add(new StitchSeam(index, fixedHeader, match.Overlap, match.Error, origin));
-                _fixedHeader = Math.Max(_fixedHeader, fixedHeader);
-                _fixedFooter = Math.Max(_fixedFooter, fixedFooter);
+                _bands.Add(new FixedBands(fixedHeader, fixedFooter));
                 _inputBytes = nextInputBytes;
                 _previousSamples = currentSamples;
             }
-            return null;
+            return (true, null);
         }
 
         internal void AddFirstFrame(PixelBuffer frame, CancellationToken cancellationToken)
@@ -192,23 +220,22 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         cancellationToken.ThrowIfCancellationRequested();
         var overlays = layout.Frames.Length < 2
             ? Array.Empty<PixelRect>()
-            : DetectStableOverlays(layout.Frames, layout.Origins, layout.FixedHeader, layout.FixedFooter, cancellationToken);
-        var image = BuildResult(layout.Frames, layout.Origins, layout.FixedHeader, layout.FixedFooter, overlays, cancellationToken);
+            : DetectStableOverlays(layout, cancellationToken);
+        var image = BuildResult(layout, overlays, cancellationToken);
         return new StitchResult(image, layout.Seams, failureReason is null, failureReason);
     }
 
     private static PixelBuffer BuildResult(
-        IReadOnlyList<PixelBuffer> frames,
-        IReadOnlyList<int> origins,
-        int fixedHeader,
-        int fixedFooter,
+        Layout layout,
         IReadOnlyList<PixelRect> overlays,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var width = frames[0].Width;
-        var frameHeight = frames[0].Height;
-        var height = checked(origins[^1] + frameHeight);
+        var frames = layout.Frames;
+        var origins = layout.Origins;
+        var width = layout.Width;
+        var frameHeight = layout.FrameHeight;
+        var height = layout.Height;
         var stride = checked(width * 4);
         var pixels = GC.AllocateUninitializedArray<byte>(checked(stride * height));
         FillBackground(pixels, stride, height, frames[0].Pixels);
@@ -216,15 +243,18 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         // The overlay exclusion machinery below only matters when overlays were
         // detected; without them every row is a single full-width copy.
         var hasOverlays = overlays.Count > 0;
-        for (var frameIndex = 0; frameIndex < frames.Count; frameIndex++)
+        for (var frameIndex = 0; frameIndex < frames.Length; frameIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var frame = frames[frameIndex];
-            for (var y = fixedHeader; y < frameHeight - fixedFooter; y++)
+            var bottom = layout.ContentBottom(frameIndex);
+            for (var y = layout.ContentTop(frameIndex); y < bottom; y++)
             {
                 var sourceRow = y * frame.Stride;
                 var targetRow = (origins[frameIndex] + y) * stride;
-                if (!hasOverlays)
+                if (!hasOverlays
+                    || (frameIndex == 0 && y < layout.FirstHeader)
+                    || (frameIndex == frames.Length - 1 && y >= frameHeight - layout.LastFooter))
                 {
                     CopySpan(frame.Pixels, sourceRow, pixels, targetRow, 0, width);
                     continue;
@@ -234,10 +264,7 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
                     y,
                     width,
                     frameIndex,
-                    origins,
-                    frameHeight,
-                    fixedHeader,
-                    fixedFooter);
+                    layout);
                 var startX = 0;
                 foreach (var interval in intervals)
                 {
@@ -248,20 +275,14 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
             }
         }
 
-        if (fixedHeader > 0)
-        {
-            CopyRectangle(frames[0], new PixelRect(0, 0, width, fixedHeader), pixels, stride, 0);
-        }
-        if (fixedFooter > 0)
-        {
-            var footerRect = new PixelRect(0, frameHeight - fixedFooter, width, fixedFooter);
-            CopyRectangle(frames[^1], footerRect, pixels, stride, origins[^1]);
-        }
         foreach (var overlay in overlays)
         {
             var useFirstFrame = overlay.Y + overlay.Height / 2 < frameHeight / 3;
-            var sourceIndex = useFirstFrame ? 0 : frames.Count - 1;
-            CopyRectangle(frames[sourceIndex], overlay, pixels, stride, origins[sourceIndex]);
+            var sourceIndex = useFirstFrame ? 0 : frames.Length - 1;
+            var top = useFirstFrame ? layout.FirstHeader : layout.ContentTop(sourceIndex);
+            var bottom = useFirstFrame ? layout.ContentBottom(sourceIndex) : frameHeight - layout.LastFooter;
+            var edgeBody = new PixelRect(0, top, width, bottom - top);
+            CopyRectangle(frames[sourceIndex], overlay.Intersect(edgeBody), pixels, stride, origins[sourceIndex]);
         }
 
         return new PixelBuffer(pixels, width, height, stride);
@@ -281,10 +302,7 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         int y,
         int width,
         int frameIndex,
-        IReadOnlyList<int> origins,
-        int frameHeight,
-        int fixedHeader,
-        int fixedFooter)
+        Layout layout)
     {
         var intervals = new List<PixelRect>();
         foreach (var rect in overlays)
@@ -295,12 +313,9 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
             }
             if (!HasAlternateCoverage(
                     rect,
-                    origins[frameIndex] + y,
+                    layout.Origins[frameIndex] + y,
                     frameIndex,
-                    origins,
-                    frameHeight,
-                    fixedHeader,
-                    fixedFooter,
+                    layout,
                     overlays))
             {
                 continue;
@@ -342,20 +357,17 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
         PixelRect rectangle,
         int outputY,
         int excludedFrame,
-        IReadOnlyList<int> origins,
-        int frameHeight,
-        int fixedHeader,
-        int fixedFooter,
+        Layout layout,
         IReadOnlyList<PixelRect> overlays)
     {
-        for (var index = 0; index < origins.Count; index++)
+        for (var index = 0; index < layout.Frames.Length; index++)
         {
             if (index == excludedFrame)
             {
                 continue;
             }
-            var sourceY = outputY - origins[index];
-            if (sourceY < fixedHeader || sourceY >= frameHeight - fixedFooter)
+            var sourceY = outputY - layout.Origins[index];
+            if (sourceY < layout.ContentTop(index) || sourceY >= layout.ContentBottom(index))
             {
                 continue;
             }
@@ -487,6 +499,38 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
 
     private static double AmbiguityMargin(double error) => Math.Min(0.75, error * 0.15 + 0.00001);
 
+    private static (double Error, bool HasAgreement) CompareStationary(byte[] previous, byte[] current)
+    {
+        long difference = 0;
+        var changedSamples = 0;
+        for (var index = 0; index < previous.Length; index++)
+        {
+            var delta = Math.Abs(previous[index] - current[index]);
+            difference += delta;
+            if (delta > 2)
+            {
+                changedSamples++;
+            }
+        }
+
+        // A moving badge can change a small part of an otherwise stationary
+        // viewport. A low average alone could also hide a whole new pale page.
+        return (difference / (double)previous.Length, changedSamples <= previous.Length / 8);
+    }
+
+    private static bool HasVerticalDetail(byte[] samples, int width)
+    {
+        var firstRow = samples.AsSpan(0, width);
+        for (var offset = width; offset < samples.Length; offset += width)
+        {
+            if (!firstRow.SequenceEqual(samples.AsSpan(offset, width)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static byte[] SampleRows(PixelBuffer frame)
     {
         var sampleWidth = Math.Min(frame.Width, HorizontalSamples);
@@ -553,14 +597,15 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
     }
 
     private static PixelRect[] DetectStableOverlays(
-        IReadOnlyList<PixelBuffer> frames,
-        IReadOnlyList<int> origins,
-        int fixedHeader,
-        int fixedFooter,
+        Layout layout,
         CancellationToken cancellationToken)
     {
-        var width = frames[0].Width;
-        var height = frames[0].Height;
+        var frames = layout.Frames;
+        var origins = layout.Origins;
+        var width = layout.Width;
+        var height = layout.FrameHeight;
+        var fixedHeader = layout.Bands.Min(band => band.Header);
+        var fixedFooter = layout.Bands.Min(band => band.Footer);
         var columns = (width + OverlayTileSize - 1) / OverlayTileSize;
         var rows = (height + OverlayTileSize - 1) / OverlayTileSize;
         var seeds = new bool[columns, rows];
@@ -581,10 +626,11 @@ public sealed class VerticalScrollStitcher : IScrollStitcher
                 double sameError = 0;
                 double movedError = 0;
                 var comparisons = 0;
-                for (var index = 1; index < frames.Count; index++)
+                for (var index = 1; index < frames.Length; index++)
                 {
                     var delta = origins[index] - origins[index - 1];
-                    if (y + delta + tileHeight > height - fixedFooter)
+                    var band = layout.Bands[index - 1];
+                    if (y < band.Header || y + delta + tileHeight > height - band.Footer)
                     {
                         continue;
                     }

@@ -238,9 +238,7 @@ public partial class SettingsWindow
             LucideIconKind.Pencil,
             "API Key",
             "仅保存在 Windows 凭据管理器",
-            CreateCredentialPasswordBox(
-                nameof(SettingsViewModel.ApiKey),
-                password: _viewModel.ApiKey)));
+            CreateApiKeyInput(racing: false)));
 
         _aiSection.Children.Add(CreateSettingRow(
             LucideIconKind.Settings2,
@@ -263,9 +261,7 @@ public partial class SettingsWindow
             LucideIconKind.Pencil,
             "竞速模型 API Key",
             "仅保存在 Windows 凭据管理器",
-            CreateCredentialPasswordBox(
-                nameof(SettingsViewModel.RacingApiKey),
-                password: _viewModel.RacingApiKey)));
+            CreateApiKeyInput(racing: true)));
         _aiSection.Children.Add(_racingRows);
 
         _aiSection.Children.Add(CreateSettingRow(

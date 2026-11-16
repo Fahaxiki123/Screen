@@ -15,8 +15,8 @@ internal sealed class TencentCloudOcrEngine(HttpClient httpClient) : IOcrEngine
     private const string Version = "2018-11-19";
     private const string Action = "GeneralAccurateOCR";
     private const string ContentType = "application/json; charset=utf-8";
-    private const int MaximumBinaryBytes = 7_300_000;
     private const int MaximumBase64Bytes = 7_000_000;
+    private const int MaximumBinaryBytes = MaximumBase64Bytes / 4 * 3;
 
     public IReadOnlyList<string> AvailableLanguages { get; } = ["auto"];
 
@@ -40,19 +40,9 @@ internal sealed class TencentCloudOcrEngine(HttpClient httpClient) : IOcrEngine
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(secretId);
         ArgumentException.ThrowIfNullOrWhiteSpace(secretKey);
-        var encoded = EncodeImage(image);
-        // Tencent limits the Base64-encoded image to 7 MB; check the final
-        // encoding (PNG or JPEG) instead of the raw pixel bytes.
-        var base64Length = checked(((encoded.Bytes.Length + 2) / 3) * 4);
-        if (base64Length > MaximumBase64Bytes)
-        {
-            throw new InvalidOperationException("选区图片过大，无法发送到腾讯云 OCR；请缩小选区后重试。");
-        }
-
-        var payload = JsonSerializer.Serialize(new
-        {
-            ImageBase64 = Convert.ToBase64String(encoded.Bytes)
-        });
+        var (payload, scaleX, scaleY) = await Task.Run(
+            () => EncodeRequest(image, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var authorization = TencentCloudApiSigner.CreateAuthorization(
             secretId,
@@ -81,10 +71,12 @@ internal sealed class TencentCloudOcrEngine(HttpClient httpClient) : IOcrEngine
         {
             throw new HttpRequestException($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}".Trim());
         }
-        return TencentOcrResponseParser.Parse(responseBody, encoded.ScaleX, encoded.ScaleY);
+        return TencentOcrResponseParser.Parse(responseBody, scaleX, scaleY);
     }
 
-    private static EncodedImage EncodeImage(PixelBuffer source)
+    private static (string Payload, double ScaleX, double ScaleY) EncodeRequest(
+        PixelBuffer source,
+        CancellationToken cancellationToken)
     {
         using var bitmap = ToBitmap(source);
         var longestSide = Math.Max(source.Width, source.Height);
@@ -103,14 +95,17 @@ internal sealed class TencentCloudOcrEngine(HttpClient httpClient) : IOcrEngine
         var target = resized ?? bitmap;
         using var image = SKImage.FromBitmap(target);
         using var png = image.Encode(SKEncodedImageFormat.Png, 100);
-        var bytes = png.ToArray();
-        if (bytes.Length > MaximumBinaryBytes)
+        cancellationToken.ThrowIfCancellationRequested();
+        using var jpeg = png.Size > MaximumBinaryBytes ? image.Encode(SKEncodedImageFormat.Jpeg, 92) : null;
+        var encoded = jpeg ?? png;
+        if (encoded.Size > MaximumBinaryBytes)
         {
-            using var jpeg = image.Encode(SKEncodedImageFormat.Jpeg, 92);
-            bytes = jpeg.ToArray();
+            throw new InvalidOperationException("选区图片过大，无法发送到腾讯云 OCR；请缩小选区后重试。");
         }
-        return new EncodedImage(
-            bytes,
+        cancellationToken.ThrowIfCancellationRequested();
+        var payload = JsonSerializer.Serialize(new { ImageBase64 = Convert.ToBase64String(encoded.ToArray()) });
+        return (
+            payload,
             source.Width / (double)target.Width,
             source.Height / (double)target.Height);
     }
@@ -133,6 +128,4 @@ internal sealed class TencentCloudOcrEngine(HttpClient httpClient) : IOcrEngine
         }
         return bitmap;
     }
-
-    private sealed record EncodedImage(byte[] Bytes, double ScaleX, double ScaleY);
 }

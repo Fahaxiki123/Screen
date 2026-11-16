@@ -10,14 +10,20 @@ namespace Screen.App.Tests;
 public sealed class ScrollCaptureCompletionRegressionTests
 {
     [TestMethod]
-    public async Task StationaryRejectedViewportSettlesWithoutRepeatedAlignmentRetries()
+    public async Task RejectedViewportSettlesWithoutRepeatedAlignmentRetries()
     {
         var first = Document(128, 180);
-        var hovered = WithChangedPatch(first, 231);
+        var replacement = new PixelBuffer((byte[])first.Pixels.Clone(), first.Width, first.Height, first.Stride);
+        for (var index = 0; index < replacement.Pixels.Length; index += 4)
+        {
+            replacement.Pixels[index] ^= 0xff;
+            replacement.Pixels[index + 1] ^= 0xff;
+            replacement.Pixels[index + 2] ^= 0xff;
+        }
         var captures = 0;
         var settlingSamples = 0;
         var sequence = new ScrollCaptureSequence(
-            _ => Task.FromResult(++captures == 1 ? first : hovered),
+            _ => Task.FromResult(++captures == 1 ? first : replacement),
             (_, token) =>
             {
                 token.ThrowIfCancellationRequested();
@@ -59,7 +65,7 @@ public sealed class ScrollCaptureCompletionRegressionTests
 
         var tail = await sequence.FlushAsync();
 
-        Assert.AreEqual(ScrollFrameOutcome.Rejected, tail.Outcome);
+        Assert.AreEqual(ScrollFrameOutcome.Unstable, tail.Outcome);
         Assert.AreEqual(1, sequence.FrameCount,
             "Unverified animation frames must not be appended to the screenshot.");
         var result = await sequence.ComposeAsync();
@@ -184,6 +190,50 @@ public sealed class ScrollCaptureCompletionRegressionTests
         Assert.AreEqual(captureCountAfterComposition, captures);
         Assert.AreEqual(1, completions);
         Assert.AreEqual(0, cancellations);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task EnterRetryUsesTheLastFailedActionAndTheSameImage(bool saves)
+    {
+        var action = saves ? ScrollCaptureFinishAction.Save : ScrollCaptureFinishAction.Edit;
+        var document = Document(128, 180);
+        var sequence = new ScrollCaptureSequence(_ => Task.FromResult(document), (_, _) => Task.CompletedTask);
+        var attempts = new List<(ScrollCaptureFinishAction Action, PixelBuffer Image)>();
+        using var controller = new ScrollCaptureController(
+            new SelectionRegion(new PixelRect(0, 0, document.Width, document.Height), null),
+            new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json")), sequence,
+            (currentAction, image) =>
+            {
+                attempts.Add((currentAction, image));
+                if (attempts.Count == 1)
+                {
+                    throw new IOException("Output unavailable");
+                }
+                return (currentAction, null);
+            });
+
+        await controller.RetryOutputAsync();
+        await controller.FinishAsync(action);
+        await controller.RetryOutputAsync();
+
+        Assert.HasCount(2, attempts);
+        Assert.AreEqual(action, attempts[1].Action);
+        Assert.AreSame(attempts[0].Image, attempts[1].Image);
+    }
+
+    [TestMethod]
+    [DataRow(0, -1, true)]
+    [DataRow(0, 0x10, false)]
+    [DataRow(0, 0x11, false)]
+    [DataRow(0, 0x12, false)]
+    [DataRow(0, 0x5b, false)]
+    [DataRow(0x10, -1, false)]
+    [DataRow(0x20, -1, false)]
+    public void CaptureShortcutsIgnoreModifiedAndInjectedKeys(int flags, int pressedModifier, bool expected)
+    {
+        Assert.AreEqual(expected, LowLevelKeyboardHook.IsPlainKeyPress(flags, key => key == pressedModifier));
     }
 
     [STATestMethod]

@@ -16,6 +16,28 @@ internal sealed partial class CaptureSurface
 
     public void ClearAnnotationSelection() => SelectAnnotation(null);
 
+    public bool DeleteSelectedAnnotation()
+    {
+        EndAnnotationInteraction();
+        if (_selectedAnnotationId is not Guid id)
+        {
+            return false;
+        }
+
+        var index = _annotations.FindIndex(item => item.Id == id);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var before = CaptureAnnotationSnapshot();
+        _annotations.RemoveAt(index);
+        _mosaicCompositeDirty = true;
+        SelectAnnotation(null);
+        RecordAnnotationEdit(before);
+        return true;
+    }
+
     public void ApplyStyleToSelected(AnnotationStyle style)
     {
         if (_selectedAnnotationId is not Guid id)
@@ -128,6 +150,11 @@ internal sealed partial class CaptureSurface
         }
     }
 
+    internal AnnotationItem[] GetMosaicAnnotations() =>
+        _annotations.Where(item => item.Kind == AnnotationKind.Mosaic).ToArray();
+
+    internal PixelBuffer RenderOriginalSelection() => _sourceBuffer.Crop(Selection);
+
     public PixelBuffer RenderSelection()
     {
         if (Selection.IsEmpty)
@@ -135,7 +162,9 @@ internal sealed partial class CaptureSurface
             throw new InvalidOperationException("请先选择截图区域。");
         }
 
-        var baseImage = _frame.ToPixelBuffer().Crop(Selection);
+        var baseImage = _translatedSelection is { } translated
+            ? translated with { Pixels = (byte[])translated.Pixels.Clone() }
+            : RenderOriginalSelection();
         foreach (var item in _annotations.Where(item => item.Kind == AnnotationKind.Mosaic))
         {
             ApplyMosaic(baseImage, OffsetItem(item, -Selection.X, -Selection.Y));
@@ -261,8 +290,8 @@ internal sealed partial class CaptureSurface
             : kind == AnnotationKind.Pen || (kind == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush)
                 ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2).Intersect(Selection)
             : RectFromPoints(start, end);
-        var annotation = new AnnotationItem(
-            Guid.NewGuid(), kind, points, bounds, CurrentStyle, text, number, _annotations.Count);
+        var zIndex = _annotations.Count == 0 ? 0 : _annotations[^1].ZIndex + 1;
+        var annotation = new AnnotationItem(Guid.NewGuid(), kind, points, bounds, CurrentStyle, text, number, zIndex);
         _annotations.Add(annotation);
         // A newly drawn mark is finished, not implicitly in transform mode.
         // The user can explicitly choose it later with the pointer tool.
@@ -379,7 +408,7 @@ internal sealed partial class CaptureSurface
         {
             return item.Bounds;
         }
-        var radius = Math.Max(12, item.Style.FontSize * 0.62);
+        var radius = NumberRadius(item.Style);
         var center = item.Points.Count > 0
             ? item.Points[0]
             : new PixelPoint(item.Bounds.X, item.Bounds.Y);
@@ -451,7 +480,7 @@ internal sealed partial class CaptureSurface
         var center = item.Points.Count > 0
             ? item.Points[0]
             : new PixelPoint(item.Bounds.X, item.Bounds.Y);
-        var radius = Math.Max(12, item.Style.FontSize * 0.62);
+        var radius = NumberRadius(item.Style);
         return Distance(center, point) <= radius + tolerance;
     }
 
@@ -466,7 +495,7 @@ internal sealed partial class CaptureSurface
         if (item.Kind == AnnotationKind.Number)
         {
             var center = new PixelPoint(newBounds.X + newBounds.Width / 2.0, newBounds.Y + newBounds.Height / 2.0);
-            var style = item.Style with { FontSize = Math.Clamp(Math.Min(newBounds.Width, newBounds.Height) / 1.24, 10, 160) };
+            var style = item.Style with { FontSize = Math.Clamp(Math.Min(newBounds.Width, newBounds.Height), 10, 198) };
             return item with
             {
                 Points = [center],

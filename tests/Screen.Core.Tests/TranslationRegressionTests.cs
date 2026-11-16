@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 
 namespace Screen.Core.Tests;
 
@@ -7,6 +8,62 @@ namespace Screen.Core.Tests;
 public sealed class TranslationRegressionTests
 {
     private const string TextEvent = "data: {\"choices\":[{\"delta\":{\"content\":\"部分译文\"}}]}\n\n";
+
+    [TestMethod]
+    public async Task AiStreamIgnoresBlankFinishReasonsAndNeverEmitsSplitThinkTagsAsync()
+    {
+        var stream = AiEvent("译文<TH", "")
+                     + AiEvent("INK>private<thi", " ")
+                     + AiEvent("nk>nested</TH")
+                     + AiEvent("INK></th")
+                     + AiEvent("ink>继续<")
+                     + AiEvent("br><thi", "stop")
+                     + "data: [DONE]\n\n";
+        using var response = SseResponse(stream);
+
+        var visible = new List<string>();
+        await foreach (var fragment in OpenAiTranslationProvider.ReadServerSentEventsAsync(response, CancellationToken.None))
+        {
+            visible.Add(fragment);
+        }
+
+        CollectionAssert.AreEqual(new[] { "译文", "继续", "<br>" }, visible);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task CompletedStreamPreservesATrailingLessThanSignAsync(bool doneMarker)
+    {
+        var stream = AiEvent("译文 <") + (doneMarker
+            ? "data: [DONE]\n\n"
+            : AiEvent(string.Empty, "stop"));
+        using var response = SseResponse(stream);
+        var visible = new StringBuilder();
+        await foreach (var fragment in OpenAiTranslationProvider.ReadServerSentEventsAsync(response, CancellationToken.None))
+        {
+            visible.Append(fragment);
+        }
+        Assert.AreEqual("译文 <", visible.ToString());
+    }
+
+    [TestMethod]
+    public async Task AiStreamCoalescesProgressDuringABurstAndReportsTheFinalTextAsync()
+    {
+        const int burstLength = 200;
+        var stream = string.Concat(Enumerable.Repeat(AiEvent("a"), burstLength)) + "data: [DONE]\n\n";
+        using var client = new HttpClient(new OfflineHandler((_, _) => Task.FromResult(SseResponse(stream))));
+        var streamed = new List<string>();
+
+        var result = await new OpenAiTranslationProvider(client).TranslateAsync(
+            "Hello world", "en-US", NaturalProfile(), new TranslationCredentials("offline-key"),
+            new SynchronousProgress(streamed.Add));
+
+        Assert.AreEqual(new string('a', burstLength), result.Text);
+        Assert.AreEqual("a", streamed[0]);
+        Assert.AreEqual(result.Text, streamed[^1]);
+        Assert.IsTrue(streamed.Count < burstLength, "A burst must not trigger one progress update per SSE fragment.");
+    }
 
     [TestMethod]
     [DataRow(TextEvent)]
@@ -207,7 +264,7 @@ public sealed class TranslationRegressionTests
     }
 
     [TestMethod]
-    public async Task FastFallbackRacePreservesIncrementalStreamingChunksAsync()
+    public async Task FastFallbackRacePreservesFirstProgressAndFinalTextAsync()
     {
         var requests = new List<string>();
         using var client = new HttpClient(new OfflineHandler((request, _) =>
@@ -241,9 +298,8 @@ public sealed class TranslationRegressionTests
         Assert.AreEqual("第一段、第二段、第三段", result.Text);
         Assert.IsFalse(result.UsedFallback);
         CollectionAssert.AreEqual(new[] { "ai.example.test" }, requests);
-        Assert.IsTrue(
-            streamed.Contains("第一段、") && streamed.Contains("第一段、第二段、"),
-            $"Expected incremental SSE chunks while fast fallback race is enabled, got: [{string.Join(" | ", streamed)}]");
+        Assert.AreEqual("第一段、", streamed[0]);
+        Assert.AreEqual(result.Text, streamed[^1]);
     }
 
     [TestMethod]
@@ -306,6 +362,9 @@ public sealed class TranslationRegressionTests
         EnableFastFallbackRace = false,
         EnableMyMemoryFallback = true
     };
+
+    private static string AiEvent(string content, string? finishReason = null) =>
+        "data: " + JsonSerializer.Serialize(new { choices = new[] { new { delta = new { content }, finish_reason = finishReason } } }) + "\n\n";
 
     private static HttpResponseMessage SseResponse(string stream) => new(HttpStatusCode.OK)
     {

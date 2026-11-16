@@ -140,6 +140,10 @@ public partial class SettingsWindow
                 {
                     throw new InvalidOperationException(racingAddressError);
                 }
+                if (_viewModel.CanBindApiKey || (profile.EnableRacing && _viewModel.CanBindRacingApiKey))
+                {
+                    throw new InvalidOperationException("请先将 Key 草稿绑定到当前地址，再测试连接。");
+                }
             }
             var credentials = _viewModel.BuildTranslationCredentials();
             var provider = new OnlineTranslationProvider(_translationTestClient);
@@ -163,23 +167,30 @@ public partial class SettingsWindow
         }
         catch (OperationCanceledException) when (operation.IsCancellationRequested)
         {
-            _translationTestStatus.Text = "测试已取消";
         }
-        catch (Exception exception) when (!operation.IsCancellationRequested)
+        catch (Exception exception)
         {
-            // A stale run faulting after being superseded must not overwrite
-            // the newer test's status.
-            _translationTestStatus.Foreground = GetResource<Brush>("Settings.Brush.Error");
-            _translationTestStatus.Text = exception.Message;
+            if (operation.IsCancellationRequested)
+            {
+                SimpleLogger.LogError("Translation connection test ended with an error after cancellation", exception);
+            }
+            else
+            {
+                _translationTestStatus.Foreground = GetResource<Brush>("Settings.Brush.Error");
+                _translationTestStatus.Text = exception.Message;
+            }
         }
         finally
         {
-            if (!operation.IsCancellationRequested)
+            if (ReferenceEquals(_translationTestOperation, operation))
             {
-                // A superseded run must not re-enable the button while the
-                // newer test is still in flight.
-                button.IsEnabled = true;
+                _translationTestOperation = null;
+                if (!operation.IsCancellationRequested)
+                {
+                    button.IsEnabled = true;
+                }
             }
+            operation.Dispose();
         }
     }
 }

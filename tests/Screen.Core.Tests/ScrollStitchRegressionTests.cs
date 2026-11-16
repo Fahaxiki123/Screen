@@ -30,6 +30,72 @@ public sealed class ScrollStitchRegressionTests
     }
 
     [TestMethod]
+    public void AnimatedPatchOnAStationaryPageDoesNotAddAScrolledRow()
+    {
+        const int width = 96;
+        const int height = 400;
+        var stopped = Pattern(width, height);
+        for (var y = 0; y < height; y++)
+        {
+            PaintRows(stopped, y, 1, (byte)(25 + y / 2));
+        }
+        var animated = stopped.Crop(new PixelRect(0, 0, width, height));
+        for (var y = 180; y < 196; y++)
+        {
+            for (var x = 32; x < 56; x++)
+            {
+                var offset = y * animated.Stride + x * 4;
+                animated.Pixels[offset] = animated.Pixels[offset + 1] = animated.Pixels[offset + 2] = 23;
+            }
+        }
+
+        var result = new VerticalScrollStitcher().Stitch([stopped, animated]);
+
+        Assert.IsTrue(result.IsComplete, result.FailureReason);
+        Assert.HasCount(0, result.Seams);
+        CollectionAssert.AreEqual(stopped.Pixels, result.Image.Pixels);
+    }
+
+    [TestMethod]
+    public void HeaderThatBecomesFixedLaterCannotEraseEarlierViewportRows()
+    {
+        const int width = 192;
+        const int height = 300;
+        var source = Pattern(width, 570);
+        var first = source.Crop(new PixelRect(0, 0, width, height));
+        var second = source.Crop(new PixelRect(0, 230, width, height));
+        var third = source.Crop(new PixelRect(0, 270, width, height));
+        second.Pixels.AsSpan(0, 100 * second.Stride).CopyTo(third.Pixels);
+
+        var result = new VerticalScrollStitcher().Stitch([first, second, third]);
+
+        Assert.IsTrue(result.IsComplete, result.FailureReason);
+        CollectionAssert.AreEqual(new[] { 0, 100 }, result.Seams.Select(seam => seam.FixedHeaderHeight).ToArray());
+        CollectionAssert.AreEqual(source.Pixels, result.Image.Pixels);
+    }
+
+    [TestMethod]
+    public void FooterThatBecomesFixedLaterCannotEraseEarlierViewportRows()
+    {
+        const int width = 192;
+        const int height = 300;
+        const int footer = 100;
+        var source = Pattern(width, 560);
+        var first = source.Crop(new PixelRect(0, 0, width, height));
+        var second = source.Crop(new PixelRect(0, 220, width, height));
+        var third = source.Crop(new PixelRect(0, 260, width, height));
+        var footerOffset = (height - footer) * source.Stride;
+        second.Pixels.AsSpan(footerOffset).CopyTo(third.Pixels.AsSpan(footerOffset));
+        third.Pixels.AsSpan(footerOffset).CopyTo(source.Pixels.AsSpan((source.Height - footer) * source.Stride));
+
+        var result = new VerticalScrollStitcher().Stitch([first, second, third]);
+
+        Assert.IsTrue(result.IsComplete, result.FailureReason);
+        CollectionAssert.AreEqual(new[] { 220, 260 }, result.Seams.Select(seam => seam.OutputY).ToArray());
+        CollectionAssert.AreEqual(source.Pixels, result.Image.Pixels);
+    }
+
+    [TestMethod]
     public void UpwardMovementInLowContrastTextCannotBecomeDuplicatedDownwardContent()
     {
         var source = Document(384, 1200, lowContrast: true);

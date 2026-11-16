@@ -341,8 +341,20 @@ internal sealed class TranslationCard : Grid
     public void SetText(string text)
     {
         _text.Foreground = Token("Brush.TextPrimary");
-        _text.Text = text;
         _hasTranslation = !string.IsNullOrWhiteSpace(text);
+        if (string.Equals(_text.Text, text, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var selectionStart = Math.Min(_text.SelectionStart, text.Length);
+        var selectionLength = Math.Min(_text.SelectionLength, text.Length - selectionStart);
+        var horizontalOffset = _text.HorizontalOffset;
+        var verticalOffset = _text.VerticalOffset;
+        _text.Text = text;
+        _text.Select(selectionStart, selectionLength);
+        _text.ScrollToHorizontalOffset(horizontalOffset);
+        _text.ScrollToVerticalOffset(verticalOffset);
     }
 
     public void SetStatus(string status)

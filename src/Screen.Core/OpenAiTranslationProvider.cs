@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -7,6 +8,8 @@ namespace Screen.Core;
 
 public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslationProvider
 {
+    private static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(80);
+
     public async Task<TranslationResult> TranslateAsync(
         string text,
         string sourceLanguage,
@@ -90,16 +93,32 @@ public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslat
         }
 
         var result = new StringBuilder();
+        long? lastProgressTimestamp = null;
+        string? lastProgressText = null;
         await foreach (var fragment in ReadServerSentEventsAsync(response, cancellationToken).ConfigureAwait(false))
         {
             result.Append(fragment);
-            streamingText?.Report(protectedText.Restore(result.ToString()));
+            if (streamingText is not null
+                && (lastProgressTimestamp is null || Stopwatch.GetElapsedTime(lastProgressTimestamp.Value) >= ProgressInterval))
+            {
+                var snapshot = protectedText.Restore(result.ToString());
+                if (!string.IsNullOrWhiteSpace(snapshot))
+                {
+                    lastProgressText = snapshot;
+                    lastProgressTimestamp = Stopwatch.GetTimestamp();
+                    streamingText.Report(snapshot);
+                }
+            }
         }
 
         var translated = protectedText.Restore(result.ToString()).Trim();
         if (translated.Length == 0)
         {
             throw new InvalidOperationException("AI 自然翻译没有返回译文。");
+        }
+        if (!string.Equals(translated, lastProgressText, StringComparison.Ordinal))
+        {
+            streamingText?.Report(translated);
         }
         return new TranslationResult(translated, "AI 自然翻译");
     }
@@ -183,6 +202,7 @@ public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslat
         RescheduleIdleTimeout();
         var completed = false;
         var eventName = string.Empty;
+        var thinking = new StreamingThinkingFilter();
         while (true)
         {
             string? line;
@@ -274,7 +294,11 @@ public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslat
                     var reason = finishReason.ValueKind == JsonValueKind.String
                         ? finishReason.GetString()
                         : null;
-                    if (reason != "stop")
+                    if (reason == "stop")
+                    {
+                        completed = true;
+                    }
+                    else if (reason is null || !string.IsNullOrWhiteSpace(reason))
                     {
                         throw new InvalidOperationException(reason switch
                         {
@@ -283,20 +307,95 @@ public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslat
                             _ => $"AI 自然翻译未正常完成（finish_reason: {reason ?? "无效"}）。"
                         });
                     }
-                    completed = true;
                 }
                 if (choice.TryGetProperty("delta", out var delta)
                     && delta.ValueKind == JsonValueKind.Object
                     && delta.TryGetProperty("content", out var content)
                     && content.ValueKind == JsonValueKind.String)
                 {
-                    yield return content.GetString()!;
+                    var visibleText = thinking.Filter(content.GetString()!);
+                    if (visibleText.Length > 0)
+                    {
+                        yield return visibleText;
+                    }
                 }
             }
         }
         if (!completed)
         {
             throw new HttpRequestException("AI 自然翻译连接在完成前中断，译文不完整。");
+        }
+        if (thinking.Complete() is { Length: > 0 } suffix)
+        {
+            yield return suffix;
+        }
+    }
+
+    private sealed class StreamingThinkingFilter
+    {
+        private const string OpenTag = "<think>";
+        private const string CloseTag = "</think>";
+        private string _pendingTag = string.Empty;
+        private int _depth;
+
+        // A bare less-than sign at normal EOF is ordinary text. Keep dropping
+        // truncated tag prefixes and unfinished reasoning blocks.
+        public string Complete() => _depth == 0 && _pendingTag == "<" ? "<" : string.Empty;
+
+        public string Filter(string fragment)
+        {
+            if (_pendingTag.Length == 0 && !fragment.Contains('<'))
+            {
+                return _depth == 0 ? fragment : string.Empty;
+            }
+
+            var text = (_pendingTag + fragment).AsSpan();
+            _pendingTag = string.Empty;
+            var visible = new StringBuilder();
+            while (!text.IsEmpty)
+            {
+                var opening = text.IndexOf('<');
+                if (opening < 0)
+                {
+                    if (_depth == 0)
+                    {
+                        visible.Append(text);
+                    }
+                    break;
+                }
+                if (_depth == 0)
+                {
+                    visible.Append(text[..opening]);
+                }
+                text = text[opening..];
+
+                if (text.StartsWith(OpenTag, StringComparison.OrdinalIgnoreCase))
+                {
+                    _depth++;
+                    text = text[OpenTag.Length..];
+                }
+                else if (text.StartsWith(CloseTag, StringComparison.OrdinalIgnoreCase))
+                {
+                    _depth = Math.Max(0, _depth - 1);
+                    text = text[CloseTag.Length..];
+                }
+                else if (OpenTag.AsSpan().StartsWith(text, StringComparison.OrdinalIgnoreCase)
+                         || CloseTag.AsSpan().StartsWith(text, StringComparison.OrdinalIgnoreCase))
+                {
+                    // The network can split a tag anywhere, including after '<'.
+                    _pendingTag = text.ToString();
+                    break;
+                }
+                else
+                {
+                    if (_depth == 0)
+                    {
+                        visible.Append('<');
+                    }
+                    text = text[1..];
+                }
+            }
+            return visible.ToString();
         }
     }
 }

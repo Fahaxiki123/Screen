@@ -143,6 +143,152 @@ public sealed class SettingsPersistenceTests
     }
 
     [STATestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void AKeyDraftSurvivesAddressEditsButRequiresBindingBeforeUse(bool racing)
+    {
+        var credentials = new FakeCredentialStore();
+        using var settings = new SettingsViewModel(_store, credentials, _ => { });
+        settings.TranslationProviderIndex = 2;
+        if (racing)
+        {
+            settings.EnableRacing = true;
+            settings.RacingApiKey = "new-key";
+            settings.SaveNow();
+            settings.RacingBaseAddress = "https://example.test/v1";
+            Assert.AreEqual("new-key", settings.RacingApiKey);
+            Assert.IsTrue(settings.CanBindRacingApiKey);
+            Assert.IsNull(settings.BuildTranslationCredentials().RacingApiKey);
+        }
+        else
+        {
+            settings.BaseAddress = "https://example.test";
+            settings.ApiKey = "new-key";
+            settings.BaseAddress += "/v1";
+            Assert.AreEqual("new-key", settings.ApiKey);
+            Assert.IsTrue(settings.CanBindApiKey);
+            Assert.IsNull(settings.BuildTranslationCredentials().ApiKey);
+        }
+
+        var slot = racing ? TranslationProfile.RacingApiKeyCredentialName : TranslationProfile.ApiKeyCredentialName;
+        settings.SaveNow();
+        Assert.IsNull(credentials.Read(slot));
+        settings.BindDraftKey(racing);
+        settings.SaveNow();
+
+        var saved = TranslationCredentialStore.ReadSaved(_store.Load().Translation, credentials);
+        Assert.AreEqual("new-key", racing ? saved.RacingApiKey : saved.ApiKey);
+        Assert.IsFalse(settings.HasError, settings.StatusText);
+    }
+
+    [STATestMethod]
+    public void AddressEditInvalidatesDraftConfirmationWithoutErasingIt()
+    {
+        var credentials = new FakeCredentialStore();
+        using var settings = new SettingsViewModel(_store, credentials, _ => { });
+        settings.ApiKey = "draft-key";
+        settings.BaseAddress = "https://example.test";
+        settings.BindDraftKey(racing: false);
+        Assert.AreEqual("draft-key", settings.BuildTranslationCredentials().ApiKey);
+
+        settings.BaseAddress += "/v1";
+
+        Assert.AreEqual("draft-key", settings.ApiKey);
+        Assert.IsNull(settings.BuildTranslationCredentials().ApiKey);
+        settings.SaveNow();
+        Assert.IsNull(credentials.Read(TranslationProfile.ApiKeyCredentialName));
+    }
+
+    [STATestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void AddressEditKeepsSessionInputAfterAutosaveWithoutRebindingIt(bool racing)
+    {
+        var credentials = new FakeCredentialStore();
+        using var settings = new SettingsViewModel(_store, credentials, _ => { });
+        settings.TranslationProviderIndex = 2;
+        settings.EnableRacing = true;
+        if (racing)
+        {
+            settings.RacingBaseAddress = "https://example.test";
+            settings.RacingApiKey = "session-key";
+        }
+        else
+        {
+            settings.BaseAddress = "https://example.test";
+            settings.ApiKey = "session-key";
+        }
+        settings.SaveNow();
+        var oldProfile = _store.Load().Translation;
+        var oldKeys = TranslationCredentialStore.ReadSaved(oldProfile, credentials);
+        Assert.AreEqual("session-key", racing ? oldKeys.RacingApiKey : oldKeys.ApiKey);
+
+        if (racing)
+        {
+            settings.RacingBaseAddress += "/v1";
+            Assert.AreEqual("session-key", settings.RacingApiKey);
+            Assert.IsTrue(settings.CanBindRacingApiKey);
+            Assert.IsNull(settings.BuildTranslationCredentials().RacingApiKey);
+        }
+        else
+        {
+            settings.BaseAddress += "/v1";
+            Assert.AreEqual("session-key", settings.ApiKey);
+            Assert.IsTrue(settings.CanBindApiKey);
+            Assert.IsNull(settings.BuildTranslationCredentials().ApiKey);
+        }
+        settings.SaveNow();
+
+        var currentProfile = _store.Load().Translation;
+        var currentKeys = TranslationCredentialStore.ReadSaved(currentProfile, credentials);
+        Assert.IsNull(racing ? currentKeys.RacingApiKey : currentKeys.ApiKey);
+        oldKeys = TranslationCredentialStore.ReadSaved(oldProfile, credentials);
+        Assert.AreEqual("session-key", racing ? oldKeys.RacingApiKey : oldKeys.ApiKey);
+
+        settings.BindDraftKey(racing);
+        settings.SaveNow();
+        currentKeys = TranslationCredentialStore.ReadSaved(currentProfile, credentials);
+        Assert.AreEqual("session-key", racing ? currentKeys.RacingApiKey : currentKeys.ApiKey);
+        oldKeys = TranslationCredentialStore.ReadSaved(oldProfile, credentials);
+        Assert.IsNull(racing ? oldKeys.RacingApiKey : oldKeys.ApiKey);
+    }
+
+    [STATestMethod]
+    [DataRow(0)]
+    [DataRow(1)]
+    public void InactiveAiOptionsDoNotBlockOtherSettings(int providerIndex)
+    {
+        var credentials = new FakeCredentialStore();
+        using var settings = new SettingsViewModel(_store, credentials, _ => { });
+        settings.TranslationProviderIndex = 2;
+        settings.FastFallbackDelayText = "31";
+        settings.RacingBaseAddress = "invalid";
+        settings.TranslationProviderIndex = providerIndex;
+        settings.RecordingShowCursor = false;
+
+        settings.SaveNow();
+
+        Assert.IsFalse(settings.HasError, settings.StatusText);
+        Assert.IsFalse(_store.Load().Recording.ShowCursor);
+        Assert.AreEqual(providerIndex == 0 ? TranslationProviderKind.Tencent : TranslationProviderKind.MyMemory,
+            _store.Load().Translation.Provider);
+    }
+
+    [STATestMethod]
+    public void DisabledAiRaceDoesNotValidateItsStoredAddress()
+    {
+        var credentials = new FakeCredentialStore();
+        using var settings = new SettingsViewModel(_store, credentials, _ => { });
+        settings.TranslationProviderIndex = 2;
+        settings.EnableRacing = true;
+        settings.RacingBaseAddress = "invalid";
+        settings.EnableRacing = false;
+        settings.SaveNow();
+        Assert.IsFalse(settings.HasError, settings.StatusText);
+        Assert.IsFalse(_store.Load().Translation.EnableRacing);
+    }
+
+    [STATestMethod]
     public void FailedAddressSaveRetainsThePreviousUsablePairUntilRetry()
     {
         var profile = SaveAiProfile();

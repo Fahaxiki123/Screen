@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -23,7 +24,7 @@ internal sealed class ScrollCaptureController : IDisposable
     private readonly Func<ScrollCaptureFinishAction, PixelBuffer, (ScrollCaptureFinishAction Action, string? Warning)> _writeOutput;
     private readonly ScrollCaptureBottomDetector _bottomDetector = new();
     private ScrollCaptureSequence? _sequence;
-    private (ScrollFrameCapture Tail, StitchResult Result)? _pendingOutput;
+    private (ScrollFrameCapture Tail, StitchResult Result, ScrollCaptureFinishAction Action)? _pendingOutput;
     private ScrollCaptureControlWindow? _control;
     private RegionBorderWindow? _border;
     private ScrollCapturePreviewWindow? _preview;
@@ -94,18 +95,28 @@ internal sealed class ScrollCaptureController : IDisposable
             _control.FinishRequested += async (_, _) => await FinishAsync(ScrollCaptureFinishAction.Copy);
             _control.EditRequested += async (_, _) => await FinishAsync(ScrollCaptureFinishAction.Edit);
             _control.SaveRequested += async (_, _) => await FinishAsync(ScrollCaptureFinishAction.Save);
+            _control.RetryRequested += async (_, _) => await RetryOutputAsync();
             _control.CancelRequested += (_, _) => Cancel();
             _control.Closed += (_, _) => Cancel();
             _control.Show();
             _keyboard = new LowLevelKeyboardHook(keyboardTarget);
             _keyboard.EnterPressed += (_, _) => Application.Current.Dispatcher.BeginInvoke(
-                new Action(async () => await FinishAsync(ScrollCaptureFinishAction.Copy)));
-            _keyboard.EscapePressed += (_, _) => Application.Current.Dispatcher.BeginInvoke(new Action(Cancel));
-
-            if (_selection.TargetWindow is { Handle: not 0 } target)
+                new Action(async () =>
+                {
+                    if (_sequence is not null)
+                    {
+                        await FinishAsync(ScrollCaptureFinishAction.Copy);
+                    }
+                }));
+            _keyboard.EscapePressed += (_, _) => Application.Current.Dispatcher.BeginInvoke(new Action(() =>
             {
-                WindowActivation.Activate(target.Handle);
-            }
+                if (_sequence is not null)
+                {
+                    Cancel();
+                }
+            }));
+
+            WindowActivation.Activate(keyboardTarget);
 
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
             _timer.Tick += OnTimerTick;
@@ -326,7 +337,7 @@ internal sealed class ScrollCaptureController : IDisposable
                 {
                     return;
                 }
-                _pendingOutput = (tail, result);
+                _pendingOutput = (tail, result, action);
                 StopAcquisition();
                 _control?.ShowOutputActions();
                 _preview?.SetStatus("已拼接 · 可复制、保存或编辑");
@@ -336,6 +347,7 @@ internal sealed class ScrollCaptureController : IDisposable
             {
                 return;
             }
+            _pendingOutput = (output.Tail, output.Result, action);
             var (deliveredAction, outputWarning) = _writeOutput(action, output.Result.Image);
             if (_ended)
             {
@@ -362,8 +374,12 @@ internal sealed class ScrollCaptureController : IDisposable
                 _preview?.SetStatus("输出失败 · 已保留拼接结果");
                 if (_control is { } owner)
                 {
-                    MessageBox.Show(owner, $"长截图输出失败：{exception.Message}\n已保留拼接结果，可重试复制、保存或编辑。",
+                    MessageBox.Show(owner, $"长截图输出失败：{exception.Message}\n已保留拼接结果，可重试复制、保存或编辑。\n回到控制条后，Enter 重试，Esc 取消。",
                         "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+                    if (!_ended)
+                    {
+                        owner.FocusOutputAction(action);
+                    }
                 }
             }
             else if (!_ended)
@@ -393,6 +409,8 @@ internal sealed class ScrollCaptureController : IDisposable
             HintToastWindow.Show(warning);
         }
     }
+
+    internal Task RetryOutputAsync() => _pendingOutput is { } output ? FinishAsync(output.Action) : Task.CompletedTask;
 
     internal static string? CompletionWarning(
         ScrollFrameCapture tail, StitchResult result, ScrollCaptureFinishAction action)
@@ -547,6 +565,7 @@ internal sealed class ScrollCapturePreviewWindow : Window
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
         ShowInTaskbar = false;
+        ShowActivated = false;
         Width = 220;
         Height = 150;
         Background = Token("Brush.Surface");
@@ -641,9 +660,13 @@ internal sealed class ScrollCapturePreviewWindow : Window
 internal sealed class ScrollCaptureControlWindow : Window
 {
     private readonly Button _autoButton;
+    private readonly Button _editButton;
+    private readonly Button _saveButton;
+    private readonly Button _finishButton;
     private readonly TextBlock _autoLabel;
     private bool _enabled;
     private bool _positioned;
+    private bool _outputActions;
     private nint _handle;
 
     public ScrollCaptureControlWindow(PixelRect region)
@@ -653,6 +676,7 @@ internal sealed class ScrollCaptureControlWindow : Window
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
         ShowInTaskbar = false;
+        ShowActivated = false;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
         // Fit the capsule to its content: a fixed width clipped the action
@@ -726,21 +750,23 @@ internal sealed class ScrollCaptureControlWindow : Window
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(_autoButton);
         row.Children.Add(ControlSeparator());
-        row.Children.Add(IconAction(LucideIconKind.Pencil, "完成并编辑", () => EditRequested?.Invoke(this, EventArgs.Empty)));
-        row.Children.Add(IconAction(LucideIconKind.Download, "完成并保存", () => SaveRequested?.Invoke(this, EventArgs.Empty)));
+        _editButton = IconAction(LucideIconKind.Pencil, "完成并编辑", () => EditRequested?.Invoke(this, EventArgs.Empty));
+        _saveButton = IconAction(LucideIconKind.Download, "完成并保存", () => SaveRequested?.Invoke(this, EventArgs.Empty));
+        row.Children.Add(_editButton);
+        row.Children.Add(_saveButton);
         row.Children.Add(IconAction(
             LucideIconKind.X, "取消长截图",
             () => CancelRequested?.Invoke(this, EventArgs.Empty),
             "Brush.DangerOnDark"));
-        var finishButton = IconAction(
+        _finishButton = IconAction(
             LucideIconKind.Check, "完成并复制",
             () => FinishRequested?.Invoke(this, EventArgs.Empty));
-        finishButton.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
-        finishButton.Width = finishButton.MinWidth = 36;
-        finishButton.Height = 36;
-        finishButton.Margin = new Thickness(3, 1, 1, 1);
-        finishButton.Padding = new Thickness(0);
-        row.Children.Add(finishButton);
+        _finishButton.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
+        _finishButton.Width = _finishButton.MinWidth = 36;
+        _finishButton.Height = 36;
+        _finishButton.Margin = new Thickness(3, 1, 1, 1);
+        _finishButton.Padding = new Thickness(0);
+        row.Children.Add(_finishButton);
 
         Content = new Border
         {
@@ -756,6 +782,8 @@ internal sealed class ScrollCaptureControlWindow : Window
         SourceInitialized += (_, _) =>
         {
             _handle = new WindowInteropHelper(this).Handle;
+            var style = NativeMethods.GetWindowLongPtr(_handle, NativeMethods.GwlExStyle).ToInt64();
+            NativeMethods.SetWindowLongPtr(_handle, NativeMethods.GwlExStyle, (nint)(style | NativeMethods.WsExNoActivate));
             NativeMethods.SetWindowDisplayAffinity(_handle, NativeMethods.WdaExcludeFromCapture);
         };
         // Position once layout has produced a real width (SizeToContent means
@@ -855,9 +883,53 @@ internal sealed class ScrollCaptureControlWindow : Window
 
     public void ShowOutputActions()
     {
+        _outputActions = true;
         SetAutomatic(false);
         _autoLabel.Text = "已拼接";
         _autoButton.IsEnabled = false;
+        if (_handle != 0)
+        {
+            var style = NativeMethods.GetWindowLongPtr(_handle, NativeMethods.GwlExStyle).ToInt64();
+            NativeMethods.SetWindowLongPtr(_handle, NativeMethods.GwlExStyle, (nint)(style & ~NativeMethods.WsExNoActivate));
+            NativeMethods.SetWindowPos(_handle, 0, 0, 0, 0, 0,
+                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder
+                | NativeMethods.SwpNoActivate | NativeMethods.SwpFrameChanged);
+        }
+    }
+
+    public void FocusOutputAction(ScrollCaptureFinishAction action)
+    {
+        Activate();
+        var button = action switch
+        {
+            ScrollCaptureFinishAction.Edit => _editButton,
+            ScrollCaptureFinishAction.Save => _saveButton,
+            _ => _finishButton
+        };
+        button.Focus();
+    }
+
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+        if (!_outputActions || e.Key is not (Key.Enter or Key.Escape))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (e.IsRepeat || Keyboard.Modifiers != ModifierKeys.None)
+        {
+            return;
+        }
+        if (e.Key == Key.Enter)
+        {
+            RetryRequested?.Invoke(this, EventArgs.Empty);
+        }
+        else
+        {
+            CancelRequested?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     public void BringToFrontNoActivate()
@@ -882,6 +954,7 @@ internal sealed class ScrollCaptureControlWindow : Window
     public event EventHandler? FinishRequested;
     public event EventHandler? EditRequested;
     public event EventHandler? SaveRequested;
+    public event EventHandler? RetryRequested;
     public event EventHandler? CancelRequested;
     public event Action<bool>? AutomaticChanged;
 }
@@ -902,6 +975,7 @@ internal sealed class RegionBorderWindow : Window
         Background = Brushes.Transparent;
         Topmost = true;
         ShowInTaskbar = false;
+        ShowActivated = false;
 
         SourceInitialized += (_, _) =>
         {

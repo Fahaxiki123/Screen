@@ -378,21 +378,29 @@ internal sealed class OcrCard : Grid, IDisposable
         {
             try
             {
-                return await ocr.RecognizeAsync(image, language, purpose, cancellationToken);
+                return (Document: (OcrDocument?)await ocr.RecognizeAsync(image, language, purpose, cancellationToken),
+                    Error: (Exception?)null);
             }
             catch (OperationCanceledException)
             {
                 throw;
             }
-            catch
+            catch (Exception exception)
             {
-                return null;
+                return (Document: (OcrDocument?)null, Error: exception);
             }
         });
-        var documents = (await Task.WhenAll(tasks)).Where(document => document is not null).Cast<OcrDocument>().ToArray();
-        return documents.Length == 0
-            ? throw new InvalidOperationException("无法创建可用的 OCR 引擎。")
-            : documents.MaxBy(RecognitionScore)!;
+        var attempts = await Task.WhenAll(tasks);
+        var bestDocument = attempts.Select(attempt => attempt.Document)
+            .OfType<OcrDocument>()
+            .MaxBy(RecognitionScore);
+        if (bestDocument is not null)
+        {
+            return bestDocument;
+        }
+
+        var error = attempts.Select(attempt => attempt.Error).FirstOrDefault(error => error is not null);
+        throw new InvalidOperationException(error?.Message ?? "无法创建可用的 OCR 引擎。", error);
     }
 
     private static IReadOnlyList<string> GetAutomaticLanguages(IEnumerable<string> availableLanguages)

@@ -41,8 +41,8 @@ public partial class SettingsWindow : Window
 
     internal SettingsWindow(
         JsonSettingsStore store,
-        CredentialService credentials,
-        StartupService startup,
+        ICredentialStore credentials,
+        Action<bool> setStartupEnabled,
         Func<string, bool>? registerCaptureHotKey = null,
         Func<string, bool>? registerRecoveryHotKey = null,
         Func<string, bool>? registerRecordHotKey = null,
@@ -74,7 +74,7 @@ public partial class SettingsWindow : Window
             }
         };
 
-        _viewModel = new SettingsViewModel(store, credentials, startup.SetEnabled, setHotKeyPriority);
+        _viewModel = new SettingsViewModel(store, credentials, setStartupEnabled, setHotKeyPriority);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
 

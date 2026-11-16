@@ -51,8 +51,28 @@ public sealed class JsonSettingsStore
 
             var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), Options)
                            ?? new AppSettings();
+            var defaults = new AppSettings();
+            settings.HotKey ??= defaults.HotKey;
+            settings.ClickThroughRecoveryHotKey ??= defaults.ClickThroughRecoveryHotKey;
+            settings.RecordHotKey ??= defaults.RecordHotKey;
+            settings.OcrLanguage ??= defaults.OcrLanguage;
+            settings.SaveDirectory ??= defaults.SaveDirectory;
             settings.Ocr ??= new OcrProfile();
-            settings.Translation ??= new AppSettings().Translation;
+            settings.Translation = settings.Translation is { } translation
+                ? translation with
+                {
+                    // An unknown endpoint must not become a guessed URL for a legacy key.
+                    BaseAddress = translation.BaseAddress ?? string.Empty,
+                    Model = translation.Model ?? defaults.Translation.Model,
+                    CredentialName = translation.CredentialName ?? string.Empty,
+                    TargetLanguage = translation.TargetLanguage ?? defaults.Translation.TargetLanguage,
+                    TencentRegion = translation.TencentRegion ?? defaults.Translation.TencentRegion,
+                    MyMemoryContactEmail = translation.MyMemoryContactEmail ?? string.Empty,
+                    RacingBaseAddress = translation.RacingBaseAddress ?? string.Empty,
+                    RacingModel = translation.RacingModel ?? string.Empty,
+                    RacingCredentialName = translation.RacingCredentialName ?? string.Empty
+                }
+                : defaults.Translation;
             settings.Recording ??= new RecordingProfile();
             if (!Enum.IsDefined(settings.TranslationDisplayMode))
             {
@@ -95,8 +115,8 @@ public sealed class JsonSettingsStore
     /// <summary>
     /// Reloads the latest on-disk settings, applies <paramref name="mutate"/>, and
     /// persists the result atomically. Use this instead of Save when the caller's
-    /// snapshot may be stale — other components (runtime SaveDirectory updates,
-    /// hotkey fallback writes) may have persisted changes since it was loaded.
+    /// snapshot may be stale — other components may have persisted changes
+    /// such as the last-used save directory or translation language.
     /// </summary>
     public void Update(Action<AppSettings> mutate)
     {

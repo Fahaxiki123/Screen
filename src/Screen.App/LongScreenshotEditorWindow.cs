@@ -136,6 +136,10 @@ internal sealed class LongScreenshotEditorWindow : Window
                 }
                 e.Handled = true;
             }
+            else if ((e.Key is Key.Delete or Key.Back) && Keyboard.Modifiers == ModifierKeys.None && _surface.DeleteSelectedAnnotation())
+            {
+                e.Handled = true;
+            }
             else if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && e.Key == Key.Z)
             {
                 UndoEdit();
@@ -337,7 +341,7 @@ internal sealed class LongScreenshotEditorWindow : Window
             {
                 _thickness = size;
                 UpdateAnnotationStyle();
-                ApplyCurrentStyleToSelection();
+                ApplyCurrentStyleToSelection(sizeChanged: true);
                 UpdateStyleSelectionVisuals();
             };
             _thicknessButtons[size] = button;
@@ -447,6 +451,7 @@ internal sealed class LongScreenshotEditorWindow : Window
                 : Theme("Brush.TextPrimary", "#E8F1F7");
         }
         UpdateAnnotationStyle();
+        UpdateStyleSelectionVisuals();
     }
 
     private void UpdateAnnotationStyle()
@@ -458,19 +463,25 @@ internal sealed class LongScreenshotEditorWindow : Window
             _ => 0
         };
         var thickness = _surface.Tool == CaptureTool.Mosaic ? 36 : _thickness;
-        _surface.CurrentStyle = new AnnotationStyle(_color, thickness, 22, variant, 0.72);
+        var fontSize = _surface.Tool == CaptureTool.Number ? NumberSizeForOption(_thickness) : 22;
+        _surface.CurrentStyle = new AnnotationStyle(_color, thickness, fontSize, variant, 0.72);
     }
 
-    private void ApplyCurrentStyleToSelection()
+    private static double NumberSizeForOption(double option) => option <= 2 ? 24 : option <= 4 ? 32 : 44;
+
+    private void ApplyCurrentStyleToSelection(bool sizeChanged = false)
     {
         if (_surface.SelectedAnnotationStyle is not { } selected)
         {
             return;
         }
-        var thickness = _surface.SelectedAnnotationKind == AnnotationKind.Mosaic
-            ? selected.Thickness
-            : _thickness;
-        _surface.ApplyStyleToSelected(selected with { Argb = _color, Thickness = thickness });
+        var style = sizeChanged ? _surface.SelectedAnnotationKind switch
+        {
+            AnnotationKind.Mosaic => selected,
+            AnnotationKind.Number => selected with { FontSize = NumberSizeForOption(_thickness) },
+            _ => selected with { Thickness = _thickness }
+        } : selected with { Argb = _color };
+        _surface.ApplyStyleToSelected(style);
     }
 
     private void SyncStyleFromSelectedAnnotation()
@@ -478,7 +489,11 @@ internal sealed class LongScreenshotEditorWindow : Window
         if (_surface.SelectedAnnotationStyle is { } selected)
         {
             _color = selected.Argb;
-            if (_surface.SelectedAnnotationKind != AnnotationKind.Mosaic)
+            if (_surface.SelectedAnnotationKind == AnnotationKind.Number)
+            {
+                _thickness = _thicknessButtons.Keys.MinBy(value => Math.Abs(NumberSizeForOption(value) - selected.FontSize));
+            }
+            else if (_surface.SelectedAnnotationKind != AnnotationKind.Mosaic)
             {
                 _thickness = _thicknessButtons.Keys.MinBy(value => Math.Abs(value - selected.Thickness));
             }
@@ -488,8 +503,12 @@ internal sealed class LongScreenshotEditorWindow : Window
 
     private void UpdateStyleSelectionVisuals()
     {
+        var numberTool = _surface.SelectedAnnotationKind is { } selectedKind
+            ? selectedKind == AnnotationKind.Number
+            : _surface.Tool == CaptureTool.Number;
         foreach (var (size, button) in _thicknessButtons)
         {
+            button.ToolTip = numberTool ? $"序号直径 {NumberSizeForOption(size):0}px" : $"{size:0}px";
             var selected = Math.Abs(size - _thickness) < 0.01;
             button.Background = selected ? Theme("Brush.AccentSubtleDark", "#294960") : Brushes.Transparent;
             button.BorderBrush = selected ? Theme("Brush.AccentText", "#C5E5F0") : Brushes.Transparent;

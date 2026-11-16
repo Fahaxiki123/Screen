@@ -840,6 +840,44 @@ public sealed class CoreTests
     }
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void OcrFusionKeepsPreciseBoundsWhenEitherEngineSplitsTheOtherEnginesLine(bool cloudIsMerged)
+    {
+        var spanning = new OcrDocument("en-US", "first line second line",
+            [new OcrLine("first line second line", new PixelRect(0, 0, 100, 43), [], 0.98)]);
+        var split = new OcrDocument("en-US", "first line\nsecond line",
+            [
+                new OcrLine("first line", new PixelRect(0, 0, 95, 20), [], 0.95),
+                new OcrLine("second line", new PixelRect(0, 23, 100, 20), [], 0.94)
+            ]);
+
+        var fused = cloudIsMerged
+            ? OcrQualityEvaluator.Fuse(split, spanning)
+            : OcrQualityEvaluator.Fuse(spanning, split);
+
+        Assert.AreEqual("first line" + Environment.NewLine + "second line", fused.Text);
+        CollectionAssert.AreEqual(split.Lines.ToArray(), fused.Lines.ToArray());
+    }
+
+    [TestMethod]
+    public void OcrFusionKeepsMergedContentWhenSplitLinesDoNotContainAllItsText()
+    {
+        var spanning = new OcrLine("first line plus second line", new PixelRect(0, 0, 100, 43), [], 0.98);
+        var cloud = new OcrDocument("en-US", spanning.Text, [spanning]);
+        var local = new OcrDocument("en-US", "first line\nsecond line\nadditional row",
+            [
+                new OcrLine("first line", new PixelRect(0, 0, 95, 20), [], 0.95),
+                new OcrLine("second line", new PixelRect(0, 23, 100, 20), [], 0.94),
+                new OcrLine("additional row", new PixelRect(0, 60, 95, 20), [], 0.94)
+            ]);
+
+        var fused = OcrQualityEvaluator.Fuse(local, cloud);
+
+        Assert.AreEqual(spanning.Text + Environment.NewLine + "additional row", fused.Text);
+    }
+
+    [TestMethod]
     public async Task MissingTencentCredentialsFallsBackToMyMemory()
     {
         using var client = new HttpClient(new StubHttpHandler((request, _) =>

@@ -44,6 +44,9 @@ internal sealed partial class CaptureSurface : FrameworkElement
     private readonly CaptureFrame _frame;
     private readonly BitmapSource _source;
     private readonly PixelBuffer _sourceBuffer;
+    private PixelBuffer? _translatedSelection;
+    private BitmapSource? _translatedSelectionSource;
+    private PixelBuffer? _translatedFrame;
     private readonly IReadOnlyList<WindowTarget> _windows;
     private readonly WindowSnapService _snapService;
     private readonly List<AnnotationItem> _annotations = [];
@@ -279,4 +282,13 @@ internal sealed partial class CaptureSurface : FrameworkElement
         (int)Math.Floor(Math.Min(a.Y, b.Y)),
         Math.Max(1, (int)Math.Ceiling(Math.Abs(a.X - b.X))),
         Math.Max(1, (int)Math.Ceiling(Math.Abs(a.Y - b.Y))));
+
+    internal static PixelRect SelectionFromDrag(PixelPoint start, PixelPoint end)
+    {
+        var left = (int)Math.Floor(Math.Min(start.X, end.X));
+        var top = (int)Math.Floor(Math.Min(start.Y, end.Y));
+        var right = (int)Math.Floor(Math.Max(start.X, end.X));
+        var bottom = (int)Math.Floor(Math.Max(start.Y, end.Y));
+        return new PixelRect(left, top, right - left + 1, bottom - top + 1);
+    }
 }
