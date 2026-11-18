@@ -2,11 +2,15 @@
 
 个人使用的 Windows 截图、录屏、OCR 与翻译工具，使用 .NET 10 / WPF。
 
-当前源码版本为 **1.0.15**。程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
+程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
 
-## 下载与本次更新
+## 下载
 
-[下载 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.15/Screen-1.0.15-win-x64-Setup.exe) · [版本说明与 SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.15)
+**[获取最新稳定版](https://github.com/Fahaxiki123/Screen/releases/latest)** · [全部版本](https://github.com/Fahaxiki123/Screen/releases)
+
+截至 **2026-11-18** 已核对发布版本：**1.0.15**。以下安装包、校验文件和源码均对应 `v1.0.15`；后续升级使用上方最新稳定版入口。
+
+**[下载 1.0.15 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.15/Screen-1.0.15-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.15) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.15/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v1.0.15)
 
 安装器允许在 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64 上安装，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。Windows 10 实机安装与运行待验收。更新前请完成截图或录屏并退出 Screen。
 
@@ -36,14 +40,16 @@
 - Git 和 Git LFS，FFmpeg 二进制通过 Git LFS 保存。
 - 构建安装包时另需 PowerShell 7 和 NSIS 3.12。
 
-发布脚本要求源码目录名为 `开发工程`。在用于存放项目的父目录中执行以下命令。
+复现上方 1.0.15 安装包时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
 
 ```powershell
 git lfs install
-git clone https://github.com/Fahaxiki123/Screen.git 开发工程
+git clone --branch v1.0.15 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
 Set-Location 开发工程
 git lfs pull
 ```
+
+`开发工程` 是发布脚本的默认目录约定。已有不同名称的源码目录时，可使用 `./rebuild-and-restart.ps1 -ProductRoot '<源码目录外的产品目录>'` 显式指定发布位置。
 
 `src/Screen.App/ffmpeg/bin/ffmpeg.exe` 应为完整的可执行文件，构建和录屏集成测试均依赖它。OCR 模型位于 `src/Screen.App/Models/Ocr`，安装器所需的 Visual C++ 运行库位于 `tools/installer/runtime/win-x64`。这些依赖及随附的第三方声明应与源码一同保留。
 
