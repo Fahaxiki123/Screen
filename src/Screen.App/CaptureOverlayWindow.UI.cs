@@ -99,6 +99,7 @@ internal sealed partial class CaptureOverlayWindow
         var tools = new WrapPanel { Orientation = Orientation.Horizontal };
 
         // Cluster 1: Annotation drawing tools
+        AddTool(tools, CaptureTool.Select, LucideIconKind.MousePointer2, "选择和调整标注 · 绘制时可按住 Ctrl 选择");
         AddTool(tools, CaptureTool.Rectangle, LucideIconKind.Square, "矩形");
         AddTool(tools, CaptureTool.Ellipse, LucideIconKind.Circle, "圆形");
         AddTool(tools, CaptureTool.Line, LucideIconKind.Minus, "直线");
@@ -110,7 +111,7 @@ internal sealed partial class CaptureOverlayWindow
             ToolbarIcons.MosaicFrame,
             ToolbarIcons.MosaicBlocks,
             1.4,
-            "马赛克",
+            "马赛克 · 按住 Ctrl 选择已有标注",
             (_, _) => SelectTool(CaptureTool.Mosaic));
         _toolButtons[CaptureTool.Mosaic] = mosaicButton;
         tools.Children.Add(mosaicButton);
@@ -207,6 +208,11 @@ internal sealed partial class CaptureOverlayWindow
 
     private void ConfigureStylePanel(CaptureTool tool, bool applyToSelection = false)
     {
+        if (tool == CaptureTool.Select)
+        {
+            _stylePanel.Visibility = Visibility.Collapsed;
+            return;
+        }
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         if (tool == CaptureTool.Mosaic)
         {
@@ -395,7 +401,7 @@ internal sealed partial class CaptureOverlayWindow
 
     private void AddTool(Panel panel, CaptureTool tool, LucideIconKind icon, string tooltip)
     {
-        var button = ActionButton(icon, tooltip, (_, _) => SelectTool(tool));
+        var button = ActionButton(icon, tool == CaptureTool.Select ? tooltip : $"{tooltip} · 按住 Ctrl 选择已有标注", (_, _) => SelectTool(tool));
         _toolButtons[tool] = button;
         panel.Children.Add(button);
     }

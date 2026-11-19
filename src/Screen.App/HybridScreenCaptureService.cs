@@ -7,7 +7,8 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
 {
     private static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(60);
 
-    private readonly IScreenCaptureService _dxgi;
+    private readonly IDisposable _dxgi;
+    private readonly Func<PixelPoint, CancellationToken, Task<CaptureFrame?>> _capturePrimary;
     private readonly IScreenCaptureService _gdi;
     private readonly Action _resetPrimary;
     private readonly TimeSpan _idleTimeout;
@@ -25,6 +26,7 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
     {
         var dxgi = new DxgiScreenCaptureService();
         _dxgi = dxgi;
+        _capturePrimary = dxgi.TryCaptureAtAsync;
         _gdi = new GdiScreenCaptureService();
         _resetPrimary = dxgi.Reset;
         _idleTimeout = idleTimeout > TimeSpan.Zero ? idleTimeout : Timeout.InfiniteTimeSpan;
@@ -35,9 +37,11 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
         IScreenCaptureService primary,
         IScreenCaptureService fallback,
         Action resetPrimary,
-        TimeSpan idleTimeout)
+        TimeSpan idleTimeout,
+        Func<PixelPoint, CancellationToken, Task<CaptureFrame?>>? capturePrimary = null)
     {
         _dxgi = primary;
+        _capturePrimary = capturePrimary ?? (async (point, token) => await primary.CaptureAtAsync(point, token).ConfigureAwait(false));
         _gdi = fallback;
         _resetPrimary = resetPrimary;
         _idleTimeout = idleTimeout > TimeSpan.Zero ? idleTimeout : Timeout.InfiniteTimeSpan;
@@ -51,8 +55,8 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
         Volatile.Write(ref _lastActiveTimestamp, Stopwatch.GetTimestamp());
         try
         {
-            var frame = await _dxgi.CaptureAtAsync(screenPoint, cancellationToken).ConfigureAwait(false);
-            if (frame.MayContainSystemCursor || frame.ColorSpace != CaptureColorSpace.Srgb)
+            var frame = await _capturePrimary(screenPoint, cancellationToken).ConfigureAwait(false);
+            if (frame is null || frame.MayContainSystemCursor || frame.ColorSpace != CaptureColorSpace.Srgb)
             {
                 // Desktop Duplication's default BGRA8 surface cannot retain HDR values.
                 // It can also supply a surface that already includes the system cursor.
@@ -65,8 +69,8 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
                 // Desktop Duplication can occasionally hand out a valid-sized, zero-filled
                 // surface while the output is waking or the duplication session is stale.
                 await Task.Delay(45, cancellationToken).ConfigureAwait(false);
-                var retry = await _dxgi.CaptureAtAsync(screenPoint, cancellationToken).ConfigureAwait(false);
-                if (retry.ColorSpace == CaptureColorSpace.Srgb
+                var retry = await _capturePrimary(screenPoint, cancellationToken).ConfigureAwait(false);
+                if (retry is not null && retry.ColorSpace == CaptureColorSpace.Srgb
                     && !retry.MayContainSystemCursor
                     && !CaptureFrameQuality.IsSuspiciouslyBlack(retry))
                 {

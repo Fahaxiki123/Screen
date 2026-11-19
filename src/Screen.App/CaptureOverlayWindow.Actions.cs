@@ -22,14 +22,14 @@ internal sealed partial class CaptureOverlayWindow
         ShowAnnotationTool(tool);
     }
 
-    private void ShowAnnotationTool(CaptureTool tool)
+    private void ShowAnnotationTool(CaptureTool tool, bool preserveSelectionTool = false)
     {
-        _surface.Tool = tool;
+        _surface.Tool = preserveSelectionTool ? CaptureTool.Select : tool;
         _stylePanel.Visibility = Visibility.Visible;
         ConfigureStylePanel(tool);
         foreach (var pair in _toolButtons)
         {
-            var isSelected = pair.Key == tool;
+            var isSelected = pair.Key == _surface.Tool;
             pair.Value.Background = isSelected
                 ? (Brush)Application.Current.FindResource("Brush.AccentSubtleDark")
                 : Brushes.Transparent;
@@ -87,20 +87,27 @@ internal sealed partial class CaptureOverlayWindow
             AnnotationKind.Number => CaptureTool.Number,
             AnnotationKind.Mosaic => CaptureTool.Mosaic,
             _ => CaptureTool.Select
-        });
+        }, preserveSelectionTool: _surface.Tool == CaptureTool.Select);
     }
 
     private void UpdateStyle(bool applyToSelection = false)
     {
+        var styleTool = _surface.Tool == CaptureTool.Select ? _surface.SelectedAnnotationKind switch
+        {
+            AnnotationKind.Mosaic => CaptureTool.Mosaic,
+            AnnotationKind.Text => CaptureTool.Text,
+            AnnotationKind.Number => CaptureTool.Number,
+            _ => CaptureTool.Select
+        } : _surface.Tool;
         var pixelScale = Math.Max(1.0, _frame.DpiX / 96.0);
-        var thickness = (_surface.Tool == CaptureTool.Mosaic ? _mosaicSize : _thickness) * pixelScale;
-        var variant = _surface.Tool switch
+        var thickness = (styleTool == CaptureTool.Mosaic ? _mosaicSize : _thickness) * pixelScale;
+        var variant = styleTool switch
         {
             CaptureTool.Mosaic => _mosaicVariant + (_surface.MosaicMode == MosaicDrawMode.Brush ? 100 : 0),
             CaptureTool.Text => _textVariant,
             _ => 0
         };
-        var fontSize = (_surface.Tool == CaptureTool.Number ? _numberSize : _fontSize) * pixelScale;
+        var fontSize = (styleTool == CaptureTool.Number ? _numberSize : _fontSize) * pixelScale;
         var style = new AnnotationStyle(_color, thickness, fontSize, variant, _mosaicIntensity);
         _surface.CurrentStyle = style;
         if (!applyToSelection || _surface.SelectedAnnotationStyle is not { } selected)

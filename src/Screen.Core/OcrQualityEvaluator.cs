@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Screen.Core;
 
 public static class OcrQualityEvaluator
@@ -186,17 +188,66 @@ public static class OcrQualityEvaluator
 
     public static string DetectLanguage(string text)
     {
-        var han = text.Count(character => character is >= '\u3400' and <= '\u9FFF');
-        var kana = text.Count(character => character is >= '\u3040' and <= '\u30FF');
-        var hangul = text.Count(character => character is >= '\uAC00' and <= '\uD7AF');
-        if (kana > Math.Max(2, han / 5))
-            return "ja-JP";
-        if (hangul > 2)
-            return "ko-KR";
-        if (han > 0)
-            return "zh-CN";
-        return "en-US";
+        var han = 0;
+        var kana = 0;
+        var hangul = 0;
+        var otherLetters = 0;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var value = rune.Value;
+            if (value is >= 0x3400 and <= 0x9fff or >= 0xf900 and <= 0xfaff or >= 0x20000 and <= 0x323af)
+                han++;
+            else if (value is >= 0x3041 and <= 0x3096 or >= 0x30a1 and <= 0x30fa or >= 0xff66 and <= 0xff9d)
+                kana++;
+            else if (value is >= 0xac00 and <= 0xd7af or >= 0x1100 and <= 0x11ff or >= 0x3130 and <= 0x318f)
+                hangul++;
+            else if (System.Text.Rune.IsLetter(rune))
+                otherLetters++;
+        }
+
+        // Unknown is intentional. Script alone cannot distinguish English from
+        // French/German/etc., and mixed-language OCR must not become a certain
+        // MyMemory source language. AI/Tencent can still use their own detection.
+        if (otherLetters == 0)
+        {
+            if (kana > 0 && hangul == 0)
+                return "ja-JP";
+            if (hangul > 0 && kana == 0)
+                return "ko-KR";
+            if (han > 0 && kana == 0 && hangul == 0)
+                return "zh-CN";
+            return "und";
+        }
+        if (han > 0 || kana > 0 || hangul > 0
+            || text.Any(character => char.IsLetter(character) && character > 127))
+            return "und";
+
+        var words = System.Text.RegularExpressions.Regex.Matches(text, "[A-Za-z]+");
+        string? firstMatch = null;
+        var hasDistinctMatches = false;
+        var matchedTokens = 0;
+        foreach (System.Text.RegularExpressions.Match word in words)
+        {
+            var token = word.Value;
+            if (!EnglishEvidenceWords.Contains(token))
+                continue;
+            matchedTokens++;
+            firstMatch ??= token;
+            hasDistinctMatches |= !StringComparer.OrdinalIgnoreCase.Equals(token, firstMatch);
+        }
+        // Repeated words count toward coverage, but one repeated label is ambiguous.
+        return hasDistinctMatches && matchedTokens >= words.Count * 0.35 ? "en-US" : "und";
     }
+
+    private static readonly HashSet<string> EnglishEvidenceWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the", "and", "this", "that", "these", "those", "your", "with", "from", "which",
+        "when", "where", "would", "should", "could", "does", "have", "there", "please",
+        "hello", "world", "settings", "screenshot", "translation", "recording", "capture",
+        "you", "they", "their", "are", "was", "were", "will", "can", "has", "been", "for", "not",
+        "before", "after", "without", "into", "click", "save", "changes", "open", "file", "new", "tab",
+        "close", "window", "choose", "select", "copy", "paste", "cancel", "try", "again"
+    };
 
     private static OcrLine ChooseLine(OcrLine local, OcrLine cloud)
     {

@@ -109,6 +109,8 @@ public sealed record AnnotationStyle(
     public double MosaicScale { get; init; } = 1;
 }
 
+public readonly record struct PreciseAnnotationBounds(double X, double Y, double Width, double Height);
+
 public sealed record AnnotationItem(
     Guid Id,
     AnnotationKind Kind,
@@ -117,7 +119,12 @@ public sealed record AnnotationItem(
     AnnotationStyle Style,
     string? Text,
     int? Number,
-    int ZIndex);
+    int ZIndex)
+{
+    // Working images can change scale after a crop. Preserve fractional
+    // geometry so repeated conversions do not move mosaic block origins.
+    public PreciseAnnotationBounds? PreciseBounds { get; init; }
+}
 
 public sealed record OcrWord(string Text, PixelRect Bounds, double Confidence = 0);
 public sealed record OcrLine(string Text, PixelRect Bounds, IReadOnlyList<OcrWord> Words, double Confidence = 0);
@@ -174,6 +181,7 @@ public sealed record TranslationProfile(
     public const string TencentSecretKeyCredentialName = "Screen.Translation.Tencent.SecretKey";
 
     public TranslationProviderKind Provider { get; init; } = TranslationProviderKind.Tencent;
+    public string SourceLanguage { get; init; } = "auto";
     public string TencentRegion { get; init; } = "ap-guangzhou";
     public bool EnableMyMemoryFallback { get; init; } = true;
     public string MyMemoryContactEmail { get; init; } = string.Empty;
@@ -206,6 +214,7 @@ public enum RecordingQuality
 
 public sealed record RecordingProfile
 {
+    public string TempDirectory { get; init; } = string.Empty;
     public int FrameRate { get; init; } = 30;
     public RecordingQuality Quality { get; init; } = RecordingQuality.Standard;
     public bool RecordSystemAudio { get; init; } = true;

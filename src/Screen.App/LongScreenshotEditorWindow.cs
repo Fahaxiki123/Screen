@@ -36,6 +36,10 @@ internal sealed class LongScreenshotEditorWindow : Window
     private bool _fitWidth = true;
     private bool _cropping;
     private CaptureTool _toolBeforeCrop = CaptureTool.Rectangle;
+    private Button _copyButton = null!;
+    private FrameworkElement _editingTools = null!;
+    private bool _exportBusy;
+    private CancellationTokenSource? _exportCancellation;
 
     public LongScreenshotEditorWindow(PixelBuffer image, ResourceDictionary? themeResources = null)
     {
@@ -70,6 +74,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         // scales selection coordinates by _currentFactor, and starting from the
         // original full-resolution image would scale them twice.
         _surface = CreateSurface(_image, CaptureTool.Rectangle);
+        _surface.SetMosaicSourceContext(image, _sourceRegion, _currentFactor);
         UpdateAnnotationStyle();
 
         var root = new Grid();
@@ -120,6 +125,15 @@ internal sealed class LongScreenshotEditorWindow : Window
         };
         PreviewKeyDown += (_, e) =>
         {
+            if (_exportBusy)
+            {
+                if (e.Key == Key.Escape)
+                {
+                    Close();
+                }
+                e.Handled = true;
+                return;
+            }
             if (CaptureKeyboardRouting.PreserveTextInput(e.Key, Keyboard.FocusedElement as DependencyObject))
             {
                 return;
@@ -153,6 +167,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         };
         Closed += (_, _) =>
         {
+            _exportCancellation?.Cancel();
             _cropHistory.Clear();
             _sourceImage = null;
         };
@@ -200,7 +215,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         tools.Children.Add(IconButton(LucideIconKind.ZoomOut, "缩小", (_, _) => SetZoom(_zoom / 1.15)));
         _zoomText = new TextBlock
         {
-            Width = 54,
+            Width = 90,
             TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             FontSize = 14,
@@ -209,7 +224,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         tools.Children.Add(_zoomText);
         tools.Children.Add(IconButton(LucideIconKind.ZoomIn, "放大", (_, _) => SetZoom(_zoom * 1.15)));
         tools.Children.Add(TextButton("适应宽度", (_, _) => FitWidth()));
-        tools.Children.Add(TextButton("1:1", (_, _) => SetZoom(1)));
+        tools.Children.Add(TextButton("原图尺寸", (_, _) => SetZoom(_currentFactor)));
         tools.Children.Add(Separator());
         AddTool(tools, CaptureTool.Select, LucideIconKind.MousePointer2, "选择和调整标注");
         AddTool(tools, CaptureTool.Rectangle, LucideIconKind.Square, "矩形");
@@ -223,7 +238,7 @@ internal sealed class LongScreenshotEditorWindow : Window
             ToolbarIcons.MosaicFrame,
             ToolbarIcons.MosaicBlocks,
             1.4,
-            "马赛克",
+            "马赛克 · 按住 Ctrl 选择已有标注",
             (_, _) => SelectTool(CaptureTool.Mosaic));
         _toolButtons[CaptureTool.Mosaic] = mosaicButton;
         tools.Children.Add(mosaicButton);
@@ -243,6 +258,7 @@ internal sealed class LongScreenshotEditorWindow : Window
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
         };
+        _editingTools = toolScroller;
         topBar.Children.Add(toolScroller);
 
         var dragContent = new StackPanel
@@ -299,7 +315,8 @@ internal sealed class LongScreenshotEditorWindow : Window
             Margin = new Thickness(4, 10, 16, 7),
             Background = Brushes.Transparent
         };
-        actions.Children.Add(TextButton("完成并复制", (_, _) => FinishAndCopy(), primary: true));
+        _copyButton = TextButton("完成并复制", async (_, _) => await FinishAndCopyAsync(), primary: true);
+        actions.Children.Add(_copyButton);
         actions.Children.Add(IconButton(LucideIconKind.Minus, "最小化", (_, _) => WindowState = WindowState.Minimized));
         actions.Children.Add(IconButton(LucideIconKind.X, "关闭", (_, _) => Close()));
         Grid.SetColumn(actions, 2);
@@ -425,16 +442,20 @@ internal sealed class LongScreenshotEditorWindow : Window
 
     private void AddTool(Panel panel, CaptureTool tool, LucideIconKind icon, string tooltip)
     {
-        var button = IconButton(icon, tooltip, (_, _) => SelectTool(tool));
+        var button = IconButton(icon, tool == CaptureTool.Select ? tooltip : $"{tooltip} · 按住 Ctrl 选择已有标注", (_, _) => SelectTool(tool));
         _toolButtons[tool] = button;
         panel.Children.Add(button);
     }
 
-    private void SelectTool(CaptureTool tool)
+    private void SelectTool(CaptureTool tool, bool preserveSelection = false)
     {
         if (_cropping && tool != CaptureTool.Select)
         {
             ApplyCrop();
+        }
+        if (!preserveSelection)
+        {
+            _surface.ClearAnnotationSelection();
         }
         _surface.Tool = tool;
         if (tool == CaptureTool.Mosaic)
@@ -532,10 +553,11 @@ internal sealed class LongScreenshotEditorWindow : Window
     private void SetZoom(double zoom, bool preserveFitMode = false)
     {
         _fitWidth = preserveFitMode;
-        _zoom = Math.Clamp(zoom, 0.08, 4.0);
+        _zoom = Math.Clamp(zoom, 0.08 * _currentFactor, 4.0 * _currentFactor);
         _surface.Width = Math.Max(1, _image.Width * _zoom);
         _surface.Height = Math.Max(1, _image.Height * _zoom);
-        _zoomText.Text = $"{_zoom:P0}";
+        _zoomText.Text = _currentFactor == 1 ? $"{_zoom:P0}" : $"{_zoom / _currentFactor:P0} 预览";
+        _zoomText.ToolTip = _currentFactor == 1 ? "相对原图尺寸" : "缩放比例按原图计算；长图预览降低采样分辨率，复制保留原图像素。";
     }
 
     private void OnViewportMouseWheel(object sender, MouseWheelEventArgs e)
@@ -658,6 +680,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         var factor = WorkingScaleFactor(image);
         var workingImage = factor == 1 ? image : Downscale(image, factor);
         var surface = CreateSurface(workingImage, state.Tool);
+        surface.SetMosaicSourceContext(source, state.SourceRegion, factor);
 
         _sourceRegion = state.SourceRegion;
         _originalImage = image;
@@ -670,7 +693,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         _thickness = state.Thickness;
         ExitCropUi();
         surface.ImportEditingState(state.Annotations);
-        SelectTool(state.Tool);
+        SelectTool(state.Tool, preserveSelection: true);
         UpdateStyleSelectionVisuals();
         if (state.FitWidth)
         {
@@ -714,22 +737,63 @@ internal sealed class LongScreenshotEditorWindow : Window
         _cropButton.Foreground = Theme("Brush.TextPrimary", "#E8F1F7");
     }
 
-    private void FinishAndCopy()
+    private async Task FinishAndCopyAsync()
     {
+        if (_exportBusy || _sourceImage is not { } source)
+        {
+            return;
+        }
+        _surface.CompletePendingAnnotationEdit();
+        var localSelection = ScaleRect(_surface.Selection, _currentFactor)
+            .Intersect(new PixelRect(0, 0, _originalImage.Width, _originalImage.Height));
+        var selection = localSelection with { X = localSelection.X + _sourceRegion.X, Y = localSelection.Y + _sourceRegion.Y };
+        var annotations = _surface.ExportEditingState().Current.Items.Select(item =>
+            CaptureSurface.OffsetItem(CaptureSurface.ScaleItem(item, _currentFactor), _sourceRegion.X, _sourceRegion.Y)).ToArray();
+        using var cancellation = new CancellationTokenSource();
+        _exportCancellation = cancellation;
+        SetExportBusy(true);
         try
         {
-            var selectionOriginal = ScaleRect(_surface.Selection, _currentFactor);
-            BitmapUtilities.CopyToClipboard(
-                _surface.RenderSelection(_originalImage, selectionOriginal, _currentFactor));
+            var image = await ScreenshotRenderWorker.RenderAsync(source, selection, annotations, cancellation.Token);
+            if (cancellation.IsCancellationRequested || _sourceImage is null)
+            {
+                return;
+            }
+            BitmapUtilities.CopyToClipboard(image);
+            Close();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
         }
         catch (Exception exception)
         {
             SimpleLogger.LogError("Long screenshot editor copy failed", exception);
+            if (_sourceImage is null)
+            {
+                return;
+            }
             MessageBox.Show(this, $"长截图复制失败，请重试。\n\n{exception.Message}",
                 "Screen", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
         }
-        Close();
+        finally
+        {
+            _exportCancellation = null;
+            if (_sourceImage is not null)
+            {
+                SetExportBusy(false);
+            }
+        }
+    }
+
+    private void SetExportBusy(bool busy)
+    {
+        _exportBusy = busy;
+        _copyButton.Content = busy ? "正在生成图片…" : "完成并复制";
+        _copyButton.IsEnabled = !busy;
+        _canvasHost.IsEnabled = !busy;
+        _editingTools.IsEnabled = !busy;
+        _styleOptions.IsEnabled = !busy;
+        _cropOptions.IsEnabled = !busy;
     }
 
     private static int WorkingScaleFactor(PixelBuffer image) => WorkingScaleFactor(image.Width, image.Height);
@@ -748,7 +812,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         Math.Max(1, (int)Math.Round(rectangle.Width * (double)factor)),
         Math.Max(1, (int)Math.Round(rectangle.Height * (double)factor)));
 
-    private static PixelBuffer Downscale(PixelBuffer image, int factor)
+    internal static PixelBuffer Downscale(PixelBuffer image, int factor)
     {
         var width = Math.Max(1, (image.Width + factor - 1) / factor);
         var height = Math.Max(1, (image.Height + factor - 1) / factor);

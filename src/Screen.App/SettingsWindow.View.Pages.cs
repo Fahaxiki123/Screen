@@ -104,7 +104,7 @@ public partial class SettingsWindow
         body.Children.Add(CreateSettingRow(
             LucideIconKind.ScanText,
             "录制麦克风",
-            "与系统声音自动混音；无设备时自动跳过",
+            "与系统声音自动混音；设备不可用或中断时会提示",
             microphone));
 
         body.Children.Add(CreateDivider());
@@ -127,6 +127,24 @@ public partial class SettingsWindow
 
         body.Children.Add(CreateFootnote(
             "录完可在编辑窗回放、裁切、复制或保存为 MP4 视频。"));
+
+        body.Children.Add(CreateDivider());
+        var tempPath = CreateBoundTextBox(nameof(SettingsViewModel.RecordingTempDirectory));
+        tempPath.Width = 210;
+        var browseTemp = CreateSecondaryButton("选择");
+        browseTemp.Margin = new Thickness(6, 0, 0, 0);
+        browseTemp.Click += (_, _) =>
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择录屏临时素材目录" };
+            if (dialog.ShowDialog(this) == true)
+                _viewModel.RecordingTempDirectory = dialog.FolderName;
+        };
+        var tempControls = new StackPanel { Orientation = Orientation.Horizontal };
+        tempControls.Children.Add(tempPath);
+        tempControls.Children.Add(browseTemp);
+        body.Children.Add(CreateSettingRow(LucideIconKind.Settings2, "录屏临时目录",
+            "留空使用系统临时目录；长时间录屏可选择空间充足的磁盘", tempControls));
+        body.Children.Add(CreateFootnote("开录前检查临时空间；保存失败的恢复素材不会由 Screen 自动删除，请按提示路径及时恢复。"));
 
         return card;
     }
@@ -304,6 +322,11 @@ public partial class SettingsWindow
         // ---------- Output / test ----------
         var outputSection = CreateSection(withLeadingDivider: true);
         outputSection.Children.Add(CreateSectionHeader("输出与测试"));
+        outputSection.Children.Add(CreateSettingRow(
+            LucideIconKind.Languages,
+            "原文语言",
+            "自动识别不确定时可手选；MyMemory 需要明确的原文语言",
+            CreateBoundComboBox(nameof(SettingsViewModel.SourceLanguageIndex), SettingsViewModel.SourceLanguageNames())));
         outputSection.Children.Add(CreateSettingRow(
             LucideIconKind.Languages,
             "目标语言",

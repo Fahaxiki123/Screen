@@ -66,6 +66,7 @@ public sealed class JsonSettingsStore
                     Model = translation.Model ?? defaults.Translation.Model,
                     CredentialName = translation.CredentialName ?? string.Empty,
                     TargetLanguage = translation.TargetLanguage ?? defaults.Translation.TargetLanguage,
+                    SourceLanguage = translation.SourceLanguage ?? "auto",
                     TencentRegion = translation.TencentRegion ?? defaults.Translation.TencentRegion,
                     MyMemoryContactEmail = translation.MyMemoryContactEmail ?? string.Empty,
                     RacingBaseAddress = translation.RacingBaseAddress ?? string.Empty,
@@ -74,6 +75,7 @@ public sealed class JsonSettingsStore
                 }
                 : defaults.Translation;
             settings.Recording ??= new RecordingProfile();
+            settings.Recording = settings.Recording with { TempDirectory = settings.Recording.TempDirectory ?? string.Empty };
             if (!Enum.IsDefined(settings.TranslationDisplayMode))
             {
                 settings.TranslationDisplayMode = TranslationDisplayMode.Card;

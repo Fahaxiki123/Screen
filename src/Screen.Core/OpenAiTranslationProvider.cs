@@ -62,7 +62,7 @@ public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslat
             ["temperature"] = 0.2,
             ["messages"] = new object[]
             {
-                new { role = "system", content = BuildSystemPrompt(profile.TargetLanguage) },
+                new { role = "system", content = BuildSystemPrompt(profile.TargetLanguage, profile.SourceLanguage) },
                 new { role = "user", content = protectedText.Text }
             }
         };
@@ -123,10 +123,11 @@ public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslat
         return new TranslationResult(translated, "AI 自然翻译");
     }
 
-    internal static string BuildSystemPrompt(string targetLanguage) =>
+    internal static string BuildSystemPrompt(string targetLanguage, string? sourceLanguage = "auto") =>
         $$"""
         You are a professional translator and software-product localizer.
         Translate the source text into {{targetLanguage}}.
+        {{(TranslationLanguageCodes.IsAutomaticSource(sourceLanguage) ? "Infer the source language from the text." : $"The user selected source language: {TranslationLanguageCodes.NormalizeSource(sourceLanguage)}.")}}
 
         Requirements:
         - First infer the meaning, domain, and tone from the whole passage, then write fluent, idiomatic target-language prose. Do not translate word by word.

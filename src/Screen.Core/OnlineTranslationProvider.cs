@@ -336,10 +336,6 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
                     credentials.ApiKey!,
                     primaryProgress,
                     linked.Token).ConfigureAwait(false);
-                if (!IsPlausibleTranslation(text, result.Text))
-                {
-                    throw new InvalidOperationException("AI 自然翻译返回译文过短。");
-                }
                 Interlocked.Exchange(ref winnerLocked, 1);
                 return result with { ProviderName = $"AI 自然翻译（{profile.Model}）" };
             }
@@ -367,10 +363,6 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
                     new TranslationCredentials(racingKey),
                     streamingText: null,
                     linked.Token).ConfigureAwait(false);
-                if (!IsPlausibleTranslation(text, result.Text))
-                {
-                    throw new InvalidOperationException("AI 竞速翻译返回译文过短。");
-                }
                 Interlocked.Exchange(ref winnerLocked, 1);
                 return result with { ProviderName = $"AI 自然翻译（{racingProfile.Model}）" };
             }
@@ -468,13 +460,6 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
 
         cancellationToken.ThrowIfCancellationRequested();
         return new RaceOutcome(null, primaryError, tencentAttempted, tencentError);
-    }
-
-    private static bool IsPlausibleTranslation(string sourceText, string translatedText)
-    {
-        var visible = translatedText.Count(character => !char.IsWhiteSpace(character));
-        var sourceVisible = Math.Max(1, sourceText.Count(character => !char.IsWhiteSpace(character)));
-        return visible >= Math.Max(1, sourceVisible / 5);
     }
 
     private async Task<TranslationResult> TranslateNaturallyWithRetryAsync(
@@ -589,16 +574,20 @@ public sealed class TencentTranslationProvider(HttpClient httpClient) : ITransla
         var normalizedText = TranslationTextProtector.NormalizeLikelyOcrArtifacts(text);
         var protectedText = TranslationTextProtector.Protect(normalizedText);
         var translated = new StringBuilder();
-        foreach (var chunk in TranslationTextChunker.SplitByCharacters(protectedText.Text, 1900))
+        var source = TranslationLanguageCodes.IsAutomaticSource(profile.SourceLanguage)
+            ? "und"
+            : TranslationLanguageCodes.ResolveSource(sourceLanguage, profile.SourceLanguage);
+        foreach (var chunk in TranslationChunkLayout.ByCharacters(protectedText.Text, 1900))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var chunkResult = await TranslateChunkAsync(
-                chunk,
+                chunk.Text,
+                source,
                 profile,
                 credentials.TencentSecretId!,
                 credentials.TencentSecretKey!,
                 cancellationToken).ConfigureAwait(false);
-            translated.Append(chunkResult);
+            TranslationChunkLayout.Append(translated, chunk, chunkResult, profile.TargetLanguage, protectedText.Restore);
             streamingText?.Report(protectedText.Restore(translated.ToString()));
         }
 
@@ -607,6 +596,7 @@ public sealed class TencentTranslationProvider(HttpClient httpClient) : ITransla
 
     private async Task<string> TranslateChunkAsync(
         string text,
+        string sourceLanguage,
         TranslationProfile profile,
         string secretId,
         string secretKey,
@@ -615,7 +605,7 @@ public sealed class TencentTranslationProvider(HttpClient httpClient) : ITransla
         var payload = JsonSerializer.Serialize(new
         {
             SourceText = text,
-            Source = "auto",
+            Source = sourceLanguage == "und" ? "auto" : sourceLanguage == "zh-CN" ? "zh" : sourceLanguage,
             Target = TranslationLanguageCodes.ToTencent(profile.TargetLanguage),
             ProjectId = 0
         });
@@ -688,17 +678,30 @@ public sealed class MyMemoryTranslationProvider(HttpClient httpClient) : ITransl
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        var source = TranslationLanguageCodes.ToMyMemorySource(sourceLanguage, text);
+        var source = TranslationLanguageCodes.ResolveSource(sourceLanguage, profile.SourceLanguage);
         var target = TranslationLanguageCodes.ToMyMemoryTarget(profile.TargetLanguage);
+        if (source == "und")
+        {
+            throw new InvalidOperationException("已跳过 MyMemory：无法可靠判断源语言，请在翻译设置的“源语言”中手动选择后重试。");
+        }
+        if (source == target)
+        {
+            if (!TranslationLanguageCodes.IsAutomaticSource(profile.SourceLanguage))
+            {
+                streamingText?.Report(text);
+                return new TranslationResult(text, "无需翻译（源语言与目标语言相同）");
+            }
+            throw new InvalidOperationException("已跳过 MyMemory：推断的源语言与目标语言相同，请手动确认源语言后重试。");
+        }
         var normalizedText = TranslationTextProtector.NormalizeLikelyOcrArtifacts(text);
         var protectedText = TranslationTextProtector.Protect(normalizedText);
         var translated = new StringBuilder();
 
-        foreach (var chunk in TranslationTextChunker.SplitByUtf8Bytes(protectedText.Text, 450))
+        foreach (var chunk in TranslationChunkLayout.ByUtf8Bytes(protectedText.Text, 450))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var endpoint = "https://api.mymemory.translated.net/get?q="
-                           + Uri.EscapeDataString(chunk)
+                           + Uri.EscapeDataString(chunk.Text)
                            + "&langpair=" + Uri.EscapeDataString($"{source}|{target}")
                            + "&mt=1"
                            + (string.IsNullOrWhiteSpace(profile.MyMemoryContactEmail)
@@ -731,7 +734,7 @@ public sealed class MyMemoryTranslationProvider(HttpClient httpClient) : ITransl
                 throw new InvalidOperationException("MyMemory 没有返回译文");
             }
             var chunkResult = WebUtility.HtmlDecode(translatedText.GetString() ?? string.Empty);
-            translated.Append(chunkResult);
+            TranslationChunkLayout.Append(translated, chunk, chunkResult, profile.TargetLanguage, protectedText.Restore);
             streamingText?.Report(protectedText.Restore(translated.ToString()));
         }
 
@@ -785,25 +788,22 @@ internal static class TranslationLanguageCodes
         _ => "zh-CN"
     };
 
-    public static string ToMyMemorySource(string sourceLanguage, string text)
+    public static bool IsAutomaticSource(string? sourceLanguage) =>
+        string.IsNullOrWhiteSpace(sourceLanguage)
+        || sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase);
+
+    public static string ResolveSource(string? detectedLanguage, string? configuredLanguage) =>
+        NormalizeSource(IsAutomaticSource(configuredLanguage) ? detectedLanguage : configuredLanguage);
+
+    internal static string NormalizeSource(string? sourceLanguage)
     {
-        if (sourceLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+        var tag = sourceLanguage?.Trim().Replace('_', '-').ToLowerInvariant() ?? string.Empty;
+        if (tag is "zh-tw" or "zh-hk" or "zh-mo" || tag.StartsWith("zh-hant", StringComparison.Ordinal))
+            return "zh-TW";
+        if (tag is "zh" or "zh-cn" or "zh-sg" || tag.StartsWith("zh-hans", StringComparison.Ordinal))
             return "zh-CN";
-        if (sourceLanguage.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
-            return "ja";
-        if (sourceLanguage.StartsWith("ko", StringComparison.OrdinalIgnoreCase))
-            return "ko";
-        if (sourceLanguage.StartsWith("en", StringComparison.OrdinalIgnoreCase))
-            return "en";
-        if (sourceLanguage.StartsWith("fr", StringComparison.OrdinalIgnoreCase))
-            return "fr";
-        if (sourceLanguage.StartsWith("es", StringComparison.OrdinalIgnoreCase))
-            return "es";
-        if (sourceLanguage.StartsWith("pt", StringComparison.OrdinalIgnoreCase))
-            return "pt";
-        if (sourceLanguage.StartsWith("de", StringComparison.OrdinalIgnoreCase))
-            return "de";
-        return text.Any(character => character is >= '\u4e00' and <= '\u9fff') ? "zh-CN" : "en";
+        var primary = tag.Split('-')[0];
+        return primary is "en" or "ja" or "ko" or "fr" or "es" or "pt" or "de" ? primary : "und";
     }
 }
 
@@ -828,7 +828,9 @@ internal static class TranslationTextChunker
         while (start < text.Length)
         {
             var end = start;
-            var lastBreak = -1;
+            var lastParagraphBreak = -1;
+            var lastSentenceBreak = -1;
+            var lastWordBreak = -1;
             var size = 0;
             while (end < text.Length)
             {
@@ -843,10 +845,12 @@ internal static class TranslationTextChunker
                     break;
                 }
                 var next = end + rune.Utf16SequenceLength;
-                if (rune.Value is '\n' or '\r' or '。' or '！' or '？' or '.' or '!' or '?' or ' ')
-                {
-                    lastBreak = next;
-                }
+                if (rune.Value is '\n' or '\r')
+                    lastParagraphBreak = next;
+                else if (rune.Value is '。' or '！' or '？' or '.' or '!' or '?')
+                    lastSentenceBreak = next;
+                else if (Rune.IsWhiteSpace(rune))
+                    lastWordBreak = next;
                 size += runeSize;
                 end = next;
             }
@@ -855,7 +859,9 @@ internal static class TranslationTextChunker
                 chunks.Add(text[start..]);
                 break;
             }
-            var splitAt = lastBreak > start ? lastBreak : end;
+            var splitAt = lastParagraphBreak > start ? lastParagraphBreak
+                : lastSentenceBreak > start ? lastSentenceBreak
+                : lastWordBreak > start ? lastWordBreak : end;
             splitAt = KeepProtectionMarkerWhole(text, start, splitAt);
             chunks.Add(text[start..splitAt]);
             start = splitAt;

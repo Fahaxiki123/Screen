@@ -68,7 +68,7 @@ public sealed class SettingsPersistenceTests
         Assert.AreEqual(2, credentials.Attempts.Count(name => name == profile.CredentialName));
         Assert.AreEqual(1, credentials.Attempts.Count(name => name == profile.RacingCredentialName));
         Assert.AreEqual(3, credentials.Attempts.Count);
-        Assert.AreEqual(1, startupUpdates);
+        Assert.AreEqual(0, startupUpdates, "Editing recording or translation options must not rewrite Windows startup registration.");
         Assert.IsFalse(File.ReadAllText(_store.Path).Contains("test-main-key", StringComparison.Ordinal));
     }
 

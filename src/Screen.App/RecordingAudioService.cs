@@ -25,6 +25,8 @@ internal sealed class RecordingAudioTrack : IDisposable
     private long _bytesWritten;
     private long _framesWritten;
     private bool _stopped;
+    private bool _expectedStop;
+    private Exception? _fault;
     private int _disposed;
 
     internal RecordingAudioTrack(
@@ -47,38 +49,57 @@ internal sealed class RecordingAudioTrack : IDisposable
         Channels = channels;
         var bytesPerSample = ffmpegFormat == "f32le" ? 4 : 2;
         _blockAlign = Math.Max(1, channels * bytesPerSample);
-        _capture.DataAvailable += (_, e) =>
+        _capture.RecordingStopped += (_, e) =>
         {
-            if (_paused || e.BytesRecorded <= 0 || (_timeline is not null && !_timeline.IsStarted))
-            {
-                _peakLevel = 0;
-                return;
-            }
             lock (_gate)
             {
-                if (_stopped || _stopSignal.IsRequested)
+                _peakLevel = 0;
+                if (e.Exception is not null)
                 {
-                    return;
+                    _fault ??= e.Exception;
                 }
-                if (_timeline is { IsStarted: true } activeTimeline && SampleRate > 0)
+                else if (!_expectedStop && !_stopSignal.IsRequested)
                 {
-                    var callbackFrames = e.BytesRecorded / _blockAlign;
-                    var expectedStartFrames = (long)Math.Round(activeTimeline.ElapsedSeconds * SampleRate) - callbackFrames;
-                    var deficitFrames = expectedStartFrames - _framesWritten;
-                    // WASAPI loopback emits no callbacks while the render endpoint
-                    // is silent. Backfill missing silent intervals (> 50 ms) with
-                    // zeros so resumed system audio stays aligned with video.
-                    if (deficitFrames > SampleRate / 20)
-                    {
-                        var padFrames = Math.Min(deficitFrames, SampleRate * 3600L);
-                        WriteSilenceFramesCore(padFrames);
-                    }
+                    _fault ??= new IOException("音频设备意外停止采集。");
                 }
-                _stream.Write(e.Buffer, 0, e.BytesRecorded);
-                _bytesWritten += e.BytesRecorded;
-                _framesWritten += e.BytesRecorded / _blockAlign;
             }
-            _peakLevel = MeasurePeak(e.Buffer, e.BytesRecorded, ffmpegFormat);
+        };
+        _capture.DataAvailable += (_, e) =>
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    if (_stopped || _fault is not null || _stopSignal.IsRequested || _paused
+                        || e.BytesRecorded <= 0 || (_timeline is not null && (!_timeline.IsStarted || _timeline.IsPaused)))
+                    {
+                        _peakLevel = 0;
+                        return;
+                    }
+                    if (_timeline is { IsStarted: true } activeTimeline && SampleRate > 0)
+                    {
+                        var callbackFrames = e.BytesRecorded / _blockAlign;
+                        var expectedStartFrames = (long)Math.Round(activeTimeline.ElapsedSeconds * SampleRate) - callbackFrames;
+                        var deficitFrames = expectedStartFrames - _framesWritten;
+                        if (deficitFrames > SampleRate / 20)
+                        {
+                            WriteSilenceFramesCore(deficitFrames);
+                        }
+                    }
+                    _stream.Write(e.Buffer, 0, e.BytesRecorded);
+                    _bytesWritten += e.BytesRecorded;
+                    _framesWritten += e.BytesRecorded / _blockAlign;
+                    _peakLevel = MeasurePeak(e.Buffer, e.BytesRecorded, ffmpegFormat);
+                }
+            }
+            catch (Exception exception)
+            {
+                lock (_gate)
+                {
+                    _fault ??= exception;
+                    _peakLevel = 0;
+                }
+            }
         };
     }
 
@@ -101,7 +122,8 @@ internal sealed class RecordingAudioTrack : IDisposable
     public int Channels { get; }
     public long BytesWritten => Interlocked.Read(ref _bytesWritten);
     public float PeakLevel => _paused ? 0 : _peakLevel;
-    public bool Paused { set => _paused = value; }
+    public Exception? Fault { get { lock (_gate) { return _fault; } } }
+    public bool Paused { set { lock (_gate) { _paused = value; } } }
 
     private static float MeasurePeak(byte[] buffer, int bytesRecorded, string format)
     {
@@ -139,31 +161,7 @@ internal sealed class RecordingAudioTrack : IDisposable
         RecordingStopSignal stopSignal,
         RecordingTimeline? timeline = null)
     {
-        try
-        {
-            var capture = new WasapiLoopbackCapture();
-            if (RawFormatFor(capture.WaveFormat) is not { } format)
-            {
-                capture.Dispose();
-                return null;
-            }
-            var track = new RecordingAudioTrack(
-                capture,
-                Path.Combine(tempDir, "system-audio.raw"),
-                format,
-                capture.WaveFormat.SampleRate,
-                capture.WaveFormat.Channels,
-                stopSignal,
-                timeline: timeline);
-            capture.StartRecording();
-            return track;
-        }
-        catch
-        {
-            // No render device / format we can persist — recording simply
-            // proceeds without this track.
-            return null;
-        }
+        return TryCreate(() => new WasapiLoopbackCapture(), Path.Combine(tempDir, "system-audio.raw"), stopSignal, timeline, out _);
     }
 
     /// <summary>Attempts to capture the default microphone.</summary>
@@ -172,27 +170,46 @@ internal sealed class RecordingAudioTrack : IDisposable
         RecordingStopSignal stopSignal,
         RecordingTimeline? timeline = null)
     {
+        return TryCreate(() => new WasapiCapture(), Path.Combine(tempDir, "microphone.raw"), stopSignal, timeline, out _);
+    }
+
+    internal static RecordingAudioTrack? TryCreate(Func<IWaveIn> factory, string path,
+        RecordingStopSignal stopSignal, RecordingTimeline? timeline, out string? warning)
+    {
+        IWaveIn? capture = null;
+        RecordingAudioTrack? track = null;
         try
         {
-            var capture = new WasapiCapture();
+            capture = factory();
             if (RawFormatFor(capture.WaveFormat) is not { } format)
             {
-                capture.Dispose();
-                return null;
+                throw new NotSupportedException("音频设备的采样格式暂不支持。");
             }
-            var track = new RecordingAudioTrack(
+            track = new RecordingAudioTrack(
                 capture,
-                Path.Combine(tempDir, "microphone.raw"),
+                path,
                 format,
                 capture.WaveFormat.SampleRate,
                 capture.WaveFormat.Channels,
                 stopSignal,
                 timeline: timeline);
             capture.StartRecording();
+            warning = null;
             return track;
         }
-        catch
+        catch (Exception exception)
         {
+            warning = exception.Message;
+            if (track is not null)
+            {
+                track.Dispose();
+            }
+            else
+            {
+                try
+                { capture?.Dispose(); }
+                catch { }
+            }
             return null;
         }
     }
@@ -226,13 +243,16 @@ internal sealed class RecordingAudioTrack : IDisposable
                 return;
             }
             _stopped = true;
+            _expectedStop = true;
         }
         try
         {
             _capture.StopRecording();
         }
-        catch
+        catch (Exception exception)
         {
+            lock (_gate)
+            { _fault ??= exception; }
         }
         // _stopped and _gate already exclude every late callback, so no timed
         // sleep is needed to guess when it is safe to close the stream.
@@ -282,6 +302,7 @@ internal sealed class RecordingAudioTrack : IDisposable
 internal sealed class RecordingAudioService : IDisposable
 {
     private readonly List<RecordingAudioTrack> _tracks = [];
+    private readonly List<string> _startupWarnings = [];
 
     internal RecordingAudioService(IEnumerable<RecordingAudioTrack>? tracks = null)
     {
@@ -292,6 +313,17 @@ internal sealed class RecordingAudioService : IDisposable
     }
 
     public IReadOnlyList<RecordingAudioTrack> Tracks => _tracks;
+
+    public string? Warning
+    {
+        get
+        {
+            var warnings = _startupWarnings.Concat(_tracks.Where(track => track.Fault is not null)
+                .Select(track => $"{(Path.GetFileName(track.RawPath).StartsWith("system-", StringComparison.Ordinal) ? "系统声音" : "麦克风")}采集中断：{track.Fault!.Message}"))
+                .Distinct().ToArray();
+            return warnings.Length == 0 ? null : string.Join("；", warnings);
+        }
+    }
 
     public float CurrentPeakLevel
     {
@@ -329,15 +361,20 @@ internal sealed class RecordingAudioService : IDisposable
         RecordingTimeline? timeline = null)
     {
         var service = new RecordingAudioService();
-        if (systemAudio && RecordingAudioTrack.TryCreateSystemLoopback(tempDir, stopSignal, timeline) is { } loopback)
-        {
-            service._tracks.Add(loopback);
-        }
-        if (microphone && RecordingAudioTrack.TryCreateMicrophone(tempDir, stopSignal, timeline) is { } mic)
-        {
-            service._tracks.Add(mic);
-        }
+        if (systemAudio)
+        { Add(() => new WasapiLoopbackCapture(), "system-audio.raw", "系统声音"); }
+        if (microphone)
+        { Add(() => new WasapiCapture(), "microphone.raw", "麦克风"); }
         return service;
+
+        void Add(Func<IWaveIn> factory, string file, string label)
+        {
+            var track = RecordingAudioTrack.TryCreate(factory, Path.Combine(tempDir, file), stopSignal, timeline, out var error);
+            if (track is not null)
+            { service._tracks.Add(track); }
+            else
+            { service._startupWarnings.Add($"{label}未能启动：{error}"); }
+        }
     }
 
     public void Stop()

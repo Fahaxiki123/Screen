@@ -8,15 +8,17 @@ using static Vortice.DXGI.DXGI;
 
 namespace Screen.App;
 
-internal sealed class DxgiScreenCaptureService : IScreenCaptureService
+internal sealed class DxgiScreenCaptureService : IDisposable
 {
     private readonly object _gate = new();
     private CaptureSession? _session;
 
-    public Task<CaptureFrame> CaptureAtAsync(PixelPoint screenPoint, CancellationToken cancellationToken = default) =>
+    // Null means this output/frame needs GDI. This is a normal routing result,
+    // not a capture failure that should rebuild the duplication session.
+    public Task<CaptureFrame?> TryCaptureAtAsync(PixelPoint screenPoint, CancellationToken cancellationToken = default) =>
         Task.Run(() => Capture(screenPoint, cancellationToken), cancellationToken);
 
-    private CaptureFrame Capture(PixelPoint point, CancellationToken cancellationToken)
+    private CaptureFrame? Capture(PixelPoint point, CancellationToken cancellationToken)
     {
         lock (_gate)
         {
@@ -125,6 +127,9 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
         }
     }
 
+    internal static bool NeedsGdiFallback(CaptureColorSpace colorSpace, ModeRotation rotation, bool separateCursor) =>
+        colorSpace != CaptureColorSpace.Srgb || rotation != ModeRotation.Identity || !separateCursor;
+
     private sealed class CaptureSession : IDisposable
     {
         private readonly IDXGIAdapter1 _adapter;
@@ -135,6 +140,7 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
         private readonly double _dpiX;
         private readonly double _dpiY;
         private readonly CaptureColorSpace _colorSpace;
+        private readonly ModeRotation _rotation;
         private ID3D11Texture2D? _staging;
         private CaptureFrame? _lastFrame;
         private bool _reportsSeparateCursor;
@@ -144,6 +150,7 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
             _adapter = adapter;
             _output = output;
             Bounds = bounds;
+            _rotation = output.Description.Rotation;
             var featureLevels = new[]
             {
                 FeatureLevel.Level_11_1,
@@ -208,15 +215,21 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
         public bool Contains(PixelPoint point) =>
             point.X >= Bounds.X && point.X < Bounds.Right && point.Y >= Bounds.Y && point.Y < Bounds.Bottom;
 
-        public CaptureFrame Capture(CancellationToken cancellationToken)
+        public CaptureFrame? Capture(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_colorSpace != CaptureColorSpace.Srgb || _rotation != ModeRotation.Identity)
+            {
+                return null;
+            }
             var acquire = _duplication.AcquireNextFrame(120, out var frameInfo, out var desktopResource);
             if (acquire.Failure)
             {
-                if (acquire == Vortice.DXGI.ResultCode.WaitTimeout && _lastFrame is not null)
+                if (acquire == Vortice.DXGI.ResultCode.WaitTimeout)
                 {
-                    return _lastFrame with { CapturedAt = DateTimeOffset.UtcNow };
+                    return _reportsSeparateCursor && _lastFrame is not null
+                        ? _lastFrame with { CapturedAt = DateTimeOffset.UtcNow }
+                        : null;
                 }
                 acquire.CheckError();
             }
@@ -231,17 +244,27 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
                     _reportsSeparateCursor = frameInfo.PointerPosition.Visible;
                 }
                 using (desktopResource)
-                using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                 {
+                    // Preserve the conservative frame-local cursor decision.
+                    // GetCursorInfo is sampled at a different time and cannot
+                    // prove that this already acquired image is cursor-free.
+                    if (NeedsGdiFallback(_colorSpace, _rotation, _reportsSeparateCursor))
+                    {
+                        _lastFrame = null;
+                        return null;
+                    }
+                    using var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>();
                     var description = desktopTexture.Description;
                     if (description.Format is not Format.B8G8R8A8_UNorm
                         and not Format.B8G8R8A8_UNorm_SRgb)
                     {
-                        throw new NotSupportedException($"DXGI output format {description.Format} requires tone mapping.");
+                        _lastFrame = null;
+                        return null;
                     }
                     if (description.Width != Bounds.Width || description.Height != Bounds.Height)
                     {
-                        throw new NotSupportedException("Rotated DXGI outputs use the GDI fallback.");
+                        _lastFrame = null;
+                        return null;
                     }
 
                     EnsureStaging(description);

@@ -40,6 +40,7 @@ internal sealed class HotKeyWindow : IDisposable
     public event EventHandler? RecordRequested;
 
     public nint SettingsWindowHandle { get; set; }
+    public string? LastPriorityError { get; private set; }
 
     public bool RegisterCaptureHotKey(string hotKey) => Register(_bindings[0], hotKey);
     public bool RegisterClickThroughRecoveryHotKey(string hotKey) => Register(_bindings[1], hotKey);
@@ -47,6 +48,7 @@ internal sealed class HotKeyWindow : IDisposable
 
     public bool TrySetPriority(bool preferScreen)
     {
+        LastPriorityError = null;
         if (_preferScreen == preferScreen)
         {
             return true;
@@ -55,6 +57,7 @@ internal sealed class HotKeyWindow : IDisposable
         {
             if (!EnsureHook())
             {
+                LastPriorityError = "无法安装键盘钩子。";
                 return false;
             }
             _preferScreen = true;
@@ -65,14 +68,15 @@ internal sealed class HotKeyWindow : IDisposable
             return true;
         }
 
-        _preferScreen = false;
-        foreach (var binding in _bindings)
+        var reservations = _bindings.Where(binding => binding.Chord is { Key: not VkF12 })
+            .Select(binding => new HotKeyReservation(binding.Text, binding.Native,
+                binding.Chord!.Value.Modifiers | NativeMethods.ModNoRepeat, binding.Chord.Value.Key)).ToArray();
+        if (!HotKeyModeTransition.TryReserveAll(reservations, out var conflict))
         {
-            if (binding.Chord is { } chord && chord.Key != VkF12)
-            {
-                binding.Native.TryRegister(chord.Modifiers | NativeMethods.ModNoRepeat, chord.Key);
-            }
+            LastPriorityError = $"快捷键 {conflict} 已被占用，已保留 Screen 优先模式。";
+            return false;
         }
+        _preferScreen = false;
         ReleaseUnusedHook();
         return true;
     }
@@ -101,6 +105,7 @@ internal sealed class HotKeyWindow : IDisposable
             return false;
         }
         binding.Chord = chord;
+        binding.Text = text;
         ReleaseUnusedHook();
         return true;
     }
@@ -249,5 +254,6 @@ internal sealed class HotKeyWindow : IDisposable
         public Action Action { get; } = action;
         public HotKeyRegistration Native { get; } = native;
         public Chord? Chord { get; set; }
+        public string Text { get; set; } = string.Empty;
     }
 }

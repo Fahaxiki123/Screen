@@ -135,7 +135,9 @@ internal sealed partial class CaptureSurface
         int Variant,
         double Intensity,
         double Thickness,
-        double Scale);
+        double Scale,
+        PreciseAnnotationBounds? PreciseBounds,
+        IReadOnlyList<PixelPoint> Points);
 
     internal bool IsShowingTranslation => _translatedSelection is not null;
 
@@ -193,7 +195,9 @@ internal sealed partial class CaptureSurface
             _mosaicComposite = source with { Pixels = (byte[])source.Pixels.Clone() };
             _mosaicCompositeSource = new WriteableBitmap(
                 _sourceBuffer.Width, _sourceBuffer.Height, 96, 96, PixelFormats.Bgra32, null);
-            _appliedMosaicSnapshots = null;
+            _mosaicCompositeSource.WritePixels(new Int32Rect(0, 0, source.Width, source.Height),
+                _mosaicComposite.Pixels, source.Stride, 0);
+            _appliedMosaicSnapshots = [];
             _mosaicCompositeDirty = true;
         }
 
@@ -205,12 +209,14 @@ internal sealed partial class CaptureSurface
         var mosaics = _annotations
             .Where(item => item.Kind == AnnotationKind.Mosaic)
             .OrderBy(item => item.ZIndex)
+            .Select(item => _mosaicSourceContext is null ? item : item with { Bounds = CoverBounds(GetPreciseBounds(item)) })
             .ToArray();
         var fullBounds = new PixelRect(0, 0, _mosaicComposite.Width, _mosaicComposite.Height);
-        var region = DirtyMosaicRegion(mosaics, _appliedMosaicSnapshots).Intersect(fullBounds);
+        var region = ExpandDirtyMosaicRegion(DirtyMosaicRegion(mosaics, _appliedMosaicSnapshots), mosaics, fullBounds);
         _appliedMosaicSnapshots = mosaics
             .Select(item => new MosaicSnapshot(
-                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness, item.Style.MosaicScale))
+                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness, item.Style.MosaicScale,
+                item.PreciseBounds, item.Points))
             .ToList();
         _mosaicCompositeDirty = false;
         if (region.IsEmpty)
@@ -219,37 +225,13 @@ internal sealed partial class CaptureSurface
             return _mosaicComposite;
         }
 
-        // Expand the dirty region to enclose the full bounds of any mosaic it
-        // touches (transitively). Partially clipping a mosaic shifts Pixelate's
-        // block grid origin and truncates BoxBlur's kernel halo, leaving seams
-        // that would remain baked into the cached composite after mouse-up.
-        bool expanded;
-        do
+        if (_mosaicSourceContext is not null)
         {
-            expanded = false;
-            foreach (var mosaic in mosaics)
-            {
-                var mosaicBounds = mosaic.Bounds.Intersect(fullBounds);
-                if (mosaicBounds.IsEmpty || mosaicBounds.Intersect(region).IsEmpty)
-                {
-                    continue;
-                }
-                var union = UnionRegion(region, mosaicBounds);
-                if (union != region)
-                {
-                    region = union;
-                    expanded = true;
-                }
-            }
-        } while (expanded);
-
-        CopyRegion(source, _mosaicComposite, region);
-        foreach (var mosaic in mosaics)
+            CopyInto(RenderContextMosaics(region, mosaics), _mosaicComposite, region);
+        }
+        else
         {
-            if (!mosaic.Bounds.Intersect(region).IsEmpty)
-            {
-                ApplyMosaic(_mosaicComposite, mosaic);
-            }
+            CopyInto(CompositeMosaicsRegion(source, region, mosaics), _mosaicComposite, region);
         }
         var stride = _mosaicComposite.Stride;
         _mosaicCompositeSource!.WritePixels(
@@ -271,7 +253,8 @@ internal sealed partial class CaptureSurface
         foreach (var item in mosaics)
         {
             var current = new MosaicSnapshot(
-                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness, item.Style.MosaicScale);
+                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness, item.Style.MosaicScale,
+                item.PreciseBounds, item.Points);
             if (previousById.Remove(item.Id, out var old))
             {
                 if (old == current)
@@ -305,16 +288,6 @@ internal sealed partial class CaptureSurface
             x, y, Math.Max(first.Right, second.Right) - x, Math.Max(first.Bottom, second.Bottom) - y);
     }
 
-    private static void CopyRegion(PixelBuffer source, PixelBuffer destination, PixelRect region)
-    {
-        var rowBytes = region.Width * 4;
-        for (var y = region.Y; y < region.Bottom; y++)
-        {
-            var offset = y * source.Stride + region.X * 4;
-            source.Pixels.AsSpan(offset, rowBytes).CopyTo(destination.Pixels.AsSpan(offset, rowBytes));
-        }
-    }
-
     private void DrawWorkingAnnotation(DrawingContext dc, PixelBuffer? compositedSource)
     {
         var tool = Tool switch
@@ -331,12 +304,21 @@ internal sealed partial class CaptureSurface
         var end = ClampAnnotationPoint(_cursor);
         IReadOnlyList<PixelPoint> points = freehand ? _workingPoints : new[] { _start, end };
         var bounds = tool == AnnotationKind.Pen || (tool == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush)
-            ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2).Intersect(Selection)
+            ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2)
             : RectFromPoints(_start, end);
         var item = new AnnotationItem(Guid.Empty, tool, points, bounds, CurrentStyle, null, null, int.MaxValue);
         if (tool == AnnotationKind.Mosaic)
         {
-            DrawMosaicPreview(dc, compositedSource ?? CompositingSource(), item);
+            var clipped = item.Bounds.Intersect(new PixelRect(0, 0, _frame.Width, _frame.Height)).Intersect(Selection);
+            if (_mosaicSourceContext is not null && !clipped.IsEmpty)
+            {
+                var mosaics = _annotations.Where(annotation => annotation.Kind == AnnotationKind.Mosaic).Append(item).ToArray();
+                dc.DrawImage(RenderContextMosaics(clipped, mosaics).ToBitmapSource(), ToRect(clipped));
+            }
+            else
+            {
+                DrawMosaicPreview(dc, compositedSource ?? CompositingSource(), item, Selection);
+            }
         }
         else
         {
@@ -460,15 +442,14 @@ internal sealed partial class CaptureSurface
         dc.DrawLine(pen, end, end + vector * size - perpendicular * size * 0.45);
     }
 
-    private static void DrawMosaicPreview(DrawingContext dc, PixelBuffer source, AnnotationItem item)
+    private static void DrawMosaicPreview(DrawingContext dc, PixelBuffer source, AnnotationItem item, PixelRect selection)
     {
-        var clipped = item.Bounds.Intersect(new PixelRect(0, 0, source.Width, source.Height));
+        var clipped = item.Bounds.Intersect(new PixelRect(0, 0, source.Width, source.Height)).Intersect(selection);
         if (clipped.IsEmpty)
         {
             return;
         }
-        var preview = source.Crop(clipped);
-        ApplyMosaic(preview, OffsetItem(item, -clipped.X, -clipped.Y));
+        var preview = CompositeMosaicsRegion(source, clipped, [item]);
         dc.DrawImage(preview.ToBitmapSource(), ToRect(clipped));
     }
 
@@ -479,21 +460,18 @@ internal sealed partial class CaptureSurface
         {
             return;
         }
-        // Work on a copy of just the affected region instead of the whole
-        // buffer: the effect is position-local, so a sub-rect yields exactly
-        // the same pixels while allocating only the annotation's size.
+        // The region compositor supplies complete pixel blocks or the blur
+        // halo. This local effect never needs the entire annotation bitmap.
         var effected = buffer.Crop(clipped);
         var region = new PixelRect(0, 0, effected.Width, effected.Height);
         var localItem = OffsetItem(item, -clipped.X, -clipped.Y);
         if (localItem.Style.Variant % 100 == AnnotationVariants.MosaicBlur)
         {
-            var radius = Math.Clamp((int)Math.Round(3 + localItem.Style.Intensity * 8), 3, 12);
-            BoxBlur(effected, region, Math.Max(1, (int)Math.Round(radius * localItem.Style.MosaicScale)));
+            BoxBlur(effected, region, MosaicBlurRadius(localItem.Style));
         }
         else
         {
-            var block = Math.Clamp((int)Math.Round(6 + localItem.Style.Intensity * 16), 6, 24);
-            Pixelate(effected, region, Math.Max(1, (int)Math.Round(block * localItem.Style.MosaicScale)));
+            Pixelate(effected, region, MosaicBlockSize(localItem.Style));
         }
 
         var mask = BuildMosaicMask(localItem, region);
@@ -513,6 +491,12 @@ internal sealed partial class CaptureSurface
             }
         }
     }
+
+    private static int MosaicBlurRadius(AnnotationStyle style) =>
+        Math.Max(1, (int)Math.Round(Math.Clamp((int)Math.Round(3 + style.Intensity * 8), 3, 12) * style.MosaicScale));
+
+    private static int MosaicBlockSize(AnnotationStyle style) =>
+        Math.Max(1, (int)Math.Round(Math.Clamp((int)Math.Round(6 + style.Intensity * 16), 6, 24) * style.MosaicScale));
 
     private static void Pixelate(PixelBuffer buffer, PixelRect bounds, int block)
     {

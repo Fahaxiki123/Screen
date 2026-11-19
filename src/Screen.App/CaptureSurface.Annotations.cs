@@ -56,8 +56,13 @@ internal sealed partial class CaptureSurface
         {
             updated = updated with
             {
-                Bounds = MeasureTextBounds(new PixelPoint(item.Bounds.X, item.Bounds.Y), item.Text ?? string.Empty, style)
+                Bounds = MeasureTextBounds(new PixelPoint(item.Bounds.X, item.Bounds.Y), item.Text ?? string.Empty, style),
+                PreciseBounds = null
             };
+        }
+        else if (IsFreehandStroke(item))
+        {
+            updated = updated with { Bounds = BoundsAroundPoints(item.Points, style.Thickness / 2), PreciseBounds = null };
         }
         _annotations[index] = updated;
         RecordAnnotationEdit(before);
@@ -65,6 +70,9 @@ internal sealed partial class CaptureSurface
         SelectedAnnotationChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
+
+    private static bool IsFreehandStroke(AnnotationItem item) =>
+        item.Kind == AnnotationKind.Pen || item.Kind == AnnotationKind.Mosaic && item.Style.Variant >= 100;
 
     public void Undo()
     {
@@ -157,91 +165,37 @@ internal sealed partial class CaptureSurface
 
     public PixelBuffer RenderSelection()
     {
-        if (Selection.IsEmpty)
+        if (_translatedSelection is { } translation && !_annotations.Any(item => item.Kind == AnnotationKind.Mosaic))
         {
-            throw new InvalidOperationException("请先选择截图区域。");
+            // The translation already contains only the selected pixels. Keep
+            // vector coordinates local without allocating a translated desktop.
+            var annotations = _annotations.Select(item => OffsetItem(item, -Selection.X, -Selection.Y)).ToArray();
+            return RenderAnnotatedRegion(translation, new PixelRect(0, 0, Selection.Width, Selection.Height), annotations);
         }
-
-        var baseImage = _translatedSelection is { } translated
-            ? translated with { Pixels = (byte[])translated.Pixels.Clone() }
-            : RenderOriginalSelection();
-        foreach (var item in _annotations.Where(item => item.Kind == AnnotationKind.Mosaic))
-        {
-            ApplyMosaic(baseImage, OffsetItem(item, -Selection.X, -Selection.Y));
-        }
-
-        var visual = new DrawingVisual();
-        using (var dc = visual.RenderOpen())
-        {
-            dc.DrawImage(baseImage.ToBitmapSource(), new Rect(0, 0, Selection.Width, Selection.Height));
-            DrawAnnotations(
-                dc,
-                _annotations.Where(item => item.Kind != AnnotationKind.Mosaic),
-                new Vector(-Selection.X, -Selection.Y));
-        }
-        var bitmap = new RenderTargetBitmap(Selection.Width, Selection.Height, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
-        bitmap.Freeze();
-        return bitmap.ToPixelBuffer();
+        return RenderAnnotatedRegion(CompositingSource(), Selection, _annotations);
     }
 
-    /// <summary>
-    /// Renders the annotations (kept in this surface's coordinate space) onto a
-    /// different, full-resolution base image. Used by the long-screenshot editor,
-    /// which edits a downscaled working copy but exports at the original size.
-    /// </summary>
-    internal PixelBuffer RenderSelection(PixelBuffer baseImage, PixelRect selectionInBaseImage, double coordinateScale)
+    /// <summary>Exports original pixels, with annotations mapped from working-image coordinates.</summary>
+    internal PixelBuffer RenderSelection(PixelBuffer baseImage, PixelRect selectionInBaseImage, double coordinateScale) =>
+        RenderAnnotatedRegion(baseImage, selectionInBaseImage, _annotations.Select(item => ScaleItem(item, coordinateScale)).ToArray());
+
+    internal static AnnotationItem ScaleItem(AnnotationItem item, double scale)
     {
-        selectionInBaseImage = selectionInBaseImage.Intersect(new PixelRect(0, 0, baseImage.Width, baseImage.Height));
-        if (selectionInBaseImage.IsEmpty)
+        var bounds = GetPreciseBounds(item);
+        var scaledBounds = new PreciseAnnotationBounds(bounds.X * scale, bounds.Y * scale, bounds.Width * scale, bounds.Height * scale);
+        return item with
         {
-            throw new InvalidOperationException("请先选择截图区域。");
-        }
-
-        var baseCropped = baseImage.Crop(selectionInBaseImage);
-        foreach (var item in _annotations.Where(item => item.Kind == AnnotationKind.Mosaic))
-        {
-            ApplyMosaic(
-                baseCropped,
-                OffsetItem(ScaleItem(item, coordinateScale), -selectionInBaseImage.X, -selectionInBaseImage.Y));
-        }
-
-        var visual = new DrawingVisual();
-        using (var dc = visual.RenderOpen())
-        {
-            dc.DrawImage(baseCropped.ToBitmapSource(), new Rect(0, 0, selectionInBaseImage.Width, selectionInBaseImage.Height));
-            DrawAnnotations(
-                dc,
-                _annotations.Where(item => item.Kind != AnnotationKind.Mosaic)
-                    .Select(item => ScaleItem(item, coordinateScale)),
-                new Vector(-selectionInBaseImage.X, -selectionInBaseImage.Y));
-        }
-        var bitmap = new RenderTargetBitmap(
-            selectionInBaseImage.Width,
-            selectionInBaseImage.Height,
-            96,
-            96,
-            PixelFormats.Pbgra32);
-        bitmap.Render(visual);
-        bitmap.Freeze();
-        return bitmap.ToPixelBuffer();
+            Points = item.Points.Select(point => new PixelPoint(point.X * scale, point.Y * scale)).ToArray(),
+            Bounds = RoundBounds(scaledBounds),
+            PreciseBounds = scaledBounds,
+            Style = item.Style with
+            {
+                Thickness = item.Style.Thickness * scale,
+                FontSize = item.Style.FontSize * scale,
+                MosaicScale = item.Kind == AnnotationKind.Mosaic ? item.Style.MosaicScale * scale : item.Style.MosaicScale
+            }
+        };
     }
-
-    internal static AnnotationItem ScaleItem(AnnotationItem item, double scale) => item with
-    {
-        Points = item.Points.Select(point => new PixelPoint(point.X * scale, point.Y * scale)).ToArray(),
-        Bounds = new PixelRect(
-            (int)Math.Round(item.Bounds.X * scale),
-            (int)Math.Round(item.Bounds.Y * scale),
-            Math.Max(1, (int)Math.Round(item.Bounds.Width * scale)),
-            Math.Max(1, (int)Math.Round(item.Bounds.Height * scale))),
-        Style = item.Style with
-        {
-            Thickness = item.Style.Thickness * scale,
-            FontSize = item.Style.FontSize * scale,
-            MosaicScale = item.Kind == AnnotationKind.Mosaic ? item.Style.MosaicScale * scale : item.Style.MosaicScale
-        }
-    };
 
     private void AddAnnotation(PixelPoint start, PixelPoint end)
     {
@@ -288,7 +242,7 @@ internal sealed partial class CaptureSurface
             : kind == AnnotationKind.Number
                 ? new PixelRect((int)start.X, (int)start.Y, 1, 1)
             : kind == AnnotationKind.Pen || (kind == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush)
-                ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2).Intersect(Selection)
+                ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2)
             : RectFromPoints(start, end);
         var zIndex = _annotations.Count == 0 ? 0 : _annotations[^1].ZIndex + 1;
         var annotation = new AnnotationItem(Guid.NewGuid(), kind, points, bounds, CurrentStyle, text, number, zIndex);
@@ -363,7 +317,8 @@ internal sealed partial class CaptureSurface
         _annotations[index] = item with
         {
             Text = dialog.Value,
-            Bounds = MeasureTextBounds(origin, dialog.Value, item.Style)
+            Bounds = MeasureTextBounds(origin, dialog.Value, item.Style),
+            PreciseBounds = null
         };
         RecordAnnotationEdit(before);
         InvalidateVisual();
@@ -500,6 +455,7 @@ internal sealed partial class CaptureSurface
             {
                 Points = [center],
                 Bounds = new PixelRect((int)center.X, (int)center.Y, 1, 1),
+                PreciseBounds = null,
                 Style = style
             };
         }
@@ -512,6 +468,7 @@ internal sealed partial class CaptureSurface
             {
                 Points = points,
                 Bounds = newBounds,
+                PreciseBounds = null,
                 Style = style
             };
         }
@@ -521,7 +478,7 @@ internal sealed partial class CaptureSurface
             ? BoundsAroundPoints(points, item.Style.Thickness / 2)
             : newBounds;
         _mosaicCompositeDirty = true;
-        return item with { Points = points, Bounds = bounds };
+        return item with { Points = points, Bounds = bounds, PreciseBounds = null };
     }
 
     private static FormattedText CreateTextLayout(string text, AnnotationStyle style, double maxWidth)

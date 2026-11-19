@@ -70,6 +70,9 @@ internal sealed class AppHost : IDisposable
             try
             {
                 RecordingTempCleaner.Clean(RecordingTempCleaner.DefaultRoot, DateTime.UtcNow);
+                var configuredRoot = RecordingStorage.GetRoot(_settings.Recording);
+                if (!string.Equals(configuredRoot, RecordingTempCleaner.DefaultRoot, StringComparison.OrdinalIgnoreCase))
+                    RecordingTempCleaner.Clean(configuredRoot, DateTime.UtcNow);
             }
             catch (Exception exception)
             {
@@ -177,6 +180,7 @@ internal sealed class AppHost : IDisposable
         CaptureOverlayWindow? overlay = null;
         RecordingSaveResult result;
         string filePath;
+        RecordingProfile recordingProfile;
         try
         {
             RecordingSelection? selection = null;
@@ -233,6 +237,7 @@ internal sealed class AppHost : IDisposable
             controller.ShowControls();
             result = await controller.Completion;
             filePath = controller.FilePath;
+            recordingProfile = controller.Profile;
         }
         catch (Exception exception)
         {
@@ -263,7 +268,7 @@ internal sealed class AppHost : IDisposable
         }
         try
         {
-            WindowActivation.ShowTopmost(new RecordingPreviewWindow(filePath));
+            WindowActivation.ShowTopmost(new RecordingPreviewWindow(filePath, recordingProfile));
         }
         catch
         {
@@ -345,7 +350,7 @@ internal sealed class AppHost : IDisposable
     {
         var notice = result.Saved ? result.Warning : $"录屏失败：{result.Error}";
         return result.RecoveryDirectory is { } directory
-            ? $"{notice}\n录制素材已保留，可从以下位置恢复：\n{directory}"
+            ? $"{notice}\n录制素材已保留，可从以下位置恢复：\n{directory}\nScreen 不会自动删除这些恢复素材，请恢复后自行清理。"
             : notice;
     }
 
@@ -370,7 +375,8 @@ internal sealed class AppHost : IDisposable
             hotKey => _hotKeyWindow.RegisterCaptureHotKey(hotKey),
             hotKey => _hotKeyWindow.RegisterClickThroughRecoveryHotKey(hotKey),
             hotKey => _hotKeyWindow.RegisterRecordHotKey(hotKey),
-            _hotKeyWindow.TrySetPriority);
+            _hotKeyWindow.TrySetPriority,
+            () => _hotKeyWindow.LastPriorityError);
         _settingsWindow = window;
         window.SourceInitialized += (_, _) =>
             _hotKeyWindow.SettingsWindowHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
@@ -401,7 +407,8 @@ internal sealed class AppHost : IDisposable
     {
         if (!_hotKeyWindow.TrySetPriority(_settings.PreferScreenHotKeys))
         {
-            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键", "无法启用优先模式，已使用普通快捷键注册。", Forms.ToolTipIcon.Warning);
+            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键",
+                _hotKeyWindow.LastPriorityError ?? "快捷键模式切换失败，已保留当前模式。", Forms.ToolTipIcon.Warning);
         }
         void RefreshShortcut(string description, string key, Func<string, bool> register)
         {

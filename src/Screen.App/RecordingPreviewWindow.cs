@@ -24,6 +24,8 @@ namespace Screen.App;
 internal sealed partial class RecordingPreviewWindow : Window
 {
     private readonly string _filePath;
+    private readonly string _exportTempRoot;
+    private readonly int _preferredPlaybackFps;
     private readonly Image _videoImage;
     private readonly TimelineBar _timeline;
     private readonly TextBlock _timeText;
@@ -54,10 +56,17 @@ internal sealed partial class RecordingPreviewWindow : Window
 
     private readonly RecordingExportCache _exportCache = new();
     private bool _closed;
+    private CancellationTokenSource? _exportOperation;
+    private Button _downloadButton = null!;
+    private Button _copyButton = null!;
+    private Button _cancelExportButton = null!;
+    private DispatcherTimer? _statusClearTimer;
 
-    public RecordingPreviewWindow(string filePath)
+    public RecordingPreviewWindow(string filePath, Screen.Core.RecordingProfile? recordingProfile = null)
     {
         _filePath = filePath;
+        _exportTempRoot = RecordingStorage.GetRoot(recordingProfile ?? new Screen.Core.RecordingProfile());
+        _preferredPlaybackFps = recordingProfile is null ? 0 : Math.Clamp(recordingProfile.FrameRate, 1, 60);
         Title = "编辑录屏";
         Width = Math.Min(1040, SystemParameters.WorkArea.Width * 0.8);
         Height = Math.Min(700, SystemParameters.WorkArea.Height * 0.85);
@@ -216,8 +225,11 @@ internal sealed partial class RecordingPreviewWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         };
         rightButtons.Children.Add(separator);
-        var downloadButton = MakeTextButton("下载", SaveAs, primary: false);
-        var copyButton = MakeTextButton("复制", CopyToClipboard, primary: true);
+        var downloadButton = _downloadButton = MakeTextButton("下载", SaveAs, primary: false);
+        var copyButton = _copyButton = MakeTextButton("复制", CopyToClipboard, primary: true);
+        _cancelExportButton = MakeTextButton("取消导出", (_, _) => _exportOperation?.Cancel(), primary: false);
+        _cancelExportButton.Visibility = Visibility.Collapsed;
+        rightButtons.Children.Add(_cancelExportButton);
         copyButton.Margin = new Thickness(6, 0, 0, 0);
         rightButtons.Children.Add(downloadButton);
         rightButtons.Children.Add(copyButton);
@@ -330,6 +342,8 @@ internal sealed partial class RecordingPreviewWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            _exportOperation?.Cancel();
+            _statusClearTimer?.Stop();
             _ticker.Stop();
             StopDecoder();
             _exportCache.Dispose();
@@ -771,10 +785,14 @@ internal sealed partial class RecordingPreviewWindow : Window
         }
     }
 
-    private void SetStatus(string text)
+    private void SetStatus(string text, bool persistent = false)
     {
+        _statusClearTimer?.Stop();
         _statusText.Text = text;
+        if (persistent)
+            return;
         var clear = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _statusClearTimer = clear;
         clear.Tick += (_, _) =>
         {
             _statusText.Text = string.Empty;

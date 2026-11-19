@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using Screen.Core;
@@ -32,6 +31,8 @@ internal sealed class RecordingController : IDisposable
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task<RecordingSaveResult>? _finishTask;
     private bool _disposed;
+    private readonly CancellationTokenSource _finishCancellation = new();
+    private string? _lastAudioWarning;
 
     internal RecordingController(
         IRecordingCapture recorder,
@@ -54,10 +55,10 @@ internal sealed class RecordingController : IDisposable
         _showClickEffects = showClickEffects;
 
         _control = new RecordingControlWindow(
-            hasAudio: audio is not null,
+            hasAudio: audio?.Tracks.Count > 0,
             levelProvider: audio is null ? null : () => audio.CurrentPeakLevel);
         _control.PauseToggled += (_, _) => TogglePause();
-        _control.StopRequested += (_, _) => _ = StopAsync();
+        _control.StopRequested += (_, _) => StopFromInput();
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _timer.Tick += (_, _) =>
@@ -69,11 +70,19 @@ internal sealed class RecordingController : IDisposable
                 _ = StopAsync();
                 return;
             }
+            var audioWarning = _audio?.Warning;
+            if (audioWarning is not null && audioWarning != _lastAudioWarning)
+            {
+                _lastAudioWarning = audioWarning;
+                HintToastWindow.Show(audioWarning);
+            }
+            _control.SetStatus(_recorder.Status ?? audioWarning);
             _control.UpdateTimer(_recorder.ElapsedSeconds);
         };
     }
 
     public string FilePath => _filePath;
+    public RecordingProfile Profile { get; private set; } = new();
     public Task<RecordingSaveResult> Completion => _completion.Task;
 
     public static RecordingController Create(
@@ -103,8 +112,7 @@ internal sealed class RecordingController : IDisposable
         FfmpegLocator.Resolve();
         Directory.CreateDirectory(appSettings.SaveDirectory);
         var filePath = Path.Combine(appSettings.SaveDirectory, $"Recording-{DateTime.Now:yyyyMMdd-HHmmss}.mp4");
-        var tempDir = Path.Combine(Path.GetTempPath(), "Screen.Recording", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
+        var tempDir = RecordingStorage.CreateSession(profile);
 
         var stopSignal = new RecordingStopSignal();
         var timeline = new RecordingTimeline();
@@ -121,14 +129,10 @@ internal sealed class RecordingController : IDisposable
                     profile.RecordMicrophone,
                     stopSignal,
                     timeline);
-                if (audio.Tracks.Count == 0)
-                {
-                    audio.Dispose();
-                    audio = null;
-                }
             }
             return new RecordingController(recorder, target, filePath, tempDir, audio, persistentBorder, stopSignal,
-                profile.ShowClickEffects);
+                profile.ShowClickEffects)
+            { Profile = profile };
         }
         catch
         {
@@ -147,7 +151,7 @@ internal sealed class RecordingController : IDisposable
         // The host owns this controller before any stop input can arrive.
         // Keep the selection border visible through the countdown and handoff.
         _hook = new LowLevelKeyboardHook(0, requireForegroundWindow: false);
-        _hook.EscapePressed += (_, _) => _control.Dispatcher.BeginInvoke(() => _ = StopAsync());
+        _hook.EscapePressed += (_, _) => _control.Dispatcher.BeginInvoke(() => StopFromInput());
         if (_showClickEffects)
         {
             try
@@ -201,6 +205,20 @@ internal sealed class RecordingController : IDisposable
         return Completion;
     }
 
+    private void StopFromInput()
+    {
+        if (_disposed)
+        { return; }
+        if (_finishTask is null)
+        {
+            _ = StopAsync();
+            return;
+        }
+        _control.SetStatus("正在取消保存，保留恢复素材…", finishing: true);
+        _finishCancellation.Cancel();
+        _recorder.CancelFinalization();
+    }
+
     private async Task CompleteAsync(Task<RecordingSaveResult> finishTask) =>
         Complete(await finishTask);
 
@@ -211,6 +229,7 @@ internal sealed class RecordingController : IDisposable
             return _finishTask;
         }
         _timer.Stop();
+        _control.SetStatus("正在保存录屏…", finishing: true);
         // Both capture paths observe the same stop boundary immediately. In
         // particular, audio must not keep recording while ffmpeg finalizes.
         _stopSignal.Request();
@@ -230,14 +249,14 @@ internal sealed class RecordingController : IDisposable
                     var warning = CombineWarnings(
                         interruptionWarning,
                         $"声音处理失败，已保存无声视频（{audioError.Message}）");
-                    return RecordingFileStore.Save(_videoTempPath, _filePath, _tempDir,
-                        warning, preserveRecovery: true);
+                    return PublishSilentVideo(warning, preserveRecovery: true);
                 }
-                return MuxAudioAndFinish(interruptionWarning);
+                return MuxAudioAndFinish(CombineWarnings(interruptionWarning, _audio?.Warning));
             }
             catch (Exception exception)
             {
                 SimpleLogger.LogError("Recording could not be saved; recovery materials retained", exception);
+                RecordingTempCleaner.PreserveRecovery(_tempDir);
                 return new RecordingSaveResult(false, null, exception.Message, _tempDir);
             }
         });
@@ -247,7 +266,7 @@ internal sealed class RecordingController : IDisposable
     private static string? CombineWarnings(string? first, string? second) =>
         string.IsNullOrWhiteSpace(first)
             ? second
-            : string.IsNullOrWhiteSpace(second)
+            : string.IsNullOrWhiteSpace(second) || string.Equals(first, second, StringComparison.Ordinal)
                 ? first
                 : $"{first}；{second}";
 
@@ -260,10 +279,9 @@ internal sealed class RecordingController : IDisposable
         var tracks = _audio?.Tracks.Where(track => track.BytesWritten > 0).ToList() ?? [];
         if (tracks.Count == 0)
         {
-            return RecordingFileStore.Save(_videoTempPath, _filePath, _tempDir, warning: interruptionWarning);
+            return PublishSilentVideo(interruptionWarning);
         }
         var muxPath = Path.Combine(_tempDir, "muxed.mp4");
-        string? muxError = null;
         try
         {
             var startInfo = BuildMuxStartInfo(
@@ -273,64 +291,48 @@ internal sealed class RecordingController : IDisposable
                 _recorder.EncodedDurationSeconds,
                 muxPath);
 
-            using var process = Process.Start(startInfo);
-            if (process is null)
-            {
-                throw new InvalidOperationException("无法启动 ffmpeg。");
-            }
-            // stderr must be drained asynchronously — a synchronous
-            // ReadToEnd() blocks until the process exits, so the timeout
-            // below could never fire on a hung mux.
-            var stderrLog = new StringBuilder();
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (e.Data is { } line)
-                {
-                    lock (stderrLog)
-                    {
-                        stderrLog.AppendLine(line);
-                    }
-                }
-            };
-            process.BeginErrorReadLine();
-            if (!process.WaitForExit(TimeSpan.FromMinutes(5)))
-            {
-                try
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch
-                {
-                }
-                process.WaitForExit(TimeSpan.FromSeconds(5));
-                throw new TimeoutException("ffmpeg 混流超时（5 分钟）。");
-            }
-            // The process has exited; the parameterless overload returns at
-            // once and only waits for the async stderr drain to finish.
-            process.WaitForExit();
-            string tail;
-            lock (stderrLog)
-            {
-                tail = stderrLog.ToString();
-            }
-            if (process.ExitCode != 0)
-            {
-                tail = tail.Length > 300 ? tail[^300..] : tail;
-                throw new InvalidOperationException($"ffmpeg 退出码 {process.ExitCode}：{tail.Trim()}");
-            }
+            var inputBytes = new FileInfo(_videoTempPath).Length + tracks.Sum(track => track.BytesWritten);
+            RecordingProcessRunner.Run(startInfo, RecordingProcessRunner.FinalizationTimeout(inputBytes), _finishCancellation.Token);
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception exception)
         {
-            muxError = exception.Message;
             SimpleLogger.LogError($"Recording audio mux failed; recovery directory: {_tempDir}", exception);
+            return PublishSilentVideo(CombineWarnings(interruptionWarning,
+                $"声音处理失败，已保存无声视频（{exception.Message}）"), preserveRecovery: true);
         }
         // A failed mux may fall back to the intact silent video. A failed file
         // commit may not claim success or remove either recoverable source.
-        var warning = CombineWarnings(
-            interruptionWarning,
-            muxError is null ? null : $"声音处理失败，已保存无声视频（{muxError}）");
-        return RecordingFileStore.Save(muxError is null ? muxPath : _videoTempPath,
-            _filePath, _tempDir, warning, preserveRecovery: muxError is not null);
+        return RecordingFileStore.Save(muxPath, _filePath, _tempDir,
+            CombineWarnings(interruptionWarning, _audio?.Warning),
+            preserveRecovery: _audio?.Warning is not null, cancellationToken: _finishCancellation.Token);
+    }
+
+    private RecordingSaveResult PublishSilentVideo(string? warning, bool preserveRecovery = false)
+    {
+        var source = _videoTempPath;
+        if (_recorder.NeedsFinalFastStart)
+        {
+            var finalPath = Path.Combine(_tempDir, "final-video.mp4");
+            try
+            {
+                var startInfo = BuildMuxStartInfo(FfmpegLocator.Resolve(), _videoTempPath, [],
+                    _recorder.EncodedDurationSeconds, finalPath);
+                RecordingProcessRunner.Run(startInfo,
+                    RecordingProcessRunner.FinalizationTimeout(new FileInfo(_videoTempPath).Length), _finishCancellation.Token);
+                source = finalPath;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception exception)
+            {
+                // The encoded MP4 is already complete. Failure to move its
+                // index must not discard a playable, recoverable recording.
+                warning = CombineWarnings(warning, $"已保存视频，快速播放优化未完成（{exception.Message}）");
+                preserveRecovery = true;
+            }
+        }
+        return RecordingFileStore.Save(source, _filePath, _tempDir, warning,
+            preserveRecovery: preserveRecovery || _audio?.Warning is not null, cancellationToken: _finishCancellation.Token);
     }
 
     internal static ProcessStartInfo BuildMuxStartInfo(
@@ -369,7 +371,11 @@ internal sealed class RecordingController : IDisposable
                 track.RawPath);
         }
         Add("-map", "0:v");
-        if (tracks.Count == 1)
+        if (tracks.Count == 0)
+        {
+            Add("-an");
+        }
+        else if (tracks.Count == 1)
         {
             Add("-map", "1:a", "-af", "apad");
         }
@@ -377,9 +383,11 @@ internal sealed class RecordingController : IDisposable
         {
             Add("-filter_complex", "[1:a][2:a]amix=inputs=2:duration=longest:normalize=0,apad[mixed]", "-map", "[mixed]");
         }
-        Add("-c:v", "copy", "-ar", "48000", "-c:a", "aac", "-b:a", "192k");
-        // Pad a short audio stream, or trim a final callback, to the exact
-        // number of accepted video frames. Never shorten the video to audio.
+        Add("-c:v", "copy");
+        if (tracks.Count > 0)
+        { Add("-ar", "48000", "-c:a", "aac", "-b:a", "192k"); }
+        // Pad a short audio stream, or trim a final callback, to the shared
+        // unpaused capture duration. Never shorten the video to audio.
         Add("-t", encodedDurationSeconds.ToString("0.#########", System.Globalization.CultureInfo.InvariantCulture));
         Add("-movflags", "+faststart");
         Add(muxPath);
@@ -442,6 +450,7 @@ internal sealed class RecordingController : IDisposable
         }
         finally
         {
+            _finishCancellation.Dispose();
             _completion.TrySetResult(result);
         }
     }

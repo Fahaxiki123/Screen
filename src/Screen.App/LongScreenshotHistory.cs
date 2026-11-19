@@ -88,18 +88,7 @@ internal sealed class LongScreenshotHistory(int maximumStates = 20)
         var dx = cropInOriginal.X / (double)nextFactor;
         var dy = cropInOriginal.Y / (double)nextFactor;
         var items = annotations.Items.Select(item =>
-        {
-            var scaled = CaptureSurface.ScaleItem(item, scale);
-            return scaled with
-            {
-                Points = scaled.Points.Select(point => new PixelPoint(point.X - dx, point.Y - dy)).ToArray(),
-                Bounds = scaled.Bounds with
-                {
-                    X = (int)Math.Round(item.Bounds.X * scale - dx),
-                    Y = (int)Math.Round(item.Bounds.Y * scale - dy)
-                }
-            };
-        }).ToArray();
+            CaptureSurface.OffsetItem(CaptureSurface.ScaleItem(item, scale), -dx, -dy)).ToArray();
         return new(new AnnotationSnapshot(items, annotations.NextNumber), AnnotationHistoryState.Empty, null);
     }
 }

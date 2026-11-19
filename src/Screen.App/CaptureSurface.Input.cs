@@ -83,7 +83,7 @@ internal sealed partial class CaptureSurface
         var annotationHit = _selectionCommitted && AllowAnnotationEditing
             ? HitTestAnnotation(_start)
             : null;
-        if (annotationHit is not null)
+        if (annotationHit is not null && ShouldEditAnnotation(Tool, Keyboard.Modifiers, _selectedAnnotationId, annotationHit.Id))
         {
             CaptureMouse();
             BeginAnnotationGesture();
@@ -93,6 +93,13 @@ internal sealed partial class CaptureSurface
             _draggingAnnotation = true;
             _annotationMoved = false;
             InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
+        if (Tool != CaptureTool.Select && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            SelectAnnotation(null);
             e.Handled = true;
             return;
         }
@@ -449,7 +456,8 @@ internal sealed partial class CaptureSurface
             Cursor = CursorForResizeHandle(annotationHandle);
             return;
         }
-        if (AllowAnnotationEditing && HitTestAnnotation(_cursor) is not null)
+        if (AllowAnnotationEditing && HitTestAnnotation(_cursor) is { } hit
+            && ShouldEditAnnotation(Tool, Keyboard.Modifiers, _selectedAnnotationId, hit.Id))
         {
             Cursor = Cursors.SizeAll;
             return;
@@ -463,6 +471,9 @@ internal sealed partial class CaptureSurface
             _ => Cursors.Cross
         };
     }
+
+    internal static bool ShouldEditAnnotation(CaptureTool tool, ModifierKeys modifiers, Guid? selectedId, Guid hitId) =>
+        tool == CaptureTool.Select || modifiers.HasFlag(ModifierKeys.Control) || selectedId == hitId;
 
     private static Cursor CursorForResizeHandle(SelectionResizeHandle handle) => handle switch
     {

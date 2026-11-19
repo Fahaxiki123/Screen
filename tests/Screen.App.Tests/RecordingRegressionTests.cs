@@ -667,7 +667,7 @@ public sealed class RecordingRegressionTests
     }
 
     [TestMethod]
-    public void RecordingTempCleanerRetainsRecentRecoveryAndRemovesExpiredOrphans()
+    public void RecordingTempCleanerRetainsAllRecoveryAndRemovesOnlyExpiredExportScratch()
     {
         var cleanRoot = Directory.CreateDirectory(Path.Combine(_root, "CleanerRoot")).FullName;
         var now = new DateTime(2026, 11, 12, 12, 0, 0, DateTimeKind.Utc);
@@ -696,9 +696,9 @@ public sealed class RecordingRegressionTests
 
         var removed = RecordingTempCleaner.Clean(cleanRoot, now);
 
-        Assert.AreEqual(2, removed);
+        Assert.AreEqual(1, removed);
         Assert.IsTrue(Directory.Exists(recentGuid));
-        Assert.IsFalse(Directory.Exists(expiredGuid));
+        Assert.IsTrue(Directory.Exists(expiredGuid), "An old session can be the only surviving recording; never expire it automatically.");
         Assert.IsTrue(Directory.Exists(nonGuidFolder));
         Assert.IsFalse(File.Exists(oldTrim));
         Assert.IsTrue(File.Exists(freshTrim));

@@ -78,7 +78,9 @@ internal sealed partial class RecordingPreviewWindow
         _durationSeconds = info.DurationSeconds;
         _videoWidth = info.Width;
         _videoHeight = info.Height;
-        _fps = info.FramesPerSecond;
+        // VFR's reported average rate may be very low after capture stalls.
+        // The preview is deliberately resampled to a bounded playback clock.
+        _fps = _preferredPlaybackFps > 0 ? _preferredPlaybackFps : Math.Clamp(info.FramesPerSecond, 15, 60);
         _timeline.Maximum = Math.Max(0.1, _durationSeconds);
         _loaded = true;
         UpdateTimeText();
@@ -441,11 +443,19 @@ internal sealed partial class RecordingPreviewWindow
             }
             if (request.StartSeconds > 0.05)
             {
+                // Keep the sample spanning the seek point. With VFR, accurate
+                // input seek otherwise drops that held frame and shows a future
+                // sample. CFR output below discards preroll on the display clock.
+                startInfo.ArgumentList.Add("-noaccurate_seek");
                 startInfo.ArgumentList.Add("-ss");
                 startInfo.ArgumentList.Add(request.StartSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
             }
             startInfo.ArgumentList.Add("-i");
             startInfo.ArgumentList.Add(_filePath);
+            startInfo.ArgumentList.Add("-r");
+            startInfo.ArgumentList.Add(request.FramesPerSecond.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("-fps_mode");
+            startInfo.ArgumentList.Add("cfr");
             if (!request.AutoPlay)
             {
                 // A paused scrub needs exactly one visual frame. Declaring

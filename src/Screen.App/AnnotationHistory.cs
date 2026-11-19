@@ -13,7 +13,7 @@ internal sealed record AnnotationSnapshot(AnnotationItem[] Items, int NextNumber
 
     private static bool SameItem(AnnotationItem first, AnnotationItem second) =>
         ReferenceEquals(first, second)
-        || first.Id == second.Id && first.Kind == second.Kind && first.Bounds == second.Bounds
+        || first.Id == second.Id && first.Kind == second.Kind && first.Bounds == second.Bounds && first.PreciseBounds == second.PreciseBounds
         && first.Style == second.Style && first.Text == second.Text && first.Number == second.Number
         && first.ZIndex == second.ZIndex && first.Points.SequenceEqual(second.Points);
 }

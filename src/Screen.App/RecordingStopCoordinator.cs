@@ -26,6 +26,11 @@ internal sealed class RecordingTimeline(Func<long>? timestamp = null)
         }
     }
 
+    public bool IsPaused
+    {
+        get { lock (_gate) { return _clock?.IsPaused ?? _pausedBeforeStart; } }
+    }
+
     public double ElapsedSeconds
     {
         get

@@ -31,6 +31,10 @@ internal sealed class RecordingControlWindow : Window
     private double _smoothedLevel;
     private int _phaseTick;
     private bool _paused;
+    private readonly TextBlock _statusLabel;
+    private readonly TextBlock _stopLabel;
+    private readonly Border _pauseButton;
+    private readonly Border _stopButton;
 
     public event EventHandler? PauseToggled;
     public event EventHandler? StopRequested;
@@ -156,6 +160,7 @@ internal sealed class RecordingControlWindow : Window
             Stroke = RecordingTheme.Brush("Brush.TextPrimary", "#F4F8FF")
         };
         var pauseButton = BuildCircleButton(_pauseIcon, "暂停 / 继续", () => PauseToggled?.Invoke(this, EventArgs.Empty));
+        _pauseButton = pauseButton;
         pauseButton.Margin = new Thickness(0, 0, 6, 0);
 
         // Translucent ruby glass stop pill (glows crisp crimson on hover, zero muddy pink)
@@ -176,6 +181,7 @@ internal sealed class RecordingControlWindow : Window
             FontWeight = FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center
         };
+        _stopLabel = stopLabel;
         var stopRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -203,6 +209,7 @@ internal sealed class RecordingControlWindow : Window
             ToolTip = "结束录制并打开预览 (Esc)",
             Child = stopRow
         };
+        _stopButton = stopButton;
         var stopHoverGlow = new DropShadowEffect
         {
             Color = Color.FromRgb(0xF4, 0x3F, 0x5E),
@@ -235,6 +242,17 @@ internal sealed class RecordingControlWindow : Window
         };
         panel.Children.Add(beaconHost);
         panel.Children.Add(_timer);
+        _statusLabel = new TextBlock
+        {
+            MaxWidth = 240,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#F4F8FF"),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0),
+            Visibility = Visibility.Collapsed
+        };
+        panel.Children.Add(_statusLabel);
         panel.Children.Add(_meterHost);
         panel.Children.Add(divider);
         panel.Children.Add(pauseButton);
@@ -364,6 +382,22 @@ internal sealed class RecordingControlWindow : Window
         _timer.Text = elapsed.TotalHours >= 1
             ? elapsed.ToString(@"hh\:mm\:ss")
             : elapsed.ToString(@"mm\:ss");
+    }
+
+    public void SetStatus(string? status, bool finishing = false)
+    {
+        _statusLabel.Text = status ?? string.Empty;
+        _statusLabel.ToolTip = status;
+        _statusLabel.Visibility = string.IsNullOrWhiteSpace(status) ? Visibility.Collapsed : Visibility.Visible;
+        if (finishing)
+        {
+            _pauseButton.IsEnabled = false;
+            _pauseButton.Opacity = 0.35;
+            _stopLabel.Text = "取消保存";
+            _stopButton.ToolTip = "取消正在进行的保存，保留恢复素材 (Esc)";
+            _meterTimer.Stop();
+            _beaconHalo.BeginAnimation(OpacityProperty, null);
+        }
     }
 
     public void SetPaused(bool paused)

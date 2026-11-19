@@ -17,12 +17,14 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     private readonly ICredentialStore _credentials;
     private readonly Action<bool> _setStartupEnabled;
     private readonly Func<bool, bool>? _setHotKeyPriority;
+    private readonly Func<string?>? _hotKeyPriorityError;
     private readonly DispatcherTimer _saveTimer;
     private readonly AppSettings _settings;
     private readonly Dictionary<string, (string Secret, string? EndpointScope)> _pendingCredentials = new();
     private readonly HashSet<string> _editedApiKeys = new();
 
-    private bool _dirty;
+    private readonly HashSet<string> _changed = new();
+    private bool _dirty => _changed.Count != 0;
     private bool _disposed;
 
     private string _tencentSecretId;
@@ -31,12 +33,13 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     private string _racingApiKey;
 
     public SettingsViewModel(JsonSettingsStore store, ICredentialStore credentials, Action<bool> setStartupEnabled,
-        Func<bool, bool>? setHotKeyPriority = null)
+        Func<bool, bool>? setHotKeyPriority = null, Func<string?>? hotKeyPriorityError = null)
     {
         _store = store;
         _credentials = credentials;
         _setStartupEnabled = setStartupEnabled;
         _setHotKeyPriority = setHotKeyPriority;
+        _hotKeyPriorityError = hotKeyPriorityError;
         _settings = store.Load();
 
         var savedCredentials = TranslationCredentialStore.ReadSaved(_settings.Translation, credentials);
@@ -58,6 +61,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     public string StatusText { get; private set; } = "设置将自动保存";
     public bool HasError { get; private set; }
+    public bool HasUnsavedChanges => _dirty || _pendingCredentials.Count != 0;
 
     // ---------- General ----------
     public bool StartWithWindows
@@ -87,7 +91,8 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             }
             if (_setHotKeyPriority?.Invoke(value) == false)
             {
-                SetStatus("无法启用快捷键优先模式。", isError: true);
+                SetStatus(_hotKeyPriorityError?.Invoke()
+                    ?? (value ? "无法启用快捷键优先模式。" : "无法关闭快捷键优先模式，已保留原模式。"), isError: true);
                 OnPropertyChanged();
                 return;
             }
@@ -143,6 +148,19 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     }
 
     // ---------- Recording ----------
+    public string RecordingTempDirectory
+    {
+        get => _settings.Recording.TempDirectory;
+        set
+        {
+            if (value == _settings.Recording.TempDirectory)
+                return;
+            _settings.Recording = _settings.Recording with { TempDirectory = value.Trim() };
+            OnPropertyChanged();
+            QueueSave();
+        }
+    }
+
     public int RecordingFrameRateIndex
     {
         get => _settings.Recording.FrameRate switch
@@ -529,6 +547,25 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public static string[] SourceLanguageNames() =>
+        ["自动识别", "简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch"];
+
+    private static readonly string[] SourceLanguageCodes = ["auto", "zh-CN", "zh-TW", "en", "ja", "ko", "fr", "es", "pt", "de"];
+
+    public int SourceLanguageIndex
+    {
+        get => Math.Max(0, Array.IndexOf(SourceLanguageCodes, _settings.Translation.SourceLanguage));
+        set
+        {
+            var code = SourceLanguageCodes[Math.Clamp(value, 0, SourceLanguageCodes.Length - 1)];
+            if (_settings.Translation.SourceLanguage == code)
+                return;
+            _settings.Translation = _settings.Translation with { SourceLanguage = code };
+            OnPropertyChanged();
+            QueueSave();
+        }
+    }
+
     // ---------- Credentials (stored in Windows Credential Manager) ----------
     public string TencentSecretId
     {
@@ -615,48 +652,163 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     private string? SaveSettings()
     {
         NormalizeBeforeSave();
-        if (Validate() is { } validationError)
+        var errors = new List<string>();
+        var blocked = new HashSet<string>();
+        void ValidateGroup(string group, string? error)
         {
-            return validationError;
+            if (error is not null && _changed.Any(property => SettingGroup(property) == group))
+            {
+                blocked.Add(group);
+                errors.Add(error);
+            }
         }
-
+        ValidateGroup("hotkeys", ValidateHotKeys());
+        ValidateGroup("translation", ValidateTranslation());
+        ValidateGroup("storage", RecordingStorage.ValidateDirectory(RecordingTempDirectory));
+        var changes = _changed.Where(property => !blocked.Contains(SettingGroup(property))).ToArray();
+        if (changes.Length == 0)
+            return string.Join(" · ", errors);
+        var committed = new HashSet<string>(changes);
         try
         {
-            // Merge into the latest on-disk settings instead of overwriting the whole
-            // document: runtime writers may have updated SaveDirectory or the
-            // click-through hint flag while the dialog was open.
-            var translation = _settings.Translation with
-            {
-                CredentialName = TranslationProfile.ApiKeyCredentialName,
-                RacingCredentialName = TranslationProfile.RacingApiKeyCredentialName
-            };
             _store.Update(latest =>
             {
-                if (latest.Translation.BaseAddress != translation.BaseAddress
-                    || latest.Translation.RacingBaseAddress != translation.RacingBaseAddress
-                    || latest.Translation.CredentialName != translation.CredentialName
-                    || latest.Translation.RacingCredentialName != translation.RacingCredentialName)
+                var endpointChanged = (committed.Contains(nameof(BaseAddress)) && latest.Translation.BaseAddress != _settings.Translation.BaseAddress)
+                    || (committed.Contains(nameof(RacingBaseAddress)) && latest.Translation.RacingBaseAddress != _settings.Translation.RacingBaseAddress);
+                if (endpointChanged)
                 {
-                    TranslationCredentialStore.BindLegacyKeys(_credentials, latest.Translation);
+                    try
+                    {
+                        TranslationCredentialStore.BindLegacyKeys(_credentials, latest.Translation);
+                    }
+                    catch (Exception exception)
+                    {
+                        errors.Add($"翻译地址未保存：无法确认旧密钥归属（{exception.Message}）。其他有效设置已保存。");
+                        committed.RemoveWhere(property => SettingGroup(property) == "translation");
+                    }
                 }
-                latest.StartWithWindows = _settings.StartWithWindows;
-                latest.HotKey = _settings.HotKey;
-                latest.PreferScreenHotKeys = _settings.PreferScreenHotKeys;
-                latest.ClickThroughRecoveryHotKey = _settings.ClickThroughRecoveryHotKey;
-                latest.RecordHotKey = _settings.RecordHotKey;
-                latest.Ocr = _settings.Ocr;
-                latest.Translation = translation;
-                latest.TranslationDisplayMode = _settings.TranslationDisplayMode;
-                latest.Recording = _settings.Recording;
+                foreach (var property in committed)
+                    ApplyChangedProperty(latest, property);
             });
-            _setStartupEnabled(_settings.StartWithWindows);
-
-            _dirty = false;
-            return null;
+            foreach (var property in committed.Where(property => property != nameof(StartWithWindows)))
+                _changed.Remove(property);
+            if (committed.Contains(nameof(StartWithWindows)))
+            {
+                _setStartupEnabled(_settings.StartWithWindows);
+                _changed.Remove(nameof(StartWithWindows));
+            }
         }
         catch (Exception exception)
         {
-            return $"自动保存失败：{exception.Message}";
+            errors.Add($"自动保存失败：{exception.Message}");
+        }
+        return errors.Count == 0 ? null : string.Join(" · ", errors);
+    }
+
+    private static string SettingGroup(string property) => property switch
+    {
+        nameof(HotKey) or nameof(RecordHotKey) or nameof(ClickThroughRecoveryHotKey) => "hotkeys",
+        nameof(PreferScreenHotKeys) => "priority",
+        nameof(RecordingTempDirectory) => "storage",
+        nameof(StartWithWindows) => "general",
+        nameof(OcrModeIndex) or nameof(UseCloudForTranslation) => "ocr",
+        nameof(TranslationDisplayModeIndex) => "display",
+        _ when property.StartsWith("Recording", StringComparison.Ordinal) => "recording",
+        _ => "translation"
+    };
+
+    private void ApplyChangedProperty(AppSettings latest, string property)
+    {
+        var translation = _settings.Translation;
+        var recording = _settings.Recording;
+        switch (property)
+        {
+            case nameof(StartWithWindows):
+                latest.StartWithWindows = _settings.StartWithWindows;
+                break;
+            case nameof(HotKey):
+                latest.HotKey = _settings.HotKey;
+                break;
+            case nameof(RecordHotKey):
+                latest.RecordHotKey = _settings.RecordHotKey;
+                break;
+            case nameof(ClickThroughRecoveryHotKey):
+                latest.ClickThroughRecoveryHotKey = _settings.ClickThroughRecoveryHotKey;
+                break;
+            case nameof(PreferScreenHotKeys):
+                latest.PreferScreenHotKeys = _settings.PreferScreenHotKeys;
+                break;
+            case nameof(OcrModeIndex):
+                latest.Ocr = latest.Ocr with { Mode = _settings.Ocr.Mode };
+                break;
+            case nameof(UseCloudForTranslation):
+                latest.Ocr = latest.Ocr with { UseCloudForTranslation = _settings.Ocr.UseCloudForTranslation };
+                break;
+            case nameof(TranslationDisplayModeIndex):
+                latest.TranslationDisplayMode = _settings.TranslationDisplayMode;
+                break;
+            case nameof(RecordingTempDirectory):
+                latest.Recording = latest.Recording with { TempDirectory = recording.TempDirectory };
+                break;
+            case nameof(RecordingFrameRateIndex):
+                latest.Recording = latest.Recording with { FrameRate = recording.FrameRate };
+                break;
+            case nameof(RecordingQualityIndex):
+                latest.Recording = latest.Recording with { Quality = recording.Quality };
+                break;
+            case nameof(RecordingShowCursor):
+                latest.Recording = latest.Recording with { ShowCursor = recording.ShowCursor };
+                break;
+            case nameof(RecordingSystemAudio):
+                latest.Recording = latest.Recording with { RecordSystemAudio = recording.RecordSystemAudio };
+                break;
+            case nameof(RecordingMicrophone):
+                latest.Recording = latest.Recording with { RecordMicrophone = recording.RecordMicrophone };
+                break;
+            case nameof(RecordingClickEffects):
+                latest.Recording = latest.Recording with { ShowClickEffects = recording.ShowClickEffects };
+                break;
+            case nameof(TranslationProviderIndex):
+                latest.Translation = latest.Translation with { Provider = translation.Provider };
+                break;
+            case nameof(TencentRegionIndex):
+                latest.Translation = latest.Translation with { TencentRegion = translation.TencentRegion };
+                break;
+            case nameof(EnableMyMemoryFallback):
+                latest.Translation = latest.Translation with { EnableMyMemoryFallback = translation.EnableMyMemoryFallback };
+                break;
+            case nameof(MyMemoryContactEmail):
+                latest.Translation = latest.Translation with { MyMemoryContactEmail = translation.MyMemoryContactEmail };
+                break;
+            case nameof(BaseAddress):
+                latest.Translation = latest.Translation with { BaseAddress = translation.BaseAddress, CredentialName = TranslationProfile.ApiKeyCredentialName };
+                break;
+            case nameof(Model):
+                latest.Translation = latest.Translation with { Model = translation.Model };
+                break;
+            case nameof(EnableRacing):
+                latest.Translation = latest.Translation with { EnableRacing = translation.EnableRacing };
+                break;
+            case nameof(RacingBaseAddress):
+                latest.Translation = latest.Translation with { RacingBaseAddress = translation.RacingBaseAddress, RacingCredentialName = TranslationProfile.RacingApiKeyCredentialName };
+                break;
+            case nameof(RacingModel):
+                latest.Translation = latest.Translation with { RacingModel = translation.RacingModel };
+                break;
+            case nameof(EnableFastFallbackRace):
+                latest.Translation = latest.Translation with { EnableFastFallbackRace = translation.EnableFastFallbackRace };
+                break;
+            case nameof(FastFallbackDelayText):
+                latest.Translation = latest.Translation with { FastFallbackDelaySeconds = translation.FastFallbackDelaySeconds };
+                break;
+            case nameof(TargetLanguageIndex):
+                latest.Translation = latest.Translation with { TargetLanguage = translation.TargetLanguage };
+                break;
+            case nameof(SourceLanguageIndex):
+                latest.Translation = latest.Translation with { SourceLanguage = translation.SourceLanguage };
+                break;
+            default:
+                throw new InvalidOperationException($"无法保存设置项：{property}");
         }
     }
 
@@ -664,6 +816,22 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     {
         _disposed = true;
         SaveNow();
+    }
+
+    public void PauseAutoSave() => _saveTimer.Stop();
+
+    public void ResumeAutoSave()
+    {
+        if (!_disposed && HasUnsavedChanges)
+            ScheduleSave();
+    }
+
+    public void DiscardPendingChanges()
+    {
+        _saveTimer.Stop();
+        _changed.Clear();
+        _pendingCredentials.Clear();
+        _editedApiKeys.Clear();
     }
 
     public static string[] TranslationRegions() =>
@@ -847,7 +1015,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         };
     }
 
-    private string? Validate()
+    private string? ValidateHotKeys()
     {
         if (!HotKeyWindow.TryParseHotKey(_settings.HotKey, out _, out _))
         {
@@ -870,6 +1038,11 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         {
             return "录屏快捷键不能与其他快捷键相同。";
         }
+        return null;
+    }
+
+    private string? ValidateTranslation()
+    {
         if (_settings.Translation.Provider == TranslationProviderKind.OpenAiCompatible
             && TranslationEndpointRules.ValidateBaseAddress(_settings.Translation.BaseAddress) is { } baseAddressError)
         {
@@ -898,9 +1071,9 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         return null;
     }
 
-    private void QueueSave()
+    private void QueueSave([CallerMemberName] string property = "")
     {
-        _dirty = true;
+        _changed.Add(property);
         ScheduleSave();
     }
 

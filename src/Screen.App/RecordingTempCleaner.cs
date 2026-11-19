@@ -1,17 +1,29 @@
 namespace Screen.App;
 
 /// <summary>
-/// Housekeeping for %TEMP%\Screen.Recording. Recovery folders are kept for
-/// <see cref="RecoveryRetention"/> so a failed save can still be rescued from
-/// the path shown to the user; export scratch files and the retired preview
-/// log are always orphans at startup (single instance, nothing open yet).
+/// Cleans abandoned export scratch files. Nonempty recording sessions may be
+/// the only surviving copy of a failed recording and are never aged out.
 /// </summary>
 internal static class RecordingTempCleaner
 {
-    public static readonly TimeSpan RecoveryRetention = TimeSpan.FromDays(14);
+    private static readonly TimeSpan EmptyDirectoryRetention = TimeSpan.FromDays(14);
     private static readonly TimeSpan ScratchRetention = TimeSpan.FromHours(1);
 
     public static string DefaultRoot => Path.Combine(Path.GetTempPath(), "Screen.Recording");
+
+    public static void PreserveRecovery(string directory)
+    {
+        try
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "RECOVERY.txt"),
+                "Screen 录屏恢复素材。Screen 不会自动删除此目录。请恢复视频和音频后自行清理。\n" + DateTimeOffset.Now.ToString("O"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            SimpleLogger.LogWarning($"无法写入恢复说明：{exception.Message}");
+        }
+    }
 
     /// <returns>The number of files and folders removed.</returns>
     public static int Clean(string root, DateTime utcNow)
@@ -45,11 +57,10 @@ internal static class RecordingTempCleaner
             {
                 continue;
             }
-            var lastWrite = SafeEnumerate(() => info.EnumerateFiles("*", SearchOption.AllDirectories))
-                .Select(file => file.LastWriteTimeUtc)
-                .DefaultIfEmpty(info.LastWriteTimeUtc)
-                .Max();
-            if (utcNow - lastWrite > RecoveryRetention && TryDelete(() => Directory.Delete(directory, recursive: true)))
+            // Do not interpret an inaccessible or partially enumerated directory
+            // as empty, and never traverse/delete nested links or media folders.
+            if (utcNow - info.LastWriteTimeUtc > EmptyDirectoryRetention
+                && TryDelete(() => Directory.Delete(directory, recursive: false)))
             {
                 removed++;
             }

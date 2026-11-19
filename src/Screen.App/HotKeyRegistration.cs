@@ -15,6 +15,7 @@ internal sealed class HotKeyRegistration(
     private uint _virtualKey;
 
     public bool IsActiveId(int id) => _activeId == id;
+    public bool IsRegistered => _activeId is not null;
 
     public bool TryRegister(uint modifiers, uint virtualKey)
     {

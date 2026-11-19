@@ -46,7 +46,8 @@ public partial class SettingsWindow : Window
         Func<string, bool>? registerCaptureHotKey = null,
         Func<string, bool>? registerRecoveryHotKey = null,
         Func<string, bool>? registerRecordHotKey = null,
-        Func<bool, bool>? setHotKeyPriority = null)
+        Func<bool, bool>? setHotKeyPriority = null,
+        Func<string?>? hotKeyPriorityError = null)
     {
         InitializeComponent();
         Background = (Brush)FindResource("Brush.WindowBackdrop");
@@ -74,9 +75,24 @@ public partial class SettingsWindow : Window
             }
         };
 
-        _viewModel = new SettingsViewModel(store, credentials, setStartupEnabled, setHotKeyPriority);
+        _viewModel = new SettingsViewModel(store, credentials, setStartupEnabled, setHotKeyPriority, hotKeyPriorityError);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        Closing += (_, e) =>
+        {
+            _viewModel.SaveNow();
+            _viewModel.PauseAutoSave();
+            if (_viewModel.HasUnsavedChanges && !Dispatcher.HasShutdownStarted)
+            {
+                e.Cancel = MessageBox.Show(this,
+                    $"有效的设置项已保存，仍有未保存内容：\n{_viewModel.StatusText}\n\n关闭将放弃未保存的内容。是否继续关闭？",
+                    "Screen 设置", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes;
+                if (e.Cancel)
+                    _viewModel.ResumeAutoSave();
+                else
+                    _viewModel.DiscardPendingChanges();
+            }
+        };
 
         BuildNavigation();
         ShowPage("general");

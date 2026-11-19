@@ -76,8 +76,8 @@ internal static class DirectTextExtractor
             return null;
         }
 
-        var textPatternResult = TryReadDocumentText(root, screenSelection, cancellationToken);
-        if (textPatternResult is not null)
+        var textPatternResult = TryReadDocumentText(root, screenSelection, cancellationToken, out var needsImageOcr);
+        if (textPatternResult is not null || needsImageOcr)
         {
             return textPatternResult;
         }
@@ -110,9 +110,15 @@ internal static class DirectTextExtractor
 
             var bounds = ToPixelRect(rectangle);
             var intersection = bounds.Intersect(screenSelection);
-            if (intersection.IsEmpty || IntersectionRatio(bounds, intersection) < 0.45)
+            if (intersection.IsEmpty)
             {
                 continue;
+            }
+            // Name is indivisible: clipping its bounding box does not clip
+            // the string. Let image OCR handle a partially selected control.
+            if (!IsTextFullySelected(bounds, screenSelection))
+            {
+                return null;
             }
             var localBounds = new PixelRect(
                 bounds.X - screenSelection.X,
@@ -147,8 +153,10 @@ internal static class DirectTextExtractor
     private static OcrDocument? TryReadDocumentText(
         AutomationElement root,
         PixelRect selection,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        out bool needsImageOcr)
     {
+        needsImageOcr = false;
         if (!root.TryGetCurrentPattern(TextPattern.Pattern, out var patternObject)
             || patternObject is not TextPattern pattern)
         {
@@ -198,34 +206,28 @@ internal static class DirectTextExtractor
 
                     var lineRange = cursor.Clone();
                     lineRange.ExpandToEnclosingUnit(TextUnit.Line);
-                    if (lineRange.CompareEndpoints(
-                            TextPatternRangeEndpoint.End,
-                            visibleRange,
-                            TextPatternRangeEndpoint.End) > 0)
-                    {
-                        lineRange.MoveEndpointByRange(
-                            TextPatternRangeEndpoint.End,
-                            visibleRange,
-                            TextPatternRangeEndpoint.End);
-                    }
+                    var wholeLineVisible = lineRange.CompareEndpoints(
+                            TextPatternRangeEndpoint.Start, visibleRange, TextPatternRangeEndpoint.Start) >= 0
+                        && lineRange.CompareEndpoints(
+                            TextPatternRangeEndpoint.End, visibleRange, TextPatternRangeEndpoint.End) <= 0;
 
                     if (TryUnionBounds(lineRange.GetBoundingRectangles()) is { } lineBounds)
                     {
                         var intersection = lineBounds.Intersect(selection);
                         if (!intersection.IsEmpty)
                         {
-                            var ratio = IntersectionRatio(lineBounds, intersection);
-                            if (ratio >= 0.80)
+                            // UIA rectangles describe visible portions, whereas
+                            // GetText can return the entire expanded line. Do
+                            // not send partially visible/selected line strings.
+                            if (!wholeLineVisible || !IsTextFullySelected(lineBounds, selection))
                             {
-                                var lineText = lineRange.GetText(1200)?.Trim() ?? string.Empty;
-                                if (lineText.Length > 0)
-                                {
-                                    candidates.Add((lineText, lineBounds));
-                                }
+                                needsImageOcr = true;
+                                return null;
                             }
-                            else if (TryReadSelectedWordsInLine(lineRange, selection, cancellationToken) is { } partial)
+                            var lineText = lineRange.GetText(1200)?.Trim() ?? string.Empty;
+                            if (lineText.Length > 0)
                             {
-                                candidates.Add(partial);
+                                candidates.Add((lineText, lineBounds));
                             }
                         }
                     }
@@ -242,7 +244,7 @@ internal static class DirectTextExtractor
                 }
             }
 
-            return BuildDocumentFromBoundedLines(candidates, selection, minimumContainment: 0.5);
+            return BuildDocumentFromBoundedLines(candidates, selection);
         }
         catch (OperationCanceledException)
         {
@@ -257,80 +259,9 @@ internal static class DirectTextExtractor
         }
     }
 
-    private static (string Text, PixelRect ScreenBounds)? TryReadSelectedWordsInLine(
-        TextPatternRange lineRange,
-        PixelRect selection,
-        CancellationToken cancellationToken)
-    {
-        var cursor = lineRange.Clone();
-        cursor.MoveEndpointByRange(
-            TextPatternRangeEndpoint.End,
-            cursor,
-            TextPatternRangeEndpoint.Start);
-
-        var selectedText = new System.Text.StringBuilder();
-        var unionBounds = new PixelRect(0, 0, 0, 0);
-        for (var step = 0; step < 80; step++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (cursor.CompareEndpoints(
-                    TextPatternRangeEndpoint.Start,
-                    lineRange,
-                    TextPatternRangeEndpoint.End) >= 0)
-            {
-                break;
-            }
-
-            var wordRange = cursor.Clone();
-            wordRange.ExpandToEnclosingUnit(TextUnit.Word);
-            if (wordRange.CompareEndpoints(
-                    TextPatternRangeEndpoint.End,
-                    lineRange,
-                    TextPatternRangeEndpoint.End) > 0)
-            {
-                wordRange.MoveEndpointByRange(
-                    TextPatternRangeEndpoint.End,
-                    lineRange,
-                    TextPatternRangeEndpoint.End);
-            }
-
-            if (TryUnionBounds(wordRange.GetBoundingRectangles()) is { } wordBounds)
-            {
-                var intersection = wordBounds.Intersect(selection);
-                if (!intersection.IsEmpty && IntersectionRatio(wordBounds, intersection) >= 0.5)
-                {
-                    var wordText = wordRange.GetText(256);
-                    if (!string.IsNullOrEmpty(wordText))
-                    {
-                        selectedText.Append(wordText);
-                        unionBounds = unionBounds.IsEmpty
-                            ? intersection
-                            : Union(unionBounds, intersection);
-                    }
-                }
-            }
-
-            var previousStart = cursor.Clone();
-            if (cursor.Move(TextUnit.Word, 1) <= 0
-                || cursor.CompareEndpoints(
-                    TextPatternRangeEndpoint.Start,
-                    previousStart,
-                    TextPatternRangeEndpoint.Start) <= 0)
-            {
-                break;
-            }
-        }
-
-        var trimmed = selectedText.ToString().Trim();
-        return trimmed.Length > 0 && !unionBounds.IsEmpty
-            ? (trimmed, unionBounds)
-            : null;
-    }
-
     internal static OcrDocument? BuildDocumentFromBoundedLines(
         IEnumerable<(string Text, PixelRect ScreenBounds)> candidates,
-        PixelRect screenSelection,
-        double minimumContainment = 0.8)
+        PixelRect screenSelection)
     {
         var lines = new List<OcrLine>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -342,7 +273,7 @@ internal static class DirectTextExtractor
                 continue;
             }
             var intersection = bounds.Intersect(screenSelection);
-            if (intersection.IsEmpty || IntersectionRatio(bounds, intersection) < minimumContainment)
+            if (intersection.IsEmpty || !IsTextFullySelected(bounds, screenSelection))
             {
                 continue;
             }
@@ -376,6 +307,9 @@ internal static class DirectTextExtractor
             ProviderName = "直接读取界面文字"
         };
     }
+
+    internal static bool IsTextFullySelected(PixelRect bounds, PixelRect selection) =>
+        !bounds.IsEmpty && bounds.Intersect(selection) == bounds;
 
     private static PixelRect? TryUnionBounds(System.Windows.Rect[]? rectangles)
     {
@@ -414,9 +348,4 @@ internal static class DirectTextExtractor
         return new PixelRect(left, top, Math.Max(1, right - left), Math.Max(1, bottom - top));
     }
 
-    private static double IntersectionRatio(PixelRect bounds, PixelRect intersection)
-    {
-        var area = bounds.Width * (double)bounds.Height;
-        return area <= 0 ? 0 : intersection.Width * (double)intersection.Height / area;
-    }
 }

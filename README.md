@@ -8,13 +8,28 @@
 
 **[获取最新稳定版](https://github.com/Fahaxiki123/Screen/releases/latest)** · [全部版本](https://github.com/Fahaxiki123/Screen/releases)
 
-截至 **2026-11-18** 已核对发布版本：**1.0.15**。以下安装包、校验文件和源码均对应 `v1.0.15`；后续升级使用上方最新稳定版入口。
+本页安装包、校验文件和源码均对应 **v1.0.16**。后续版本可从上方最新稳定版入口获取。
 
-**[下载 1.0.15 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.15/Screen-1.0.15-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.15) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.15/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v1.0.15)
+**[下载 1.0.16 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.16/Screen-1.0.16-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.16) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.16/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v1.0.16)
 
 安装器允许在 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64 上安装，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。Windows 10 实机安装与运行待验收。更新前请完成截图或录屏并退出 Screen。
 
-1.0.15 修复贴图周围的粗边和截图带入系统光标的问题。贴图内容按原图尺寸铺到边缘，保留悬停时的细描边。DXGI 帧可能已经合成系统光标时，截图改用 GDI 取图。
+### 1.0.16 更新
+
+- 英文界面短句和长段落可以自动识别并交给 MyMemory 翻译。源语言不确定时仍可手选。
+- 录屏临时目录支持 UNC 共享路径，空间检查按当前用户在所选目录的可用容量计算。
+- 在支持 AVX2 的 CPU 上加速 GDI 回退画面的 NV12 颜色转换，适用于 4K 录屏。光标单独合成，支持显示或隐藏。
+
+- 录屏通过带逐帧采集时间戳的视频输入保留真实时长；编码变慢时降低实际采集频率，避免视频加速及音频尾部被截断。预览按独立固定帧率解码；裁切按本次录制目标帧率重编码并保持画面与声音的时间关系，端点精度为一个视频帧以内。
+- 音频设备无法启动、意外停止及写入失败都会提示。DXGI 访问丢失最多尝试恢复 10 秒，显示恢复状态；布局不兼容或恢复失败时保存已录片段。
+- 视频快启整理移到最终发布阶段；收尾支持取消，失败时保留可恢复素材。视频另存为与裁切复制在后台执行，显示进度并可取消；裁切从选定开始位置查找，保持精确重编码。
+- 截图在需要 GDI 回退时跳过无效的像素回读，旋转显示器使用回退路径。直接读取界面文字仅接受完整落在选区内的控件/文字范围，部分覆盖改用选区 OCR。
+- 普通画笔和马赛克调整粗细时更新边界；选择工具负责编辑，绘制工具优先新增，按 Ctrl 可临时选择标注。马赛克裁剪、重叠和长图原尺寸导出使用一致的网格、采样范围和标注顺序。
+- AI 竞速接受有效短译文；源语言可手选，MyMemory 不会将不确定语言直接当成英语请求。分块保留段落和合理的块间分隔。
+- 关闭快捷键优先模式时，所有系统快捷键注册成功后才切换；失败保留原模式并指出冲突。设置按实际修改字段保存，无效分组不影响其他有效设置；关闭时明确处理未保存内容。
+- 录屏页可选择临时目录，开录前检查写权限与空间，录制过程中检查剩余空间。Screen 不再按时间删除录屏恢复目录；用户恢复完成后自行清理。
+
+自动验证包含时间戳视频的真实 FFmpeg 编解码、离线 HTTP、模拟音频、离屏图像和保存失败/取消回归。实际显卡、旋转屏、UAC/锁屏、音频设备拔插及长时间录制仍需实机验收。
 
 ## 已实现的功能
 
@@ -40,11 +55,11 @@
 - Git 和 Git LFS，FFmpeg 二进制通过 Git LFS 保存。
 - 构建安装包时另需 PowerShell 7 和 NSIS 3.12。
 
-复现上方 1.0.15 安装包时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
+复现上方 1.0.16 安装包时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
 
 ```powershell
 git lfs install
-git clone --branch v1.0.15 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
+git clone --branch v1.0.16 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
 Set-Location 开发工程
 git lfs pull
 ```

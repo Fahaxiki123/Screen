@@ -15,6 +15,9 @@ internal interface IRecordingCapture : IDisposable
     Exception? Fault { get; }
     double ElapsedSeconds { get; }
     double EncodedDurationSeconds { get; }
+    string? Status => null;
+    bool NeedsFinalFastStart => false;
+    void CancelFinalization() { }
     void Pause();
     void Resume();
     void RequestStop();
@@ -24,8 +27,8 @@ internal interface IRecordingCapture : IDisposable
 /// <summary>
 /// Screen recording loop: DXGI Desktop Duplication capture on a dedicated
 /// thread, GPU crop + BGRA→NV12 conversion via the D3D11 video processor,
-/// cursor compositing into the NV12 buffer, and CFR delivery into the
-/// <see cref="RecordingPipeline"/>.  Paused ticks drop frames entirely so the
+/// cursor compositing into NV12/BGRA, and timestamped delivery into the
+/// <see cref="RecordingPipeline"/>. Paused ticks drop frames entirely so the
 /// output timeline has no frozen segments (see <see cref="PauseClock"/>).
 /// </summary>
 internal sealed class ScreenRecorder : IRecordingCapture
@@ -45,7 +48,14 @@ internal sealed class ScreenRecorder : IRecordingCapture
     private volatile RecordingPipeline? _pipeline;
     private bool _disposed;
     private long _framesWritten;
-    private bool _useNv12 = true;
+    private bool _useNv12;
+    private double _lastCaptureSeconds;
+    private double _encodedDuration;
+    private bool _reportsSeparateCursor;
+    private PixelRect[] _monitorLayout = [];
+    private volatile string? _status;
+    private long _recoveryStarted;
+    private volatile bool _finalizationCancelled;
 
     // GPU resources owned by the loop thread; created in Run, disposed there.
     private IDXGIAdapter1? _adapter;
@@ -66,6 +76,8 @@ internal sealed class ScreenRecorder : IRecordingCapture
     private ID3D11VideoContext? _videoContext;
 
     private FrameBuffer? _frames;
+    private byte[]? _gdiFallbackFrame;
+    private DesktopRegionCapture? _gdiCapture;
     private volatile bool _paused;
     private volatile bool _stopRequested;
     private volatile Exception? _fault;
@@ -97,7 +109,14 @@ internal sealed class ScreenRecorder : IRecordingCapture
 
     /// <summary>Recorded duration so far, excluding paused time.</summary>
     public double ElapsedSeconds => _timeline.ElapsedSeconds;
-    public double EncodedDurationSeconds => Interlocked.Read(ref _framesWritten) / (double)_frameRate;
+    public double EncodedDurationSeconds => Volatile.Read(ref _encodedDuration);
+    public string? Status => _status;
+    public bool NeedsFinalFastStart => true;
+    public void CancelFinalization()
+    {
+        _finalizationCancelled = true;
+        _pipeline?.Abort();
+    }
 
     public void Pause()
     {
@@ -146,7 +165,19 @@ internal sealed class ScreenRecorder : IRecordingCapture
             RecordingStopCoordinator.JoinAndFinalize(
                 _loop,
                 () => _pipeline?.Abort(),
-                () => _pipeline?.FinalizeFile(),
+                () =>
+                {
+                    if (_finalizationCancelled)
+                    {
+                        throw new OperationCanceledException("已取消保存，录制素材已保留。");
+                    }
+                    if (Interlocked.Read(ref _framesWritten) > 0)
+                    {
+                        Volatile.Write(ref _encodedDuration, Math.Max(_lastCaptureSeconds + 0.000001, _timeline.ElapsedSeconds));
+                    }
+                    _pipeline?.SetEndTimestamp(EncodedDurationSeconds);
+                    _pipeline?.FinalizeFile();
+                },
                 TimeSpan.FromSeconds(10),
                 TimeSpan.FromSeconds(5));
             if (_pipeline is null || EncodedDurationSeconds <= 0)
@@ -191,18 +222,19 @@ internal sealed class ScreenRecorder : IRecordingCapture
     {
         try
         {
-            var monitors = DesktopRegionCapture.GetMonitorBounds();
-            using var desktop = DesktopRegionCapture.FitsOnOneDisplay(_region, monitors)
-                ? null
-                : new DesktopRegionCapture(_region, monitors);
-            if (desktop is null)
+            _monitorLayout = DesktopRegionCapture.GetMonitorBounds();
+            var useDuplication = DesktopRegionCapture.FitsOnOneDisplay(_region, _monitorLayout);
+            if (useDuplication)
             {
-                CreateSession();
-                CreateProcessorChain();
-            }
-            else
-            {
-                _useNv12 = false;
+                try
+                {
+                    CreateSession();
+                    CreateProcessorChain();
+                }
+                catch (RotatedOutputException)
+                {
+                    useDuplication = false;
+                }
             }
             _cts.Token.ThrowIfCancellationRequested();
             _pipeline = new RecordingPipeline(
@@ -212,24 +244,24 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 _frameRate,
                 _profile.VideoBitrate,
                 _useNv12 ? "nv12" : "bgra");
-            RunLoop(desktop);
+            RunLoop(useDuplication);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            _timeline.Pause();
             _fault = exception;
         }
         finally
         {
+            _gdiCapture?.Dispose();
             DisposeGpu();
         }
     }
 
-    private void RunLoop(DesktopRegionCapture? desktop)
+    private void RunLoop(bool useDuplication)
     {
-        var frameIntervalTicks = Stopwatch.Frequency / (double)_frameRate;
-        var maxCatchUpDuplicates = Math.Max(1, _frameRate / 4);
-        long slotDebt = 0;
-        _timeline.Start();
+        var nextCaptureSeconds = 0.0;
+        var nextSpaceCheckSeconds = 0.0;
 
         while (!_cts.IsCancellationRequested && !_stopSignal.IsRequested)
         {
@@ -242,9 +274,7 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 continue;
             }
 
-            var nextSlotIndex = Interlocked.Read(ref _framesWritten) + slotDebt;
-            var targetSeconds = nextSlotIndex / (double)_frameRate;
-            var waitSeconds = targetSeconds - _timeline.ElapsedSeconds;
+            var waitSeconds = nextCaptureSeconds - _timeline.ElapsedSeconds;
             if (waitSeconds > 0)
             {
                 var waitMs = (int)(waitSeconds * 1000);
@@ -255,16 +285,30 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 continue;
             }
 
-            if (desktop is not null || TryAcquireDesktopFrame())
+            var acquired = !useDuplication || TryAcquireDesktopFrame();
+            if (acquired)
             {
                 _frames ??= new FrameBuffer(_region.Width, _region.Height, _useNv12);
-                if (desktop is null)
+                // Some drivers bake the pointer into duplication surfaces.
+                // GDI supplies a clean desktop in that case, and also handles
+                // rotated outputs. Compose the requested cursor exactly once.
+                if (useDuplication && _reportsSeparateCursor)
                 {
                     ConvertFrame(_frames.Desktop);
                 }
                 else
                 {
-                    desktop.ReadInto(_frames.Desktop);
+                    _gdiCapture ??= new DesktopRegionCapture(_region, _monitorLayout);
+                    if (_useNv12)
+                    {
+                        _gdiFallbackFrame ??= new byte[checked(_region.Width * _region.Height * 4)];
+                        _gdiCapture.ReadInto(_gdiFallbackFrame);
+                        RecordingColorConversion.CopyBgraToNv12(_gdiFallbackFrame, _frames.Desktop, _region.Width, _region.Height);
+                    }
+                    else
+                    {
+                        _gdiCapture.ReadInto(_frames.Desktop);
+                    }
                 }
             }
             if (_frames is null)
@@ -275,6 +319,14 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 }
                 continue;
             }
+            if (_paused || _cts.IsCancellationRequested || _stopSignal.IsRequested)
+            {
+                continue;
+            }
+            _timeline.Start();
+            var captureSeconds = Interlocked.Read(ref _framesWritten) == 0 ? 0 : _timeline.ElapsedSeconds;
+            captureSeconds = Interlocked.Read(ref _framesWritten) == 0
+                ? 0 : Math.Max(_lastCaptureSeconds + 0.000001, captureSeconds);
             var cursor = _showCursor ? CaptureCursorBitmap() : null;
             var frame = _frames.GetEncodingFrame(cursor);
             if (_stopSignal.IsRequested)
@@ -282,42 +334,37 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 break;
             }
 
-            var writeStart = Stopwatch.GetTimestamp();
-            _pipeline!.WriteVideoFrame(frame);
-            var writeTicks = Stopwatch.GetTimestamp() - writeStart;
-            var written = Interlocked.Increment(ref _framesWritten);
-
-            // Keep CFR frame count aligned with unpaused recording time across
-            // capture/scheduling jitter, while avoiding extra writes when the
-            // encoder pipe itself is already the bottleneck.
-            var targetFrames = (long)Math.Floor(_timeline.ElapsedSeconds * _frameRate) + 1 - slotDebt;
-            if (written < targetFrames)
+            if (captureSeconds >= nextSpaceCheckSeconds)
             {
-                if (writeTicks < frameIntervalTicks * 0.8)
+                if (!_monitorLayout.SequenceEqual(DesktopRegionCapture.GetMonitorBounds()))
                 {
-                    var duplicates = (int)Math.Min(targetFrames - written, maxCatchUpDuplicates);
-                    for (var i = 0; i < duplicates && !_stopSignal.IsRequested && !_cts.IsCancellationRequested && !_paused; i++)
-                    {
-                        var dupStart = Stopwatch.GetTimestamp();
-                        _pipeline.WriteVideoFrame(frame);
-                        written = Interlocked.Increment(ref _framesWritten);
-                        if (Stopwatch.GetTimestamp() - dupStart >= frameIntervalTicks * 0.8)
-                        {
-                            break;
-                        }
-                    }
+                    throw new NotSupportedException("显示器布局已改变，已停止并保留录制内容。");
                 }
-                if (written < targetFrames)
-                {
-                    slotDebt += targetFrames - written;
-                }
+                RecordingStorage.EnsureAvailableSpace(Path.GetDirectoryName(_filePath)!);
+                nextSpaceCheckSeconds = captureSeconds + 5;
             }
+            _pipeline!.WriteVideoFrame(frame, captureSeconds);
+            Interlocked.Increment(ref _framesWritten);
+            _lastCaptureSeconds = captureSeconds;
+            Volatile.Write(ref _encodedDuration, captureSeconds + 1.0 / _frameRate);
+            // Throttle capture, never delete elapsed time. A slow encoder makes
+            // frames less frequent while their MOV timestamps retain the gap.
+            nextCaptureSeconds = Math.Max(captureSeconds + 1.0 / _frameRate, _timeline.ElapsedSeconds);
         }
     }
 
     private bool TryAcquireDesktopFrame()
     {
-        var acquire = _duplication!.AcquireNextFrame(8, out _, out var desktopResource);
+        if (_recoveryStarted != 0 && Stopwatch.GetElapsedTime(_recoveryStarted) >= TimeSpan.FromSeconds(10))
+        {
+            throw new TimeoutException("画面采集 10 秒内未恢复，已停止并保留录制内容。");
+        }
+        var acquire = _duplication!.AcquireNextFrame(8, out var frameInfo, out var desktopResource);
+        if (acquire == Vortice.DXGI.ResultCode.AccessLost)
+        {
+            RecoverDuplication();
+            return false;
+        }
         if (acquire == Vortice.DXGI.ResultCode.WaitTimeout)
         {
             return false;
@@ -325,6 +372,10 @@ internal sealed class ScreenRecorder : IRecordingCapture
         acquire.CheckError();
         try
         {
+            if (frameInfo.LastMouseUpdateTime != 0)
+            {
+                _reportsSeparateCursor = frameInfo.PointerPosition.Visible;
+            }
             using (desktopResource)
             using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
             {
@@ -338,15 +389,61 @@ internal sealed class ScreenRecorder : IRecordingCapture
                 {
                     throw new NotSupportedException("当前显示输出分辨率或方向已变化，录屏已停止。");
                 }
-                _context!.CopyResource(_bgraTexture, desktopTexture);
+                if (_reportsSeparateCursor)
+                {
+                    _context!.CopyResource(_bgraTexture, desktopTexture);
+                }
             }
         }
         finally
         {
             _duplication.ReleaseFrame();
         }
+        _recoveryStarted = 0;
+        _status = null;
         return true;
     }
+
+    private void RecoverDuplication()
+    {
+        _status = "画面采集中断，正在恢复…";
+        _duplication?.Dispose();
+        _duplication = null;
+        if (_recoveryStarted == 0)
+        { _recoveryStarted = Stopwatch.GetTimestamp(); }
+        Exception? lastError = null;
+        while (Stopwatch.GetElapsedTime(_recoveryStarted) < TimeSpan.FromSeconds(10))
+        {
+            _cts.Token.ThrowIfCancellationRequested();
+            if (!_monitorLayout.SequenceEqual(DesktopRegionCapture.GetMonitorBounds()))
+            {
+                throw new NotSupportedException("显示器布局已改变，已停止并保留录制内容。");
+            }
+            if (_output is null || (int)_output.Description.Rotation > 1)
+            {
+                throw new NotSupportedException("显示器方向已改变，已停止并保留录制内容。");
+            }
+            RejectHighDynamicRange(_output);
+            try
+            {
+                using var output1 = _output.QueryInterface<IDXGIOutput1>();
+                _duplication = output1.DuplicateOutput(_device!);
+                _reportsSeparateCursor = false;
+                return;
+            }
+            catch (Exception exception)
+            {
+                lastError = exception;
+            }
+            if (_cts.Token.WaitHandle.WaitOne(200))
+            {
+                _cts.Token.ThrowIfCancellationRequested();
+            }
+        }
+        throw new TimeoutException("画面采集 10 秒内未恢复，已停止并保留录制内容。", lastError);
+    }
+
+    private sealed class RotatedOutputException : Exception { }
 
     /// <summary>GPU crop (source rect) + BGRA→NV12 in one video-processor pass, then read back.</summary>
     private void ConvertFrame(byte[] frame)
@@ -426,6 +523,10 @@ internal sealed class ScreenRecorder : IRecordingCapture
                                 throw new NotSupportedException("录制区域超出了单个显示器的范围。");
                             }
                             RejectHighDynamicRange(output);
+                            if ((int)output.Description.Rotation > 1)
+                            {
+                                throw new RotatedOutputException();
+                            }
                             CreateDeviceAndDuplication(adapter, output, bounds);
                             keepAdapter = true;
                             keepOutput = true;
@@ -662,12 +763,12 @@ internal sealed class ScreenRecorder : IRecordingCapture
         _videoContext.VideoProcessorSetStreamColorSpace(
             _processor,
             0,
-            new VideoProcessorColorSpace { Usage = 0, RGB_Range = 0, YCbCr_Matrix = 1, YCbCr_xvYCC = 0, Nominal_Range = 1 });
+            new VideoProcessorColorSpace { Usage = 0, RGB_Range = 0, YCbCr_Matrix = 0, YCbCr_xvYCC = 0, Nominal_Range = 2 });
         _videoContext.VideoProcessorSetOutputColorSpace(
             _processor,
             _useNv12
-                ? new VideoProcessorColorSpace { Usage = 0, RGB_Range = 0, YCbCr_Matrix = 1, YCbCr_xvYCC = 0, Nominal_Range = 0 }
-                : new VideoProcessorColorSpace { Usage = 0, RGB_Range = 0, YCbCr_Matrix = 0, YCbCr_xvYCC = 0, Nominal_Range = 0 });
+                ? new VideoProcessorColorSpace { Usage = 0, RGB_Range = 0, YCbCr_Matrix = 0, YCbCr_xvYCC = 0, Nominal_Range = 1 }
+                : new VideoProcessorColorSpace { Usage = 0, RGB_Range = 0, YCbCr_Matrix = 0, YCbCr_xvYCC = 0, Nominal_Range = 2 });
     }
 
     // ------------------------------------------------------------------
@@ -1027,13 +1128,13 @@ internal sealed class ScreenRecorder : IRecordingCapture
     }
 
     private static byte RgbToY(byte r, byte g, byte b) =>
-        (byte)Math.Clamp(((66 * r + 129 * g + 25 * b + 128) >> 8) + 16, 16, 235);
+        RecordingColorConversion.RgbToY(r, g, b);
 
     private static byte RgbToU(byte r, byte g, byte b) =>
-        (byte)Math.Clamp(((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128, 16, 240);
+        RecordingColorConversion.RgbToU(r, g, b);
 
     private static byte RgbToV(byte r, byte g, byte b) =>
-        (byte)Math.Clamp(((112 * r - 94 * g - 18 * b + 128) >> 8) + 128, 16, 240);
+        RecordingColorConversion.RgbToV(r, g, b);
 
     private static (byte R, byte G, byte B) YuvToRgb(byte y, byte u, byte v)
     {

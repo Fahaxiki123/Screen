@@ -149,6 +149,13 @@ internal static class FfmpegEncoderProbe
             return false;
         }
         _ = process.StandardError.ReadToEndAsync();
+        using var probeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var stopProbe = probeDeadline.Token.Register(() =>
+        {
+            try
+            { if (!process.HasExited) { process.Kill(entireProcessTree: true); } }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        });
         var frame = new byte[ProbeWidth * ProbeHeight * 3 / 2];
         frame.AsSpan(0, ProbeWidth * ProbeHeight).Fill(16);
         frame.AsSpan(ProbeWidth * ProbeHeight).Fill(128);
@@ -179,7 +186,7 @@ internal static class FfmpegEncoderProbe
 
 /// <summary>
 /// H.264 encoder backed by an ffmpeg child process: packed NV12 or BGRA frames
-/// are written to its stdin as rawvideo and ffmpeg emits a CFR .mp4.  Hardware
+/// carry capture timestamps through fragmented MOV input into a VFR .mp4. Hardware
 /// encoders (NVENC/QSV/AMF) are preferred when available, with automatic
 /// startup replay fallback to <c>libx264</c> if a hardware session fails to open.
 /// </summary>
@@ -199,7 +206,11 @@ internal sealed class RecordingPipeline : IDisposable
     private readonly StringBuilder _errorLog = new();
     private Process _process;
     private Stream _input;
-    private List<byte[]>? _startupFrames;
+    private RecordingTimestampStream _timestamps;
+    private List<(byte[] Frame, double Seconds)>? _startupFrames;
+    private long _submittedFrames;
+    private double _lastTimestamp;
+    private double? _endTimestamp;
     private bool _canFallbackToSoftware;
     private bool _aborted;
     private bool _finalized;
@@ -238,9 +249,10 @@ internal sealed class RecordingPipeline : IDisposable
         _canFallbackToSoftware = !string.Equals(encoder, FfmpegEncoderProbe.SoftwareEncoder, StringComparison.OrdinalIgnoreCase);
         if (_canFallbackToSoftware)
         {
-            _startupFrames = new List<byte[]>(MaxStartupReplayFrames);
+            _startupFrames = new List<(byte[], double)>(MaxStartupReplayFrames);
         }
         (_process, _input) = StartEncoderProcess(encoder);
+        _timestamps = new RecordingTimestampStream(_input, width, height, _pixelFormat);
     }
 
     public int Width => _width;
@@ -251,10 +263,12 @@ internal sealed class RecordingPipeline : IDisposable
     /// <summary>
     /// Writes one packed frame (NV12: Y plane followed by interleaved UV;
     /// BGRA: four bytes per pixel).
-    /// Blocks while the encoder pipe is full — that backpressure is the CFR
-    /// pacing signal for the capture loop.
+    /// Blocks while the encoder pipe is full; the capture loop may skip work
+    /// while each accepted frame retains its actual unpaused timestamp.
     /// </summary>
-    public void WriteVideoFrame(ReadOnlySpan<byte> frame)
+    public void WriteVideoFrame(ReadOnlySpan<byte> frame) => WriteVideoFrame(frame, _submittedFrames / (double)_frameRate);
+
+    public void WriteVideoFrame(ReadOnlySpan<byte> frame, double captureSeconds)
     {
         ObjectDisposedException.ThrowIf(_finalized, this);
         if (frame.Length != _frameByteSize)
@@ -262,32 +276,51 @@ internal sealed class RecordingPipeline : IDisposable
             throw new ArgumentException($"帧缓冲大小不匹配：期望 {_frameByteSize}，实际 {frame.Length}。");
         }
 
+        if (!double.IsFinite(captureSeconds) || captureSeconds < 0
+            || (_submittedFrames > 0 && captureSeconds <= _lastTimestamp))
+        {
+            throw new ArgumentException("采集时间必须严格递增。", nameof(captureSeconds));
+        }
+        var pixels = frame;
         if (_canFallbackToSoftware && !_aborted && HasProcessFaultedEarly())
         {
-            FallbackToSoftwareEncoder(frame);
+            FallbackToSoftwareEncoder(pixels, captureSeconds);
+            AcceptTimestamp(captureSeconds);
             return;
         }
 
         try
         {
-            _input.Write(frame);
+            _timestamps.WriteFrame(pixels, captureSeconds);
         }
         catch (IOException) when (_canFallbackToSoftware && !_aborted)
         {
-            FallbackToSoftwareEncoder(frame);
+            FallbackToSoftwareEncoder(pixels, captureSeconds);
+            AcceptTimestamp(captureSeconds);
             return;
         }
 
         if (_canFallbackToSoftware && _startupFrames is not null)
         {
-            _startupFrames.Add(frame.ToArray());
-            if (_startupFrames.Count >= MaxStartupReplayFrames && !HasProcessFaultedEarly())
+            _startupFrames.Add((pixels.ToArray(), captureSeconds));
+            if ((_startupFrames.Count >= MaxStartupReplayFrames
+                 || (long)_startupFrames.Count * pixels.Length >= 64 * 1024 * 1024)
+                && !HasProcessFaultedEarly())
             {
                 _canFallbackToSoftware = false;
                 _startupFrames = null;
             }
         }
+        AcceptTimestamp(captureSeconds);
     }
+
+    private void AcceptTimestamp(double seconds)
+    {
+        _lastTimestamp = seconds;
+        _submittedFrames++;
+    }
+
+    public void SetEndTimestamp(double seconds) => _endTimestamp = Math.Max(seconds, _lastTimestamp + 0.000001);
 
     /// <summary>Closes the pipe and waits for ffmpeg to finish the file. Idempotent.</summary>
     public void FinalizeFile()
@@ -297,6 +330,12 @@ internal sealed class RecordingPipeline : IDisposable
             return;
         }
         _finalized = true;
+        var timedOut = 0;
+        using var deadline = new Timer(_ =>
+        {
+            Interlocked.Exchange(ref timedOut, 1);
+            Abort();
+        }, null, TimeSpan.FromMinutes(2), Timeout.InfiniteTimeSpan);
         CloseInputAndWait();
 
         if (_process.ExitCode != 0 && _canFallbackToSoftware && !_aborted && _startupFrames is { Count: > 0 } buffered)
@@ -308,11 +347,19 @@ internal sealed class RecordingPipeline : IDisposable
             _startupFrames = null;
             foreach (var saved in buffered)
             {
-                _input.Write(saved);
+                _timestamps.WriteFrame(saved.Frame, saved.Seconds);
             }
             CloseInputAndWait();
         }
 
+        if (Volatile.Read(ref timedOut) != 0)
+        {
+            throw new TimeoutException("视频收尾超时（2 分钟），素材已保留。");
+        }
+        if (_aborted)
+        {
+            throw new OperationCanceledException("已取消视频收尾，素材已保留。");
+        }
         if (_process.ExitCode != 0)
         {
             string tail;
@@ -361,9 +408,8 @@ internal sealed class RecordingPipeline : IDisposable
         foreach (var argument in new[]
                  {
                      "-hide_banner", "-loglevel", "error", "-y",
-                     "-f", "rawvideo", "-pix_fmt", _pixelFormat,
-                     "-video_size", $"{_width}x{_height}",
-                     "-framerate", _frameRate.ToString(CultureInfo.InvariantCulture),
+                     "-probesize", "32", "-analyzeduration", "1", "-fpsprobesize", "0",
+                     "-f", "mov",
                      "-i", "pipe:0"
                  })
         {
@@ -373,8 +419,10 @@ internal sealed class RecordingPipeline : IDisposable
         {
             startInfo.ArgumentList.Add(argument);
         }
-        startInfo.ArgumentList.Add("-movflags");
-        startInfo.ArgumentList.Add("+faststart");
+        foreach (var argument in new[] { "-fps_mode", "vfr", "-enc_time_base", "1:1000000", "-bf", "0", "-video_track_timescale", "1000000", "-colorspace", "smpte170m", "-color_range", "tv" })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
         startInfo.ArgumentList.Add(_filePath);
 
         var process = Process.Start(startInfo)
@@ -405,7 +453,7 @@ internal sealed class RecordingPipeline : IDisposable
         }
     }
 
-    private void FallbackToSoftwareEncoder(ReadOnlySpan<byte> currentFrame)
+    private void FallbackToSoftwareEncoder(ReadOnlySpan<byte> currentFrame, double captureSeconds)
     {
         var previousEncoder = SelectedEncoder;
         var buffered = _startupFrames;
@@ -420,10 +468,10 @@ internal sealed class RecordingPipeline : IDisposable
         {
             foreach (var saved in buffered)
             {
-                _input.Write(saved);
+                _timestamps.WriteFrame(saved.Frame, saved.Seconds);
             }
         }
-        _input.Write(currentFrame);
+        _timestamps.WriteFrame(currentFrame, captureSeconds);
     }
 
     private void SwitchEncoderProcess(string encoderName)
@@ -449,6 +497,7 @@ internal sealed class RecordingPipeline : IDisposable
             }
             SelectedEncoder = encoderName;
             (_process, _input) = StartEncoderProcess(encoderName);
+            _timestamps = new RecordingTimestampStream(_input, _width, _height, _pixelFormat);
         }
     }
 
@@ -456,6 +505,7 @@ internal sealed class RecordingPipeline : IDisposable
     {
         try
         {
+            _timestamps.Finish(_endTimestamp ?? (_lastTimestamp + 1.0 / _frameRate));
             _input.Flush();
             _input.Close();
         }
@@ -463,7 +513,7 @@ internal sealed class RecordingPipeline : IDisposable
         {
             // ffmpeg may already be gone; WaitForExit/exit code tell the truth.
         }
-        if (!_process.WaitForExit(TimeSpan.FromSeconds(30)))
+        if (!_process.WaitForExit(TimeSpan.FromMinutes(2)))
         {
             KillQuietly();
             throw new TimeoutException("ffmpeg 收尾超时，录制文件可能不完整。");

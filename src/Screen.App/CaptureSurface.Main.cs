@@ -235,11 +235,29 @@ internal sealed partial class CaptureSurface : FrameworkElement
         rect.Width + amount * 2,
         rect.Height + amount * 2);
 
-    private static AnnotationItem OffsetItem(AnnotationItem item, int x, int y) => item with
+    internal static AnnotationItem OffsetItem(AnnotationItem item, double x, double y)
     {
-        Bounds = Offset(item.Bounds, x, y),
-        Points = item.Points.Select(point => new PixelPoint(point.X + x, point.Y + y)).ToArray()
-    };
+        var bounds = GetPreciseBounds(item);
+        var moved = bounds with { X = bounds.X + x, Y = bounds.Y + y };
+        return item with
+        {
+            Bounds = RoundBounds(moved),
+            PreciseBounds = moved,
+            Points = item.Points.Select(point => new PixelPoint(point.X + x, point.Y + y)).ToArray()
+        };
+    }
+
+    private static PreciseAnnotationBounds GetPreciseBounds(AnnotationItem item) => item.PreciseBounds
+        ?? new PreciseAnnotationBounds(item.Bounds.X, item.Bounds.Y, item.Bounds.Width, item.Bounds.Height);
+
+    private static PixelRect RoundBounds(PreciseAnnotationBounds bounds) => new(
+        (int)Math.Round(bounds.X), (int)Math.Round(bounds.Y),
+        Math.Max(1, (int)Math.Round(bounds.Width)), Math.Max(1, (int)Math.Round(bounds.Height)));
+
+    private static PixelRect CoverBounds(PreciseAnnotationBounds bounds) => new(
+        (int)Math.Floor(bounds.X), (int)Math.Floor(bounds.Y),
+        Math.Max(1, (int)Math.Ceiling(bounds.X + bounds.Width) - (int)Math.Floor(bounds.X)),
+        Math.Max(1, (int)Math.Ceiling(bounds.Y + bounds.Height) - (int)Math.Floor(bounds.Y)));
 
     private static PixelRect BoundsAroundPoints(IReadOnlyList<PixelPoint> points, double padding)
     {

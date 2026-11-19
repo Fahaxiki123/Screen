@@ -73,8 +73,12 @@ public sealed class InteractionRegressionTests
             Assert.IsTrue(hotKeys.TrySetPriority(true));
             Assert.IsTrue(hotKeys.RegisterRecordHotKey(conflict));
             Assert.IsFalse(hotKeys.RegisterCaptureHotKey(conflict));
+            Assert.IsFalse(hotKeys.TrySetPriority(false));
+            StringAssert.Contains(hotKeys.LastPriorityError!, conflict);
+            Assert.IsTrue(hotKeys.RegisterRecordHotKey(conflict), "The priority binding must remain usable after the failed transition.");
+            Assert.IsTrue(NativeMethods.UnregisterHotKey(0, reservedId));
             Assert.IsTrue(hotKeys.TrySetPriority(false));
-            Assert.IsFalse(hotKeys.RegisterRecordHotKey(conflict));
+            Assert.IsTrue(hotKeys.RegisterRecordHotKey(conflict));
             Assert.IsTrue(hotKeys.RegisterCaptureHotKey("F12"));
         }
         finally

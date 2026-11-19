@@ -127,7 +127,10 @@ public partial class SettingsWindow
 
         try
         {
-            var profile = _viewModel.BuildTranslationProfile();
+            // The smoke test is a fixed English -> Chinese request. A user's
+            // same-language preference must not bypass the network and claim
+            // a successful connection without contacting the service.
+            var profile = _viewModel.BuildTranslationProfile() with { SourceLanguage = "en", TargetLanguage = "简体中文" };
             if (profile.Provider == TranslationProviderKind.OpenAiCompatible)
             {
                 if (TranslationEndpointRules.ValidateBaseAddress(profile.BaseAddress) is { } baseAddressError)

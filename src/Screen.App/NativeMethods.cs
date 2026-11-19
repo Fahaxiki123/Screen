@@ -36,6 +36,11 @@ internal static partial class NativeMethods
     internal const uint WdaExcludeFromCapture = 0x00000011;
     internal const uint MonitorDefaultToNearest = 2;
 
+    [LibraryImport("kernel32.dll", EntryPoint = "GetDiskFreeSpaceExW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetDiskFreeSpaceEx(string directory, out ulong freeBytesAvailable,
+        nint totalNumberOfBytes, nint totalNumberOfFreeBytes);
+
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool RegisterHotKey(nint hWnd, int id, uint modifiers, uint virtualKey);
