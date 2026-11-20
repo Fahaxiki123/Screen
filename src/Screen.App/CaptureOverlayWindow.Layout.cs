@@ -143,8 +143,7 @@ internal sealed partial class CaptureOverlayWindow
 
     /// <summary>
     /// Recording mode replaces every annotation panel with the setup card:
-    /// centered inside the committed region, falling back below/above it when
-    /// the region is too small to host the card.
+    /// centered below the region, then above or inside when space is tight.
     /// </summary>
     private void PositionRecordingPanel()
     {
@@ -159,8 +158,12 @@ internal sealed partial class CaptureOverlayWindow
             _recordingPanel.Visibility = Visibility.Collapsed;
             return;
         }
+        var entering = _recordingPanel.Visibility != Visibility.Visible;
         _recordingPanel.Visibility = Visibility.Visible;
-        _recordingPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        _recordingPanel.MaxWidth = Math.Max(1, ActualWidth - 16);
+        _recordingPanel.Measure(new Size(_recordingPanel.MaxWidth, double.PositiveInfinity));
+        if (entering)
+            Motion.PopIn(_recordingPanel);
         var scaleX = ActualWidth / _frame.Width;
         var scaleY = ActualHeight / _frame.Height;
         var selection = _surface.Selection;
@@ -172,24 +175,11 @@ internal sealed partial class CaptureOverlayWindow
             selection.Width * scaleX,
             selection.Height * scaleY);
 
-        double left;
-        double top;
-        if (selectionDip.Width >= panelWidth + 24 && selectionDip.Height >= panelHeight + 24)
-        {
-            // Feishu placement: inside the region, dead center.
-            left = selectionDip.Left + (selectionDip.Width - panelWidth) / 2;
-            top = selectionDip.Top + (selectionDip.Height - panelHeight) / 2;
-        }
-        else if (selectionDip.Bottom + 12 + panelHeight <= ActualHeight - 8)
-        {
-            left = selectionDip.Left + (selectionDip.Width - panelWidth) / 2;
-            top = selectionDip.Bottom + 12;
-        }
-        else
-        {
-            left = selectionDip.Left + (selectionDip.Width - panelWidth) / 2;
-            top = Math.Max(8, selectionDip.Top - panelHeight - 12);
-        }
+        var left = selectionDip.Left + (selectionDip.Width - panelWidth) / 2;
+        var below = selectionDip.Bottom + 12;
+        var above = selectionDip.Top - panelHeight - 12;
+        var top = below + panelHeight <= ActualHeight - 8 ? below
+            : above >= 8 ? above : selectionDip.Bottom - panelHeight - 8;
         Canvas.SetLeft(_recordingPanel, Math.Clamp(left, 8, Math.Max(8, ActualWidth - panelWidth - 8)));
         Canvas.SetTop(_recordingPanel, Math.Clamp(top, 8, Math.Max(8, ActualHeight - panelHeight - 8)));
     }

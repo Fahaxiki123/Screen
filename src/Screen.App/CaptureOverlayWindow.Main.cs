@@ -14,7 +14,8 @@ internal sealed record RecordingSelection(
     bool ShowCursor,
     bool ShowClickEffects,
     bool RecordSystemAudio,
-    bool RecordMicrophone);
+    bool RecordMicrophone,
+    RecordingFormat Format = RecordingFormat.Mp4);
 
 /// <summary>
 /// Main structure for CaptureOverlayWindow (fields, constructor, initialization).
@@ -39,11 +40,8 @@ internal sealed partial class CaptureOverlayWindow : Window
     private readonly Button _translationButton;
     private readonly Button _translationDropDownButton;
     private readonly Dictionary<CaptureTool, RadioButton> _toolButtons = [];
-    private readonly bool _recordingMode;
-    private Border? _recordingPanel;
-    private LucideIconElement? _cursorToggleIcon;
-    private LucideIconElement? _speakerToggleIcon;
-    private LucideIconElement? _micToggleIcon;
+    private bool _recordingMode;
+    private WrapPanel? _recordingPanel;
     private bool _showCursorChoice = true;
     private bool _recordSystemAudioChoice;
     private bool _recordMicrophoneChoice;

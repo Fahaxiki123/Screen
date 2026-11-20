@@ -153,10 +153,10 @@ internal sealed class AppHost : IDisposable
 
     public Task StartRecordingSelectionAsync() => RunRecordingAsync(null);
 
-    public Task StartRecordingWithRegionAsync(PixelRect region, RecordingBorderWindow persistentBorder) =>
-        RunRecordingAsync(region, persistentBorder);
+    public Task StartRecordingWithRegionAsync(RecordingSelection selection, RecordingBorderWindow persistentBorder) =>
+        RunRecordingAsync(selection.Region, persistentBorder, selection);
 
-    private async Task RunRecordingAsync(PixelRect? region, RecordingBorderWindow? persistentBorder = null)
+    private async Task RunRecordingAsync(PixelRect? region, RecordingBorderWindow? persistentBorder = null, RecordingSelection? selection = null)
     {
         if (_exiting)
         {
@@ -183,7 +183,6 @@ internal sealed class AppHost : IDisposable
         RecordingProfile recordingProfile;
         try
         {
-            RecordingSelection? selection = null;
             if (region is null)
             {
                 NativeMethods.TryGetPhysicalCursorPosition(out var cursor);

@@ -1,225 +1,134 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using Lucide.NET;
 using Screen.Core;
 
 namespace Screen.App;
 
-/// <summary>
-/// UI building methods for CaptureOverlayWindow (toolbars, panels, buttons).
-/// </summary>
 internal sealed partial class CaptureOverlayWindow
 {
+    private RecordingFormat _formatChoice;
+    private bool _showClickEffectsChoice;
+
     private static Brush FindResourceBrush(string key) => (Brush)Application.Current.FindResource(key);
 
-    private static System.Windows.Media.Effects.DropShadowEffect FindResourceEffect(string key) =>
-        (System.Windows.Media.Effects.DropShadowEffect)Application.Current.FindResource(key);
-    /// <summary>
-    /// Recording setup card uses the shared navy and moon-blue palette,
-    /// with a light primary action and quiet format and audio options.
-    /// </summary>
-    private Border BuildRecordingPanel()
+    private WrapPanel BuildRecordingPanel()
     {
-        var recordingDefaults = _settingsStore.Load().Recording;
-        _showCursorChoice = recordingDefaults.ShowCursor;
-        _recordSystemAudioChoice = recordingDefaults.RecordSystemAudio;
-        _recordMicrophoneChoice = recordingDefaults.RecordMicrophone;
+        var defaults = _settingsStore.Load().Recording;
+        _formatChoice = defaults.Format;
+        _showCursorChoice = defaults.ShowCursor;
+        _showClickEffectsChoice = defaults.ShowClickEffects;
+        _recordSystemAudioChoice = defaults.RecordSystemAudio;
+        _recordMicrophoneChoice = defaults.RecordMicrophone;
 
-        var startButton = new Button
+        var format = new SegmentedControl
         {
-            Content = "开始录制",
-            Height = 42,
-            FontSize = 15,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = FindResourceBrush("Brush.OnAccent"),
-            Padding = new Thickness(0)
+            ItemsSource = new[] { FormatLabel(LucideIconKind.Video, "视频"), FormatLabel(LucideIconKind.Images, "GIF") },
+            SelectedIndex = _formatChoice == RecordingFormat.Gif ? 1 : 0,
+            Height = 34
         };
-        startButton.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
-        startButton.Click += (_, _) => BeginRecordingFromPanel();
+        AutomationProperties.SetName(format, "录制格式");
 
-        var formatRow = new StackPanel
+        var options = HorizontalRow();
+        var speaker = RecordingOption("系统声音", LucideIconKind.Volume2);
+        var mic = RecordingOption("麦克风", LucideIconKind.Mic);
+        var cursor = RecordingOption("鼠标", LucideIconKind.MousePointer2);
+        options.Children.Add(speaker);
+        options.Children.Add(mic);
+        options.Children.Add(cursor);
+
+        // The buttons display the effective state, while these delegates retain the
+        // user's video choices even when the GIF format temporarily disables sound.
+        var refreshSpeaker = BindAudio(speaker, "系统声音", LucideIconKind.Volume2, LucideIconKind.VolumeX,
+            () => _recordSystemAudioChoice, enabled => _recordSystemAudioChoice = enabled);
+        var refreshMic = BindAudio(mic, "麦克风", LucideIconKind.Mic, LucideIconKind.MicOff,
+            () => _recordMicrophoneChoice, enabled => _recordMicrophoneChoice = enabled);
+        format.SelectionChanged += (_, _) =>
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 16, 0, 0)
+            _formatChoice = format.SelectedIndex == 1 ? RecordingFormat.Gif : RecordingFormat.Mp4;
+            refreshSpeaker();
+            refreshMic();
         };
-        formatRow.Children.Add(RecordingFormatChip("MP4", isSelected: true, isEnabled: true, "录制为 MP4 视频"));
-        formatRow.Children.Add(RecordingFormatChip("GIF", isSelected: false, isEnabled: false, "录后可在编辑窗导出 GIF"));
-
-        var iconRow = new StackPanel
+        cursor.IsChecked = _showCursorChoice || _showClickEffectsChoice;
+        cursor.ToolTip = (_showCursorChoice, _showClickEffectsChoice) switch
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 8, 0, 0)
+            (true, false) => "仅录制鼠标光标",
+            (false, true) => "仅录制鼠标点击效果",
+            (true, true) => "录制鼠标光标与点击效果",
+            _ => "不录鼠标光标和点击效果"
         };
-        _speakerToggleIcon = RecordingToggleIcon(
-            _recordSystemAudioChoice ? LucideIconKind.Volume2 : LucideIconKind.VolumeX,
-            _recordSystemAudioChoice);
-        var speakerButton = RecordingOptionButton(
-            _speakerToggleIcon,
-            "扬声器",
-            _recordSystemAudioChoice ? "已开启：录制系统声音" : "已关闭：不录制系统声音",
-            enabled: true);
-        StyleRecordingToggle(_speakerToggleIcon, _recordSystemAudioChoice, speakerButton);
-        speakerButton.Click += (_, _) =>
+        void SetMouseChoice(bool enabled)
         {
-            _recordSystemAudioChoice = !_recordSystemAudioChoice;
-            speakerButton.ToolTip = _recordSystemAudioChoice ? "已开启：录制系统声音" : "已关闭：不录制系统声音";
-            _speakerToggleIcon.Kind = _recordSystemAudioChoice ? LucideIconKind.Volume2 : LucideIconKind.VolumeX;
-            StyleRecordingToggle(_speakerToggleIcon, _recordSystemAudioChoice, speakerButton);
-        };
-        iconRow.Children.Add(speakerButton);
+            _showCursorChoice = _showClickEffectsChoice = enabled;
+            cursor.ToolTip = enabled ? "录制鼠标光标与点击效果" : "不录鼠标光标和点击效果";
+        }
+        cursor.Checked += (_, _) => SetMouseChoice(true);
+        cursor.Unchecked += (_, _) => SetMouseChoice(false);
 
-        _micToggleIcon = RecordingToggleIcon(LucideIconKind.Mic, _recordMicrophoneChoice);
-        var micButton = RecordingOptionButton(
-            _micToggleIcon,
-            "麦克风",
-            _recordMicrophoneChoice ? "已开启：录制麦克风" : "已关闭：不录制麦克风",
-            enabled: true);
-        StyleRecordingToggle(_micToggleIcon, _recordMicrophoneChoice, micButton);
-        micButton.Click += (_, _) =>
-        {
-            _recordMicrophoneChoice = !_recordMicrophoneChoice;
-            micButton.ToolTip = _recordMicrophoneChoice ? "已开启：录制麦克风" : "已关闭：不录制麦克风";
-            StyleRecordingToggle(_micToggleIcon, _recordMicrophoneChoice, micButton);
-        };
-        iconRow.Children.Add(micButton);
+        var mark = new Ellipse { Width = 10, Height = 10, Margin = new Thickness(0, 0, 6, 0) };
+        mark.SetResourceReference(Shape.FillProperty, "Brush.White");
+        var caption = HorizontalRow();
+        caption.Children.Add(mark);
+        caption.Children.Add(new TextBlock { Text = "录制" });
+        var start = new Button { Content = caption, ToolTip = "开始录制　Enter" };
+        AutomationProperties.SetName(start, "开始录制");
+        start.SetResourceReference(StyleProperty, "RecordButtonStyle");
+        start.Click += (_, _) => BeginRecordingFromPanel();
 
-        iconRow.Children.Add(RecordingOptionButton(
-            RecordingToggleIcon(LucideIconKind.Video, enabled: false),
-            "摄像头",
-            "摄像头画中画即将推出",
-            enabled: false));
-
-        _cursorToggleIcon = RecordingToggleIcon(LucideIconKind.MousePointer2, _showCursorChoice);
-        var cursorButton = RecordingOptionButton(
-            _cursorToggleIcon,
-            "鼠标设置",
-            _showCursorChoice ? "已开启：录制鼠标光标与点击波纹" : "已关闭：不录制鼠标光标与点击波纹",
-            enabled: true);
-        StyleRecordingToggle(_cursorToggleIcon, _showCursorChoice, cursorButton);
-        cursorButton.Click += (_, _) =>
-        {
-            _showCursorChoice = !_showCursorChoice;
-            cursorButton.ToolTip = _showCursorChoice ? "已开启：录制鼠标光标与点击波纹" : "已关闭：不录制鼠标光标与点击波纹";
-            StyleRecordingToggle(_cursorToggleIcon, _showCursorChoice, cursorButton);
-        };
-        iconRow.Children.Add(cursorButton);
-
-        var content = new StackPanel { Width = 276, Margin = new Thickness(20, 18, 20, 14) };
-        content.Children.Add(startButton);
-        content.Children.Add(formatRow);
-        content.Children.Add(new Border
-        {
-            Height = 1,
-            Background = FindResourceBrush("Brush.Border"),
-            Margin = new Thickness(0, 14, 0, 2)
-        });
-        content.Children.Add(iconRow);
-
-        return new Border
-        {
-            Background = FindResourceBrush("Brush.AuroraCard"),
-            CornerRadius = new CornerRadius(14),
-            BorderBrush = FindResourceBrush("Brush.GlassRim"),
-            BorderThickness = new Thickness(1),
-            Effect = FindResourceEffect("Shadow.Floating"),
-            Child = content
-        };
+        return new WrapPanel { Children = { ToolbarGroup(format), ToolbarGroup(options), ToolbarGroup(start, last: true) } };
     }
 
-    private static void StyleRecordingToggle(LucideIconElement icon, bool enabled, Button button)
+    private static StackPanel FormatLabel(LucideIconKind kind, string text)
     {
-        icon.Stroke = enabled
-            ? FindResourceBrush("Brush.Accent")
-            : FindResourceBrush("Brush.TextTertiary");
-        icon.Opacity = 1;
-        button.Background = enabled ? FindResourceBrush("Brush.AccentSubtleDark") : Brushes.Transparent;
-        button.BorderBrush = enabled ? FindResourceBrush("Brush.Accent") : Brushes.Transparent;
-        button.BorderThickness = new Thickness(1);
+        var row = HorizontalRow();
+        var icon = HudIcon(kind);
+        icon.Width = icon.Height = 15;
+        icon.Margin = new Thickness(0, 0, 5, 0);
+        row.Children.Add(icon);
+        row.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center });
+        AutomationProperties.SetName(row, text);
+        return row;
     }
 
-    private static LucideIconElement RecordingToggleIcon(LucideIconKind kind, bool enabled) => new()
+    private static ToggleButton RecordingOption(string name, LucideIconKind icon)
     {
-        Kind = kind,
-        Width = 20,
-        Height = 20,
-        StrokeThickness = 1.7,
-        Stroke = enabled
-            ? FindResourceBrush("Brush.Accent")
-            : FindResourceBrush("Brush.TextTertiary"),
-        HorizontalAlignment = HorizontalAlignment.Center
-    };
-
-    private static Button RecordingOptionButton(LucideIconElement icon, string label, string toolTip, bool enabled)
-    {
-        var text = new TextBlock
-        {
-            Text = label,
-            FontSize = 11,
-            Foreground = FindResourceBrush("Brush.TextSecondary"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 3, 0, 0)
-        };
-        var button = new Button
-        {
-            Content = new StackPanel { Children = { icon, text } },
-            Width = 61,
-            Height = 54,
-            Padding = new Thickness(0),
-            Background = Brushes.Transparent,
-            ToolTip = toolTip,
-            IsEnabled = enabled,
-            Opacity = enabled ? 1 : 0.55
-        };
-        button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
+        var button = new ToggleButton { Content = HudIcon(icon) };
+        button.SetResourceReference(StyleProperty, "RecordingOptionStyle");
+        ToolTipService.SetShowOnDisabled(button, true);
+        AutomationProperties.SetName(button, name);
         return button;
     }
 
-    private static Border RecordingFormatChip(string label, bool isSelected, bool isEnabled, string toolTip)
+    private Action BindAudio(ToggleButton button, string label, LucideIconKind on, LucideIconKind off,
+        Func<bool> choice, Action<bool> remember)
     {
-        var dot = new System.Windows.Shapes.Ellipse
+        void UpdateIcon()
         {
-            Width = 8,
-            Height = 8,
-            Fill = isSelected
-                ? FindResourceBrush("Brush.Accent")
-                : Brushes.Transparent,
-            Stroke = isSelected
-                ? null
-                : FindResourceBrush("Brush.TextTertiary"),
-            StrokeThickness = 1.5,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 7, 0)
-        };
-        var text = new TextBlock
-        {
-            Text = label,
-            FontSize = 13,
-            Foreground = isSelected
-                ? FindResourceBrush("Brush.AccentText")
-                : FindResourceBrush("Brush.TextTertiary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        return new Border
-        {
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(12, 6, 14, 6),
-            Margin = new Thickness(0, 0, 10, 0),
-            Background = isSelected
-                ? FindResourceBrush("Brush.AccentSubtleDark")
-                : FindResourceBrush("Brush.SurfaceRaised"),
-            BorderBrush = isSelected
-                ? FindResourceBrush("Brush.Accent")
-                : FindResourceBrush("Brush.Border"),
-            BorderThickness = new Thickness(1),
-            ToolTip = toolTip,
-            Opacity = isEnabled ? 1 : 0.6,
-            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, text } }
-        };
-    }
+            var active = button.IsChecked == true;
+            ((LucideIconElement)button.Content).Kind = active ? on : off;
+            button.ToolTip = !button.IsEnabled ? "GIF 不含声音" : active ? $"录制{label}" : $"不录{label}";
+        }
 
+        void Refresh()
+        {
+            button.IsEnabled = _formatChoice != RecordingFormat.Gif;
+            button.IsChecked = button.IsEnabled && choice();
+            UpdateIcon();
+        }
+
+        void Changed(object sender, RoutedEventArgs e)
+        {
+            if (button.IsEnabled)
+                remember(button.IsChecked == true);
+            UpdateIcon();
+        }
+        Refresh();
+        button.Checked += Changed;
+        button.Unchecked += Changed;
+        return Refresh;
+    }
 }

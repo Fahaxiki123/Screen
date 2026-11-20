@@ -17,50 +17,17 @@ internal sealed class TimelineBar : FrameworkElement
     private const double HandleHitPadding = 5;
     private const double PlayheadWidth = 2.4;
 
-    private static readonly Brush SurfaceBrush = CreateFrozenBrush(Color.FromRgb(0x07, 0x0E, 0x1B));
-    private static readonly Brush ExcludedDimBrush = CreateFrozenBrush(Color.FromArgb(0xA8, 0x03, 0x06, 0x0E));
-    private static readonly Brush ActiveZoneBrush = CreateFrozenGradient(
-        Color.FromArgb(0x2E, 0x38, 0xBD, 0xF8),
-        Color.FromArgb(0x16, 0x0E, 0xA5, 0xE9),
-        horizontal: true);
-    private static readonly Pen TickPen = CreateFrozenPen(Color.FromArgb(0x16, 0x94, 0xC5, 0xFF), 1);
-    private static readonly Pen ActiveEdgePen = CreateFrozenPen(Color.FromRgb(0x38, 0xBD, 0xF8), 1.6);
-    private static readonly Brush AccentBrush = CreateFrozenGradient(
-        Color.FromRgb(0x7D, 0xD3, 0xFC),
-        Color.FromRgb(0x0E, 0xA5, 0xE9),
-        horizontal: false);
-    private static readonly Brush AccentHoverBrush = CreateFrozenGradient(
-        Color.FromRgb(0xBA, 0xE6, 0xFD),
-        Color.FromRgb(0x38, 0xBD, 0xF8),
-        horizontal: false);
-    private static readonly Brush GripBrush = CreateFrozenBrush(Color.FromRgb(0x06, 0x13, 0x26));
-    private static readonly Brush PlayheadBrush = Brushes.White;
-
-    private static SolidColorBrush CreateFrozenBrush(Color color)
-    {
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        return brush;
-    }
-
-    private static LinearGradientBrush CreateFrozenGradient(Color start, Color end, bool horizontal)
-    {
-        var brush = new LinearGradientBrush(
-            start,
-            end,
-            new Point(0, 0),
-            horizontal ? new Point(1, 0) : new Point(0, 1));
-        brush.Freeze();
-        return brush;
-    }
-
-    private static Pen CreateFrozenPen(Color color, double thickness)
-    {
-        var pen = new Pen(CreateFrozenBrush(color), thickness);
-        pen.Freeze();
-        return pen;
-    }
-
+    // Detached timeline tests use the same compiled tokens as an application window.
+    private readonly Brush _surfaceBrush = GlassTheme.Brush("Brush.Neutral100");
+    private readonly Brush _excludedDim = GlassTheme.Brush("Brush.Dim");
+    private readonly Brush _activeZone = GlassTheme.Brush("Brush.AccentSubtle");
+    private readonly Pen _tick = new(GlassTheme.Brush("Brush.Separator"), 1);
+    private readonly Pen _edge = new(GlassTheme.Brush("Brush.Accent"), 1.6);
+    private readonly Brush _handle = GlassTheme.Brush("Brush.PrimaryAction");
+    private readonly Brush _hoverHandle = GlassTheme.Brush("Brush.AccentHover");
+    private readonly Brush _grip = GlassTheme.Brush("Brush.Black");
+    private readonly Brush _playhead = GlassTheme.Brush("Brush.White");
+    private readonly double _handleRadius = GlassTheme.Radius("Radius.Key").TopLeft;
     private enum DragMode { None, Thumb, TrimStart, TrimEnd }
 
     private double _value;
@@ -172,10 +139,10 @@ internal sealed class TimelineBar : FrameworkElement
         var xe = XFor(_trimEnd, width);
 
         // Cinema filmstrip track + subtle vertical tick marks
-        dc.DrawRectangle(SurfaceBrush, null, new Rect(0, 0, width, height));
+        dc.DrawRectangle(_surfaceBrush, null, new Rect(0, 0, width, height));
         for (var tickX = 24.0; tickX < width - 8; tickX += 28.0)
         {
-            dc.DrawLine(TickPen, new Point(tickX, 4), new Point(tickX, Math.Max(4, height - 4)));
+            dc.DrawLine(_tick, new Point(tickX, 4), new Point(tickX, Math.Max(4, height - 4)));
         }
 
         var startHandle = HandleRect(xs, width, height, DragMode.TrimStart);
@@ -184,19 +151,19 @@ internal sealed class TimelineBar : FrameworkElement
         // Dim trimmed-out regions outside the handles
         if (startHandle.Left > 0.5)
         {
-            dc.DrawRectangle(ExcludedDimBrush, null, new Rect(0, 0, startHandle.Left, height));
+            dc.DrawRectangle(_excludedDim, null, new Rect(0, 0, startHandle.Left, height));
         }
         if (endHandle.Right < width - 0.5)
         {
-            dc.DrawRectangle(ExcludedDimBrush, null, new Rect(endHandle.Right, 0, width - endHandle.Right, height));
+            dc.DrawRectangle(_excludedDim, null, new Rect(endHandle.Right, 0, width - endHandle.Right, height));
         }
 
-        // Luminous ice-cyan active interval highlight & top/bottom rails
+        // Highlight the retained range; its handles sit outside the boundaries
         if (xe > xs)
         {
-            dc.DrawRectangle(ActiveZoneBrush, null, new Rect(xs, 1, xe - xs, Math.Max(0, height - 2)));
-            dc.DrawLine(ActiveEdgePen, new Point(xs, 0.8), new Point(xe, 0.8));
-            dc.DrawLine(ActiveEdgePen, new Point(xs, height - 0.8), new Point(xe, height - 0.8));
+            dc.DrawRectangle(_activeZone, null, new Rect(xs, 1, xe - xs, Math.Max(0, height - 2)));
+            dc.DrawLine(_edge, new Point(xs, 0.8), new Point(xe, 0.8));
+            dc.DrawLine(_edge, new Point(xs, height - 0.8), new Point(xe, height - 0.8));
         }
 
         var x = XFor(_value, width);
@@ -206,26 +173,23 @@ internal sealed class TimelineBar : FrameworkElement
         var playheadWidth = Math.Min(PlayheadWidth, Math.Max(0, xe - xs));
         var playheadX = Math.Clamp(x, xs, Math.Max(xs, xe - playheadWidth));
         var inset = Math.Min(1.5, height / 2);
-        dc.DrawRoundedRectangle(
-            PlayheadBrush, null,
-            new Rect(playheadX, inset, playheadWidth, Math.Max(0, height - 2 * inset)),
-            1.2, 1.2);
+        dc.DrawRectangle(_playhead, null, new Rect(playheadX, inset, playheadWidth, Math.Max(0, height - 2 * inset)));
     }
 
     private void DrawHandle(DrawingContext dc, Rect rect, DragMode mode)
     {
-        var brush = _dragMode == mode || _hoverMode == mode ? AccentHoverBrush : AccentBrush;
-        dc.DrawRoundedRectangle(brush, null, rect, 4, 4);
+        var brush = _dragMode == mode || _hoverMode == mode ? _hoverHandle : _handle;
+        dc.DrawRoundedRectangle(brush, null, rect, _handleRadius, _handleRadius);
         var squareHalf = mode == DragMode.TrimStart
             ? new Rect(rect.Left + rect.Width / 2, rect.Top, rect.Width / 2, rect.Height)
             : new Rect(rect.Left, rect.Top, rect.Width / 2, rect.Height);
         dc.DrawRectangle(brush, null, squareHalf);
 
-        // Clean single slot pill inside the ice-cyan grip
+        // A short inset mark makes each handle legible on bright footage
         var center = rect.Left + rect.Width / 2;
         var slotHeight = Math.Clamp(rect.Height * 0.42, 4, 12);
         var slotTop = rect.Top + (rect.Height - slotHeight) / 2;
-        dc.DrawRoundedRectangle(GripBrush, null, new Rect(center - 1, slotTop, 2, slotHeight), 1, 1);
+        dc.DrawRectangle(_grip, null, new Rect(center - 1, slotTop, 2, slotHeight));
     }
 
     private DragMode HitTest(Point point, double width)

@@ -205,6 +205,8 @@ public sealed record TranslationResult(
     bool UsedFallback = false,
     string? PrimaryFailure = null);
 
+public enum RecordingFormat { Mp4, Gif }
+
 public enum RecordingQuality
 {
     Smooth,
@@ -214,6 +216,7 @@ public enum RecordingQuality
 
 public sealed record RecordingProfile
 {
+    public RecordingFormat Format { get; init; } = RecordingFormat.Mp4;
     public string TempDirectory { get; init; } = string.Empty;
     public int FrameRate { get; init; } = 30;
     public RecordingQuality Quality { get; init; } = RecordingQuality.Standard;

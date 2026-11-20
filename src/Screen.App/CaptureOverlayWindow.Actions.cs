@@ -479,37 +479,43 @@ internal sealed partial class CaptureOverlayWindow
         RecordingRegionConfirmed?.Invoke(this, new RecordingSelection(
             region,
             _showCursorChoice,
-            // The panel's 鼠标设置 switch owns both the cursor and the click
-            // ripple effect — otherwise the effect stays bound to a hidden
-            // settings flag and looks broken.
-            _showCursorChoice,
-            _recordSystemAudioChoice,
-            _recordMicrophoneChoice));
+            _showClickEffectsChoice,
+            _formatChoice != RecordingFormat.Gif && _recordSystemAudioChoice,
+            _formatChoice != RecordingFormat.Gif && _recordMicrophoneChoice,
+            _formatChoice));
     }
 
-    private async void StartRegionRecording(object sender, RoutedEventArgs e)
+    private void StartRegionRecording(object sender, RoutedEventArgs e)
     {
-        if (!_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
-        {
+        if (_recordingMode || !_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
             return;
-        }
-        var selection = _surface.Selection;
-        var region = new PixelRect(
-            _frame.ScreenBounds.X + selection.X,
-            _frame.ScreenBounds.Y + selection.Y,
-            selection.Width,
-            selection.Height);
-        var host = ((App)Application.Current).Host;
-        if (host is null)
+        // The screenshot entry reuses its committed region. Opening a second
+        // selector here would lose the user's crop and flash the desktop.
+        CancelTextOperations();
+        _translationPopup.IsOpen = false;
+        _surface.ClearAnnotationSelection();
+        _surface.Tool = CaptureTool.Select;
+        _surface.AllowAnnotationEditing = false;
+        _recordingMode = true;
+        _recordingPanel = BuildRecordingPanel();
+        _root.Children.Add(_recordingPanel);
+        RecordingRegionConfirmed += StartConfirmedRegion;
+        PositionFloatingPanels();
+        Motion.PopIn(_recordingPanel);
+    }
+
+    private async void StartConfirmedRegion(object? sender, RecordingSelection selected)
+    {
+        RecordingRegionConfirmed -= StartConfirmedRegion;
+        if (Application.Current is not App { Host: { } host })
         {
             Close();
             return;
         }
-        // Persistent border first, then close — the outline must never blink.
-        var border = new RecordingBorderWindow(region);
+        var border = new RecordingBorderWindow(selected.Region);
         border.Show();
         Close();
-        await host.StartRecordingWithRegionAsync(region, border);
+        await host.StartRecordingWithRegionAsync(selected, border);
     }
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -527,7 +533,8 @@ internal sealed partial class CaptureOverlayWindow
             {
                 BeginRecordingFromPanel();
             }
-            e.Handled = true;
+            // Let the focused format selector and switches handle navigation and Space.
+            e.Handled = e.Key is not (Key.Tab or Key.Left or Key.Right or Key.Up or Key.Down or Key.Space);
             return;
         }
 

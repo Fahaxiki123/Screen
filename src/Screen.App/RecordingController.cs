@@ -42,7 +42,8 @@ internal sealed class RecordingController : IDisposable
         RecordingAudioService? audio,
         RecordingBorderWindow? border,
         RecordingStopSignal stopSignal,
-        bool showClickEffects = false)
+        bool showClickEffects = false,
+        RecordingFormat format = RecordingFormat.Mp4)
     {
         _recorder = recorder;
         _region = region;
@@ -56,7 +57,8 @@ internal sealed class RecordingController : IDisposable
 
         _control = new RecordingControlWindow(
             hasAudio: audio?.Tracks.Count > 0,
-            levelProvider: audio is null ? null : () => audio.CurrentPeakLevel);
+            levelProvider: audio is null ? null : () => audio.CurrentPeakLevel,
+            format: format);
         _control.PauseToggled += (_, _) => TogglePause();
         _control.StopRequested += (_, _) => StopFromInput();
 
@@ -85,6 +87,24 @@ internal sealed class RecordingController : IDisposable
     public RecordingProfile Profile { get; private set; } = new();
     public Task<RecordingSaveResult> Completion => _completion.Task;
 
+    internal static RecordingProfile ResolveSessionProfile(RecordingProfile profile, RecordingSelection? selection)
+    {
+        if (selection is not null)
+        {
+            profile = profile with
+            {
+                Format = selection.Format,
+                ShowCursor = selection.ShowCursor,
+                ShowClickEffects = selection.ShowClickEffects,
+                RecordSystemAudio = selection.RecordSystemAudio,
+                RecordMicrophone = selection.RecordMicrophone
+            };
+        }
+        if (profile.Format == RecordingFormat.Gif)
+            profile = profile with { RecordSystemAudio = false, RecordMicrophone = false };
+        return profile;
+    }
+
     public static RecordingController Create(
         JsonSettingsStore settings,
         PixelRect region,
@@ -92,17 +112,7 @@ internal sealed class RecordingController : IDisposable
         RecordingBorderWindow? persistentBorder)
     {
         var appSettings = settings.Load();
-        var profile = appSettings.Recording;
-        if (selection is not null)
-        {
-            profile = profile with
-            {
-                ShowCursor = selection.ShowCursor,
-                ShowClickEffects = selection.ShowClickEffects,
-                RecordSystemAudio = selection.RecordSystemAudio,
-                RecordMicrophone = selection.RecordMicrophone
-            };
-        }
+        var profile = ResolveSessionProfile(appSettings.Recording, selection);
         // Encoders need even dimensions; the crop keeps the top-left.
         var target = region with { Width = region.Width & ~1, Height = region.Height & ~1 };
         if (target.Width < 64 || target.Height < 64)
@@ -131,7 +141,7 @@ internal sealed class RecordingController : IDisposable
                     timeline);
             }
             return new RecordingController(recorder, target, filePath, tempDir, audio, persistentBorder, stopSignal,
-                profile.ShowClickEffects)
+                profile.ShowClickEffects, profile.Format)
             { Profile = profile };
         }
         catch

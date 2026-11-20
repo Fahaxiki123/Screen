@@ -1,169 +1,60 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
-using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using Screen.Core;
 
 namespace Screen.App;
 
-/// <summary>
-/// 3-2-1 Liquid Sapphire optical orb countdown over the recording region.
-/// Everything outside the region stays dimmed, while a luminous frosted-sapphire
-/// medallion pulses cleanly at the region center before capture begins.
-/// </summary>
 internal sealed class RecordingCountdownWindow : Window
 {
     private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TextBlock _number;
-    private readonly Grid _orb;
-    private readonly Ellipse _pulseRing;
-    private readonly ScaleTransform _numberScale = new(1, 1);
+    private readonly Ellipse _progressRing;
+    private readonly ScaleTransform _numberScale = new();
     private readonly DispatcherTimer _timer;
     private int _remaining = 3;
 
     public RecordingCountdownWindow(PixelRect region)
     {
         Title = "Screen 录屏倒计时";
-        WindowStyle = WindowStyle.None;
-        ResizeMode = ResizeMode.NoResize;
-        Topmost = true;
-        ShowInTaskbar = false;
-        AllowsTransparency = true;
-        Background = Brushes.Transparent;
-        IsHitTestVisible = false;
-        UseLayoutRounding = true;
-
-        var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
-        var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
-            region.X + region.Width / 2,
-            region.Y + region.Height / 2)) / 96.0;
-        Left = screen.Left / dpi;
-        Top = screen.Top / dpi;
-        Width = screen.Width / dpi;
-        Height = screen.Height / dpi;
-
-        // Region rect in this window's DIP space.
-        var rx = (region.X - screen.Left) / dpi;
-        var ry = (region.Y - screen.Top) / dpi;
-        var rw = region.Width / dpi;
-        var rh = region.Height / dpi;
-
-        var mask = RecordingTheme.Brush("Brush.WindowBackground", "#0A1222").Clone();
-        mask.Opacity = 0.56;
-        var canvas = new Canvas { ClipToBounds = true };
-        canvas.Children.Add(MaskRect(mask, 0, 0, Width, ry));
-        canvas.Children.Add(MaskRect(mask, 0, ry + rh, Width, Height - ry - rh));
-        canvas.Children.Add(MaskRect(mask, 0, ry, rx, rh));
-        canvas.Children.Add(MaskRect(mask, rx + rw, ry, Width - rx - rw, rh));
-
-        const double orbDiameter = 128;
-        _orb = new Grid
-        {
-            Width = orbDiameter + 32,
-            Height = orbDiameter + 32
-        };
-
-        _pulseRing = new Ellipse
-        {
-            Width = orbDiameter,
-            Height = orbDiameter,
-            Stroke = new SolidColorBrush(Color.FromArgb(0x90, 0x7D, 0xD3, 0xFC)),
-            StrokeThickness = 1.5,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            RenderTransformOrigin = new Point(0.5, 0.5),
-            RenderTransform = new ScaleTransform(1, 1)
-        };
-
-        var orbFill = new RadialGradientBrush
-        {
-            GradientOrigin = new Point(0.32, 0.24),
-            Center = new Point(0.5, 0.5),
-            RadiusX = 0.68,
-            RadiusY = 0.68,
-            GradientStops = new GradientStopCollection
-            {
-                new(Color.FromArgb(0xEB, 0x1A, 0x35, 0x5E), 0),
-                new(Color.FromArgb(0xF2, 0x0E, 0x1B, 0x33), 0.65),
-                new(Color.FromArgb(0xF8, 0x09, 0x12, 0x24), 1)
-            }
-        };
-        var orbRim = new LinearGradientBrush(
-            Color.FromArgb(0x90, 0xBA, 0xE6, 0xFD),
-            Color.FromArgb(0x30, 0x38, 0xBD, 0xF8),
-            new Point(0, 0),
-            new Point(1, 1));
-
-        var numberBrush = new LinearGradientBrush(
-            Colors.White,
-            Color.FromRgb(0x93, 0xC5, 0xFD),
-            new Point(0, 0),
-            new Point(0, 1));
-
+        var canvas = RecordingRegionWindow.CreateMask(this, region, "Recording.CountdownMask", out var cutout);
+        const double diameter = 128;
+        var face = new GlassPanel { Variant = GlassVariant.Solid, Width = diameter, Height = diameter, Padding = new Thickness(0) };
+        face.SetResourceReference(GlassPanel.CornerRadiusProperty, "Recording.CountdownRadius");
+        var content = new Grid();
+        var track = Ring("Recording.RingTrack");
+        _progressRing = Ring("Brush.White");
+        // Dash units are multiples of stroke thickness: one dash travels exactly one circumference.
+        var circumference = Math.PI * (_progressRing.Width - _progressRing.StrokeThickness) / _progressRing.StrokeThickness;
+        _progressRing.StrokeDashArray = new DoubleCollection { circumference, circumference };
+        _progressRing.RenderTransformOrigin = new Point(0.5, 0.5);
+        _progressRing.RenderTransform = new RotateTransform(-90);
+        content.Children.Add(track);
+        content.Children.Add(_progressRing);
         _number = new TextBlock
         {
             Text = "3",
-            FontSize = 52,
-            FontWeight = FontWeights.Bold,
-            Foreground = numberBrush,
+            FontSize = 56,
+            FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, -10, 0, 0),
             RenderTransformOrigin = new Point(0.5, 0.5),
             RenderTransform = _numberScale
         };
-
-        var readyLabel = new TextBlock
-        {
-            Text = "READY",
-            FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI Variable Text"),
-            FontSize = 10.5,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = RecordingTheme.Brush("Brush.AccentText", "#7DD3FC"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0, 0, 0, 20),
-            Opacity = 0.88
-        };
-
-        var coreCircle = new Border
-        {
-            Width = orbDiameter,
-            Height = orbDiameter,
-            CornerRadius = new CornerRadius(orbDiameter / 2),
-            Background = orbFill,
-            BorderBrush = orbRim,
-            BorderThickness = new Thickness(1.5),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Effect = new DropShadowEffect
-            {
-                Color = Color.FromRgb(0x0E, 0xA5, 0xE9),
-                BlurRadius = 32,
-                ShadowDepth = 0,
-                Opacity = 0.35
-            },
-            Child = new Grid
-            {
-                Children = { _number, readyLabel }
-            }
-        };
-
-        _orb.Children.Add(_pulseRing);
-        _orb.Children.Add(coreCircle);
-        Canvas.SetLeft(_orb, rx + (rw - _orb.Width) / 2);
-        Canvas.SetTop(_orb, ry + (rh - _orb.Height) / 2);
-        canvas.Children.Add(_orb);
-        RecordingRegionWindow.Attach(this, canvas, screen);
+        _number.SetResourceReference(TextBlock.FontFamilyProperty, "FontFamily.Display");
+        _number.SetResourceReference(TextBlock.ForegroundProperty, "Brush.White");
+        content.Children.Add(_number);
+        face.Content = content;
+        Canvas.SetLeft(face, cutout.Left + (cutout.Width - diameter) / 2);
+        Canvas.SetTop(face, cutout.Top + (cutout.Height - diameter) / 2);
+        canvas.Children.Add(face);
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) =>
         {
-            _remaining--;
-            if (_remaining <= 0)
+            if (--_remaining <= 0)
             {
                 Finish();
                 return;
@@ -171,7 +62,6 @@ internal sealed class RecordingCountdownWindow : Window
             _number.Text = _remaining.ToString();
             PlayBeatAnimation();
         };
-
         Loaded += (_, _) =>
         {
             PlayBeatAnimation();
@@ -184,48 +74,30 @@ internal sealed class RecordingCountdownWindow : Window
         };
     }
 
-    private void PlayBeatAnimation()
+    private static Ellipse Ring(string resource)
     {
-        var pop = new DoubleAnimation(1.18, 1.0, TimeSpan.FromMilliseconds(320))
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        _numberScale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
-        _numberScale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
-
-        if (_pulseRing.RenderTransform is ScaleTransform ringScale)
-        {
-            var expand = new DoubleAnimation(1.0, 1.22, TimeSpan.FromMilliseconds(720))
-            {
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-            };
-            var fade = new DoubleAnimation(0.75, 0.0, TimeSpan.FromMilliseconds(720));
-            ringScale.BeginAnimation(ScaleTransform.ScaleXProperty, expand);
-            ringScale.BeginAnimation(ScaleTransform.ScaleYProperty, expand);
-            _pulseRing.BeginAnimation(OpacityProperty, fade);
-        }
+        var ring = new Ellipse { Width = 112, Height = 112, StrokeThickness = 3 };
+        ring.SetResourceReference(Shape.StrokeProperty, resource);
+        return ring;
     }
 
-    private static Border MaskRect(Brush mask, double left, double top, double width, double height)
+    private void PlayBeatAnimation()
     {
-        var rect = new Border
-        {
-            Background = mask,
-            Width = Math.Max(0, width),
-            Height = Math.Max(0, height)
-        };
-        Canvas.SetLeft(rect, left);
-        Canvas.SetTop(rect, top);
-        return rect;
+        if (!SystemParameters.ClientAreaAnimation)
+            return;
+        var pop = Motion.Tween(1.5, 1, 700, Motion.Spring());
+        _numberScale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+        _numberScale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
+        _number.BeginAnimation(OpacityProperty, Motion.Tween(0, 1, 700));
+        _progressRing.BeginAnimation(Shape.StrokeDashOffsetProperty, Motion.Tween(_progressRing.StrokeDashArray[0], 0, 700));
     }
 
     public Task<bool> Completion => _completion.Task;
 
-    /// <summary>Stops the countdown and closes; idempotent and cancel-safe.</summary>
     public void Finish()
     {
         _timer.Stop();
-        _completion.TrySetResult(true);
-        Close();
+        if (_completion.TrySetResult(true))
+            Close();
     }
 }

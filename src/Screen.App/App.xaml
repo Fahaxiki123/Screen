@@ -11,6 +11,8 @@
         <ResourceDictionary Source="Themes/CaptureSurface.xaml" />
         <ResourceDictionary Source="Themes/CaptureToolbar.xaml" />
         <ResourceDictionary Source="Themes/TextCards.xaml" />
+        <ResourceDictionary Source="Themes/RecordingHud.xaml" />
+        <ResourceDictionary Source="Themes/RecordingOptions.xaml" />
       </ResourceDictionary.MergedDictionaries>
 
       <!-- Legacy aliases: existing code references these keys; they now
