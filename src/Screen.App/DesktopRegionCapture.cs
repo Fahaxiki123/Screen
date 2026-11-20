@@ -46,13 +46,25 @@ internal sealed class DesktopRegionCapture : IDisposable
     internal static PixelRect[] GetVisibleAreas(PixelRect region, IReadOnlyList<PixelRect> monitors) =>
         monitors.Select(monitor => monitor.Intersect(region)).Where(area => !area.IsEmpty).ToArray();
 
-    public void ReadInto(byte[] pixels)
+    public static Task<PixelBuffer> CaptureAsync(PixelRect region, IReadOnlyList<PixelRect> monitors, CancellationToken token) =>
+        Task.Run(() =>
+        {
+            using var desktop = new DesktopRegionCapture(region, monitors);
+            var stride = checked(region.Width * 4);
+            var pixels = GC.AllocateUninitializedArray<byte>(checked(stride * region.Height));
+            desktop.ReadInto(pixels, token);
+            return new PixelBuffer(pixels, region.Width, region.Height, stride);
+        }, token);
+
+    public void ReadInto(byte[] pixels, CancellationToken token = default)
     {
         foreach (var area in _areas)
         {
+            token.ThrowIfCancellationRequested();
             _graphics.CopyFromScreen(area.X, area.Y, area.X - _region.X, area.Y - _region.Y,
                 new System.Drawing.Size(area.Width, area.Height), CopyPixelOperation.SourceCopy);
         }
+        token.ThrowIfCancellationRequested();
         var data = _bitmap.LockBits(new Rectangle(0, 0, _bitmap.Width, _bitmap.Height),
             ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
         try

@@ -1,5 +1,6 @@
 FFmpeg build identity and source information
 Recorded for Screen 1.1.0 on 2026-11-20
+Screen 1.1.1 ships the same binary unchanged.
 
 Distributed file: ffmpeg/bin/ffmpeg.exe
 Size: 10629120 bytes (10.14 MiB)

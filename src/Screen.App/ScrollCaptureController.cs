@@ -43,16 +43,28 @@ internal sealed class ScrollCaptureController : IDisposable
         IScreenCaptureService capture,
         SelectionRegion selection,
         JsonSettingsStore settings)
-        : this(selection, settings, new ScrollCaptureSequence(async token =>
-        {
-            var center = new PixelPoint(
-                selection.Bounds.X + selection.Bounds.Width / 2.0,
-                selection.Bounds.Y + selection.Bounds.Height / 2.0);
-            // Crop on the capture continuation's pool thread, not the UI thread.
-            var frame = await capture.CaptureAtAsync(center, token).ConfigureAwait(false);
-            return frame.Crop(selection.Bounds);
-        }))
+        : this(selection, settings, new ScrollCaptureSequence(token => CaptureViewportAsync(
+            selection.Bounds, DesktopRegionCapture.GetMonitorBounds(), capture.CaptureAtAsync,
+            DesktopRegionCapture.CaptureAsync, token)))
     {
+    }
+
+    internal static async Task<PixelBuffer> CaptureViewportAsync(
+        PixelRect region, IReadOnlyList<PixelRect> monitors,
+        Func<PixelPoint, CancellationToken, Task<CaptureFrame>> captureDisplay,
+        Func<PixelRect, IReadOnlyList<PixelRect>, CancellationToken, Task<PixelBuffer>> captureRegion,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!DesktopRegionCapture.FitsOnOneDisplay(region, monitors))
+        {
+            // Cropping the centre display would silently discard the other side of the selection.
+            return await captureRegion(region, monitors, token).ConfigureAwait(false);
+        }
+        var center = new PixelPoint(region.X + region.Width / 2.0, region.Y + region.Height / 2.0);
+        var frame = await captureDisplay(center, token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        return frame.Crop(region);
     }
 
     internal ScrollCaptureController(

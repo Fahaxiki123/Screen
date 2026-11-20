@@ -139,7 +139,14 @@ internal sealed partial class CaptureSurface
         double Thickness,
         double Scale,
         PreciseAnnotationBounds? PreciseBounds,
-        IReadOnlyList<PixelPoint> Points);
+        IReadOnlyList<PixelPoint> Points,
+        IReadOnlySet<int> StrokeBreaks)
+    {
+        public MosaicSnapshot(AnnotationItem item) : this(
+            item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness,
+            item.Style.MosaicScale, item.PreciseBounds, item.Points, item.StrokeBreaks)
+        { }
+    }
 
     internal bool IsShowingTranslation => _translatedSelection is not null;
 
@@ -215,11 +222,7 @@ internal sealed partial class CaptureSurface
             .ToArray();
         var fullBounds = new PixelRect(0, 0, _mosaicComposite.Width, _mosaicComposite.Height);
         var region = ExpandDirtyMosaicRegion(DirtyMosaicRegion(mosaics, _appliedMosaicSnapshots), mosaics, fullBounds);
-        _appliedMosaicSnapshots = mosaics
-            .Select(item => new MosaicSnapshot(
-                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness, item.Style.MosaicScale,
-                item.PreciseBounds, item.Points))
-            .ToList();
+        _appliedMosaicSnapshots = mosaics.Select(item => new MosaicSnapshot(item)).ToList();
         _mosaicCompositeDirty = false;
         if (region.IsEmpty)
         {
@@ -254,9 +257,7 @@ internal sealed partial class CaptureSurface
         var previousById = previous.ToDictionary(snapshot => snapshot.Id);
         foreach (var item in mosaics)
         {
-            var current = new MosaicSnapshot(
-                item.Id, item.Bounds, item.Style.Variant, item.Style.Intensity, item.Style.Thickness, item.Style.MosaicScale,
-                item.PreciseBounds, item.Points);
+            var current = new MosaicSnapshot(item);
             if (previousById.Remove(item.Id, out var old))
             {
                 if (old == current)
@@ -305,10 +306,13 @@ internal sealed partial class CaptureSurface
         var freehand = tool == AnnotationKind.Pen || (tool == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush);
         var end = ClampAnnotationPoint(_cursor);
         IReadOnlyList<PixelPoint> points = freehand ? _workingPoints : new[] { _start, end };
-        var bounds = tool == AnnotationKind.Pen || (tool == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush)
+        var bounds = freehand
             ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2)
             : RectFromPoints(_start, end);
-        var item = new AnnotationItem(Guid.Empty, tool, points, bounds, CurrentStyle, null, null, int.MaxValue);
+        var item = new AnnotationItem(Guid.Empty, tool, points, bounds, CurrentStyle, null, null, int.MaxValue)
+        {
+            StrokeBreaks = _workingStrokeBreaks
+        };
         if (tool == AnnotationKind.Mosaic)
         {
             var clipped = item.Bounds.Intersect(new PixelRect(0, 0, _frame.Width, _frame.Height)).Intersect(Selection);
@@ -631,18 +635,11 @@ internal sealed partial class CaptureSurface
             return mask;
         }
         var radius = Math.Max(3, item.Style.Thickness / 2);
-        if (item.Points.Count == 1)
+        foreach (var (from, to) in StrokeSegments(item.Points, item.StrokeBreaks))
         {
-            MarkCircle(mask, bounds, item.Points[0].X, item.Points[0].Y, radius);
-            return mask;
-        }
-        for (var index = 1; index < item.Points.Count; index++)
-        {
-            var from = item.Points[index - 1];
-            var to = item.Points[index];
-            var distance = Math.Max(1, Distance(from, to));
-            var steps = Math.Max(1, (int)Math.Ceiling(distance / Math.Max(1, radius / 2)));
-            for (var step = 0; step <= steps; step++)
+            MarkCircle(mask, bounds, from.X, from.Y, radius);
+            var steps = (int)Math.Ceiling(Distance(from, to) / Math.Max(1, radius / 2));
+            for (var step = 1; step <= steps; step++)
             {
                 var t = step / (double)steps;
                 MarkCircle(mask, bounds, from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t, radius);
@@ -690,13 +687,14 @@ internal sealed partial class CaptureSurface
         get
         {
             const double margin = 6, gap = 24;
-            var diameter = Math.Min(128, Math.Max(1, Math.Min(ActualWidth, ActualHeight) - 2 * margin));
+            var viewport = CursorViewport;
+            var diameter = Math.Min(128, Math.Max(1, Math.Min(viewport.Width, viewport.Height) - 2 * margin));
             var px = _cursor.X * ActualWidth / _frame.Width;
             var py = _cursor.Y * ActualHeight / _frame.Height;
-            var x = px + gap + diameter + margin <= ActualWidth ? px + gap : px - diameter - gap;
-            var y = py + gap + diameter + 54 <= ActualHeight ? py + gap : py - diameter - 54;
-            return new Rect(Math.Clamp(x, margin, Math.Max(margin, ActualWidth - diameter - margin)),
-                Math.Clamp(y, margin, Math.Max(margin, ActualHeight - diameter - margin)), diameter, diameter);
+            var x = px + gap + diameter + margin <= viewport.Right ? px + gap : px - diameter - gap;
+            var y = py + gap + diameter + 54 <= viewport.Bottom ? py + gap : py - diameter - 54;
+            return new Rect(Math.Clamp(x, viewport.Left + margin, Math.Max(viewport.Left + margin, viewport.Right - diameter - margin)),
+                Math.Clamp(y, viewport.Top + margin, Math.Max(viewport.Top + margin, viewport.Bottom - diameter - margin)), diameter, diameter);
         }
     }
 

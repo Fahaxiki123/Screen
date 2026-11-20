@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Screen.Core;
 
@@ -179,4 +180,34 @@ public sealed class JsonSettingsStore
         {
         }
     }
+}
+
+// A malformed optional appearance field must not send unrelated settings down
+// the corrupt-file recovery path. Keep the on-disk format numeric, like other enums.
+internal sealed class PinOutlineColorConverter : JsonConverter<PinOutlineColor>
+{
+    public override PinOutlineColor Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var value))
+            return (PinOutlineColor)value;
+        reader.Skip();
+        return PinOutlineColor.Subtle;
+    }
+
+    public override void Write(Utf8JsonWriter writer, PinOutlineColor value, JsonSerializerOptions options) =>
+        writer.WriteNumberValue((int)value);
+}
+
+internal sealed class PinOutlineWidthConverter : JsonConverter<double>
+{
+    public override double Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetDouble(out var value))
+            return value;
+        reader.Skip();
+        return AppSettings.DefaultPinOutlineWidth;
+    }
+
+    public override void Write(Utf8JsonWriter writer, double value, JsonSerializerOptions options) =>
+        writer.WriteNumberValue(value);
 }

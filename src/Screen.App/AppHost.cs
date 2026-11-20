@@ -46,7 +46,9 @@ internal sealed class AppHost : IDisposable
         }
         _hotKeyWindow = new HotKeyWindow();
         _captureService = new HybridScreenCaptureService();
-        _pinWindowManager = new PinWindowManager();
+        _pinWindowManager = new PinWindowManager(
+            () => (_settings.PinOutlineColor, _settings.PinOutlineWidth),
+            RememberPinOutline);
         _pinWindowManager.ClickThroughEnabled += (_, _) => ShowFirstClickThroughHint();
         _ocrEngine = new SmartOcrEngine(
             new PaddleOcrEngine(),
@@ -184,10 +186,7 @@ internal sealed class AppHost : IDisposable
         {
             if (region is null)
             {
-                NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
-                var frame = DesktopRegionCapture.GetMonitorBounds().Length > 1
-                    ? await GdiScreenCaptureService.CaptureDesktopAsync()
-                    : await _captureService.CaptureAtAsync(new PixelPoint(cursor.X, cursor.Y));
+                var frame = await _coordinator.CaptureSelectionBackgroundAsync();
                 overlay = new CaptureOverlayWindow(
                     frame,
                     _captureService,
@@ -420,6 +419,30 @@ internal sealed class AppHost : IDisposable
         RefreshShortcut("截图", _settings.HotKey, _hotKeyWindow.RegisterCaptureHotKey);
         RefreshShortcut("恢复贴图", _settings.ClickThroughRecoveryHotKey, _hotKeyWindow.RegisterClickThroughRecoveryHotKey);
         RefreshShortcut("录屏", _settings.RecordHotKey, _hotKeyWindow.RegisterRecordHotKey);
+    }
+
+    private void RememberPinOutline(PinOutlineColor? color, double? width)
+    {
+        // A pin may predate the current defaults. Only save the option that was clicked.
+        void ApplyChange(AppSettings settings)
+        {
+            if (color is { } selectedColor)
+                settings.PinOutlineColor = selectedColor;
+            if (width is { } selectedWidth)
+                settings.PinOutlineWidth = selectedWidth;
+        }
+
+        ApplyChange(_settings);
+        try
+        {
+            _settingsStore.Update(ApplyChange);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SimpleLogger.LogWarning($"Unable to save pin outline preference: {ex.Message}");
+            _notifyIcon.ShowBalloonTip(4000, "贴图描边未保存",
+                "本次选择已生效，但未能写入设置文件，重启后不会保留。", Forms.ToolTipIcon.Warning);
+        }
     }
 
     private void ShowFirstClickThroughHint()

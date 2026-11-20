@@ -11,20 +11,25 @@ internal sealed class GdiScreenCaptureService : IScreenCaptureService
     public Task<CaptureFrame> CaptureAtAsync(PixelPoint screenPoint, CancellationToken cancellationToken = default) =>
         Task.Run(() => Capture(screenPoint, cancellationToken), cancellationToken);
 
-    public static Task<CaptureFrame> CaptureDesktopAsync(CancellationToken cancellationToken = default) =>
-        Task.Run(() =>
+    public static async Task<CaptureFrame> CaptureDesktopAsync(IReadOnlyList<PixelRect> monitors,
+        CancellationToken cancellationToken = default)
+    {
+        var left = monitors.Min(screen => screen.X);
+        var top = monitors.Min(screen => screen.Y);
+        var bounds = new PixelRect(left, top,
+            checked(monitors.Max(screen => screen.Right) - left),
+            checked(monitors.Max(screen => screen.Bottom) - top));
+        var image = await DesktopRegionCapture.CaptureAsync(bounds, monitors, cancellationToken).ConfigureAwait(false);
+        // WPF uses one DPI for the spanning HWND, on the display with the largest overlap.
+        var display = FormsScreen.FromRectangle(new Rectangle(left, top, bounds.Width, bounds.Height)).Bounds;
+        var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
+            display.Left + display.Width / 2, display.Top + display.Height / 2));
+        return new CaptureFrame(image.Pixels, image.Width, image.Height, image.Stride, dpi, dpi,
+            bounds, CaptureColorSpace.Srgb, DateTimeOffset.UtcNow)
         {
-            var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
-            var bounds = new PixelRect(screen.X, screen.Y, screen.Width, screen.Height);
-            var stride = checked(bounds.Width * 4);
-            var pixels = GC.AllocateUninitializedArray<byte>(checked(stride * bounds.Height));
-            using var desktop = new DesktopRegionCapture(bounds, DesktopRegionCapture.GetMonitorBounds());
-            cancellationToken.ThrowIfCancellationRequested();
-            desktop.ReadInto(pixels);
-            var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(bounds.X, bounds.Y));
-            return new CaptureFrame(pixels, bounds.Width, bounds.Height, stride, dpi, dpi,
-                bounds, CaptureColorSpace.Srgb, DateTimeOffset.UtcNow);
-        }, cancellationToken);
+            DisplayBounds = monitors
+        };
+    }
 
     private static CaptureFrame Capture(PixelPoint screenPoint, CancellationToken cancellationToken)
     {

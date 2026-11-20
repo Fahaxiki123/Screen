@@ -1,4 +1,4 @@
-OCR model files shipped with Screen 1.1.0
+OCR model files shipped with Screen 1.1.1
 
 The three PP-OCRv6 files recorded for Screen 1.0.7 are unchanged. The
 existing Screen third-party notice identifies them as RapidOCR /

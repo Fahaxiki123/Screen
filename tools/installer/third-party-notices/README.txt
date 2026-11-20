@@ -1,4 +1,4 @@
-Screen 1.1.0 — Third-party notices
+Screen 1.1.1 — Third-party notices
 Release inventory checked on 2026-11-20 for the win-x64 package.
 
 This folder contains third-party license texts, attribution, package versions,

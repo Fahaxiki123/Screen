@@ -84,6 +84,9 @@ internal sealed partial class CaptureOverlayWindow
 
     private void UpdateSurfaceAdornments()
     {
+        var viewport = _surface.IsSelectionCommitted ? _surface.SelectionViewport : _surface.CursorViewport;
+        if (!_surface.IsSelectionCommitted)
+            PositionSelectionHint(viewport);
         var hasSize = _surface.ShowSelectionChrome && !_surface.Selection.IsEmpty;
         _sizeTag.Visibility = hasSize ? Visibility.Visible : Visibility.Collapsed;
         if (hasSize)
@@ -91,7 +94,7 @@ internal sealed partial class CaptureOverlayWindow
             var selection = _surface.Selection;
             _sizeText.Text = $"{selection.Width} × {selection.Height}";
             var rect = _surface.SelectionInDips;
-            Place(_sizeTag, rect.Left, rect.Top >= 26 ? rect.Top - 26 : rect.Top + 7, false);
+            Place(_sizeTag, rect.Left, rect.Top >= viewport.Top + 26 ? rect.Top - 26 : rect.Top + 7, false, viewport);
         }
         _sampleTag.Visibility = _surface.IsSelectionCommitted ? Visibility.Collapsed : Visibility.Visible;
         if (_sampleTag.Visibility != Visibility.Visible)
@@ -110,14 +113,14 @@ internal sealed partial class CaptureOverlayWindow
             _sampleChip.Fill = new SolidColorBrush(Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
         }
         var lens = _surface.LoupeInDips;
-        Place(_sampleTag, lens.Left + lens.Width / 2, lens.Bottom + 9, true);
+        Place(_sampleTag, lens.Left + lens.Width / 2, lens.Bottom + 9, true, viewport);
     }
 
-    private void Place(FrameworkElement tag, double x, double y, bool centered)
+    private static void Place(FrameworkElement tag, double x, double y, bool centered, Rect viewport)
     {
         tag.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var size = tag.DesiredSize;
-        Canvas.SetLeft(tag, Math.Clamp(centered ? x - size.Width / 2 : x, 1, Math.Max(1, _root.ActualWidth - size.Width - 1)));
-        Canvas.SetTop(tag, Math.Clamp(y, 1, Math.Max(1, _root.ActualHeight - size.Height - 1)));
+        Canvas.SetLeft(tag, FitX(viewport, centered ? x - size.Width / 2 : x, size.Width, 1));
+        Canvas.SetTop(tag, FitY(viewport, y, size.Height, 1));
     }
 }

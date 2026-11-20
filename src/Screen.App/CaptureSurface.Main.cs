@@ -53,6 +53,8 @@ internal sealed partial class CaptureSurface : FrameworkElement
     private readonly AnnotationHistory _history = new();
     private AnnotationSnapshot? _annotationGestureStart;
     private readonly List<PixelPoint> _workingPoints = [];
+    private readonly HashSet<int> _workingStrokeBreaks = [];
+    private PixelPoint? _lastOutsideMosaicPoint;
     private PixelPoint _start;
     private PixelPoint _cursor;
     private bool _draggingSelection;
@@ -115,6 +117,8 @@ internal sealed partial class CaptureSurface : FrameworkElement
         ResourceDictionary? themeResources = null)
     {
         _frame = frame;
+        if (frame.DisplayBounds.Count > 0 && NativeMethods.TryGetPhysicalCursorPosition(out var cursor))
+            _cursor = new PixelPoint(cursor.X - frame.ScreenBounds.X, cursor.Y - frame.ScreenBounds.Y);
         _source = frame.ToBitmapSource();
         _sourceBuffer = frame.ToPixelBuffer();
         _windows = windows;
@@ -139,6 +143,41 @@ internal sealed partial class CaptureSurface : FrameworkElement
     internal event EventHandler? AnnotationEdited;
     internal event EventHandler? AnnotationContentChanged;
     public PixelRect Selection { get; private set; }
+    internal Rect CursorViewport => ViewportFor(new PixelRect((int)SampledPixel.X, (int)SampledPixel.Y, 1, 1));
+    internal Rect SelectionViewport => ViewportFor(Selection);
+
+    private Rect ViewportFor(PixelRect anchor) => DisplayViewport(_frame.ScreenBounds, _frame.DisplayBounds, RenderSize, anchor);
+
+    internal static Rect DisplayViewport(PixelRect frame, IReadOnlyList<PixelRect> displays, Size size, PixelRect anchor)
+    {
+        // The overlay is one HWND with one DIP scale, even when its pixels span different monitor DPIs.
+        var target = anchor with { X = frame.X + anchor.X, Y = frame.Y + anchor.Y };
+        var centerX = target.X + target.Width / 2.0;
+        var centerY = target.Y + target.Height / 2.0;
+        var best = frame;
+        long largestOverlap = -1;
+        var nearest = double.MaxValue;
+        foreach (var display in displays)
+        {
+            var visible = display.Intersect(frame);
+            if (visible.IsEmpty)
+                continue;
+            var overlap = visible.Intersect(target);
+            var area = (long)overlap.Width * overlap.Height;
+            var dx = centerX - Math.Clamp(centerX, visible.X, visible.Right);
+            var dy = centerY - Math.Clamp(centerY, visible.Y, visible.Bottom);
+            var distance = dx * dx + dy * dy;
+            if (area > largestOverlap || area == largestOverlap && distance < nearest)
+            {
+                largestOverlap = area;
+                nearest = distance;
+                best = visible;
+            }
+        }
+        var sx = size.Width / frame.Width;
+        var sy = size.Height / frame.Height;
+        return new Rect((best.X - frame.X) * sx, (best.Y - frame.Y) * sy, best.Width * sx, best.Height * sy);
+    }
     public WindowTarget? SelectedWindow { get; private set; }
     public bool IsSelectionCommitted => _selectionCommitted;
     internal event Action? AdornmentsRendered;
@@ -173,11 +212,11 @@ internal sealed partial class CaptureSurface : FrameworkElement
         }
     }
 
+    private bool IsMosaicBrush => Tool == CaptureTool.Mosaic && MosaicMode == MosaicDrawMode.Brush;
     private bool CanShowMosaicBrushCursor => IsMouseOver
         && _selectionCommitted
         && !Selection.IsEmpty
-        && Tool == CaptureTool.Mosaic
-        && MosaicMode == MosaicDrawMode.Brush
+        && IsMosaicBrush
         && Contains(Selection, _cursor);
     public bool ColorRgbMode { get; set; }
     public string ColorStatus { get; set; } = "Ctrl+C 复制色值 · Shift 切换格式";
@@ -208,9 +247,16 @@ internal sealed partial class CaptureSurface : FrameworkElement
     internal uint HoverColor => GetPixelColor(_cursor);
 
     // Utility methods
-    private PixelPoint ToPixel(Point point) => new(
-        Math.Clamp(point.X * _frame.Width / Math.Max(1, ActualWidth), 0, _frame.Width - 1),
-        Math.Clamp(point.Y * _frame.Height / Math.Max(1, ActualHeight), 0, _frame.Height - 1));
+    private PixelPoint ToPixel(Point point)
+    {
+        var x = point.X * _frame.Width / Math.Max(1, ActualWidth);
+        var y = point.Y * _frame.Height / Math.Max(1, ActualHeight);
+        // Captured mouse events can be outside even a full-frame selection.
+        // Keep that position for the brush instead of sliding it along the frame edge.
+        return _drawing && IsMosaicBrush
+            ? new PixelPoint(x, y)
+            : new PixelPoint(Math.Clamp(x, 0, _frame.Width - 1), Math.Clamp(y, 0, _frame.Height - 1));
+    }
 
     private PixelPoint ClampAnnotationPoint(PixelPoint point) => new(
         Math.Clamp(point.X, Selection.X, Selection.Right),

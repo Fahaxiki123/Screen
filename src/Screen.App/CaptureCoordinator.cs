@@ -18,6 +18,16 @@ internal sealed class CaptureCoordinator(
     /// <summary>True while the screenshot selection overlay is open.</summary>
     public bool IsCapturing => Volatile.Read(ref _capturing) != 0;
 
+    public Task<CaptureFrame> CaptureSelectionBackgroundAsync()
+    {
+        var monitors = DesktopRegionCapture.GetMonitorBounds();
+        if (monitors.Length > 1)
+            return GdiScreenCaptureService.CaptureDesktopAsync(monitors);
+
+        NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
+        return captureService.CaptureAtAsync(new PixelPoint(cursor.X, cursor.Y));
+    }
+
     public async Task StartCaptureAsync()
     {
         if (Interlocked.Exchange(ref _capturing, 1) != 0)
@@ -28,8 +38,7 @@ internal sealed class CaptureCoordinator(
         try
         {
             var timer = Stopwatch.StartNew();
-            NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
-            var frame = await captureService.CaptureAtAsync(new PixelPoint(cursor.X, cursor.Y));
+            var frame = await CaptureSelectionBackgroundAsync();
             var overlay = new CaptureOverlayWindow(
                 frame,
                 captureService,

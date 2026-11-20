@@ -97,6 +97,7 @@ internal sealed partial class CaptureOverlayWindow : Window
         _surface.SelectionChanged += (_, _) => OnCaptureSelectionChanged();
         _surface.AnnotationContentChanged += (_, _) => OnCaptureAnnotationsChanged();
         _surface.SelectionCommitted += (_, _) => OnSelectionCommitted();
+        _surface.SizeChanged += (_, _) => PositionFloatingPanels();
         _root.Children.Add(_surface);
 
         InitializeSurfaceAdornments();
@@ -196,11 +197,8 @@ internal sealed partial class CaptureOverlayWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
-        var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
-            _frame.ScreenBounds.X + _frame.ScreenBounds.Width / 2,
-            _frame.ScreenBounds.Y + _frame.ScreenBounds.Height / 2));
-        Width = _frame.Width * 96.0 / dpi;
-        Height = _frame.Height * 96.0 / dpi;
+        Width = _frame.Width * 96.0 / _frame.DpiX;
+        Height = _frame.Height * 96.0 / _frame.DpiY;
         NativeMethods.SetWindowPos(
             handle,
             new nint(-1),

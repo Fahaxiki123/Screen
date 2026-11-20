@@ -2,9 +2,11 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Screen.App;
 using Screen.Core;
@@ -19,11 +21,12 @@ public sealed class CaptureBoundaryRegressionTests
     private static readonly PixelRect _region = new(30, 25, 80, 60);
 
     [TestMethod]
-    public void PinRendersSourcePixelsToEveryEdgeWhenNotHovered() => OnSta(() =>
+    public void BorderlessPinKeepsSourcePixelsEverywhereExceptTheRoundedCorners() => OnSta(() =>
     {
         const int width = 48;
         const int height = 32;
         const int stride = width * 4;
+        const int radius = 12;
         var pixels = new byte[height * stride];
         for (var y = 0; y < height; y++)
         {
@@ -37,17 +40,192 @@ public sealed class CaptureBoundaryRegressionTests
             }
         }
 
-        var pin = new PinWindow(new PixelBuffer(pixels, width, height, stride), new PixelRect(0, 0, width, height));
+        var pin = CreateThemedPin(new PixelBuffer(pixels, width, height, stride));
+        ChoosePinOption(pin, "描边颜色", "无描边");
+        var rendered = RenderPin(pin, width, height);
+        AssertPinCornersTransparent(rendered, width, height);
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                // If even the outer corner of this pixel is inside the arc, it must be unchanged.
+                var dx = Math.Max(0, radius - Math.Min(x, width - 1 - x));
+                var dy = Math.Max(0, radius - Math.Min(y, height - 1 - y));
+                if (dx * dx + dy * dy <= radius * radius)
+                    Assert.AreEqual(PixelAt(pixels, stride, x, y), PixelAt(rendered, stride, x, y), $"Source pixel changed at ({x}, {y}).");
+            }
+        }
+    });
+
+    [TestMethod]
+    [DataRow("淡描边", "Pin.OutlineSubtle")]
+    [DataRow("浅色描边", "Pin.OutlineLight")]
+    [DataRow("深色描边", "Pin.OutlineDark")]
+    [DataRow("蓝色描边", "Brush.Accent")]
+    public void PinOutlineKeepsItsSelectedColorAndStaysInsideRoundedCornersAfterResize(string outlineName, string brushKey) => OnSta(() =>
+    {
+        const byte sourceChannel = 24;
+        var image = FillSelection(0xFF181818);
+        var pin = CreateThemedPin(image);
+        ChoosePinOption(pin, "描边颜色", outlineName);
+        var stroke = ((SolidColorBrush)pin.FindResource(brushKey)).Color;
+        int Blend(byte channel) => (stroke.A * channel + (255 - stroke.A) * sourceChannel + 127) / 255;
+
+        foreach (var (width, height) in new[] { (image.Width, image.Height), (120, 90), (40, 30) })
+        {
+            var rendered = RenderPin(pin, width, height);
+            AssertPinCornersTransparent(rendered, width, height);
+            foreach (var (x, y) in new[] { (width / 2, 0), (width / 2, height - 1), (0, height / 2), (width - 1, height / 2) })
+            {
+                var offset = (y * width + x) * 4;
+                Assert.AreEqual(Blend(stroke.B), (int)rendered[offset], 1);
+                Assert.AreEqual(Blend(stroke.G), (int)rendered[offset + 1], 1);
+                Assert.AreEqual(Blend(stroke.R), (int)rendered[offset + 2], 1);
+                Assert.AreEqual((byte)255, rendered[offset + 3]);
+            }
+            Assert.AreEqual(0xFF181818u, PixelAt(rendered, width * 4, width / 2, 1), "The default stroke is one DIP wide.");
+        }
+    });
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void PinHoverOnlyChangesTheCloseButton(bool borderless) => OnSta(() =>
+    {
+        var image = FillSelection(0xFF181818);
+        var pin = CreateThemedPin(image);
+        if (borderless)
+            ChoosePinOption(pin, "描边颜色", "无描边");
+        AssertPinChoice(pin, "描边颜色", borderless ? "无描边" : "淡描边");
+        AssertPinChoice(pin, "描边粗细", "1 px");
+        var resting = RenderPin(pin, image.Width, image.Height);
+        var close = ((Grid)pin.Content).Children.OfType<Button>().Single();
+        Assert.AreEqual(Visibility.Collapsed, close.Visibility);
+        AssertPinCornersTransparent(resting, image.Width, image.Height);
+        var edge = PixelAt(resting, image.Stride, image.Width / 2, 0);
+        Assert.AreEqual(borderless, edge == 0xFF181818u, "Only an explicitly borderless pin should have no stroke at rest.");
+
+        void Hover(RoutedEvent routedEvent)
+        {
+            pin.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = routedEvent });
+            // Check the settled frame, not the first frame of a possible hover transition.
+            var frame = new DispatcherFrame();
+            var timer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
+                (_, _) => frame.Continue = false, pin.Dispatcher);
+            Dispatcher.PushFrame(frame);
+            timer.Stop();
+        }
+        Hover(Mouse.MouseEnterEvent);
+        Assert.AreEqual(Visibility.Visible, close.Visibility);
+        var hovered = RenderPin(pin, image.Width, image.Height);
+        AssertPinCornersTransparent(hovered, image.Width, image.Height);
+        Assert.AreEqual(edge, PixelAt(hovered, image.Stride, image.Width / 2, 0));
+        Hover(Mouse.MouseLeaveEvent);
+        Assert.AreEqual(Visibility.Collapsed, close.Visibility);
+        CollectionAssert.AreEqual(resting, RenderPin(pin, image.Width, image.Height));
+    });
+
+    [TestMethod]
+    public void PinWidthsRenderIndependentlyOfColorAndCarryForwardToNewPins() => OnSta(() =>
+    {
+        var image = FillSelection(0xFF181818);
+        var saved = new AppSettings();
+        var changes = new List<(PinOutlineColor? Color, double? Width)>();
+        void Save(PinOutlineColor? color, double? width)
+        {
+            changes.Add((color, width));
+            if (color.HasValue)
+                saved.PinOutlineColor = color.Value;
+            if (width.HasValue)
+                saved.PinOutlineWidth = width.Value;
+        }
+        PinWindow NewPin() => CreateThemedPin(image, saved, Save);
+
+        var pin = NewPin();
+        ChoosePinOption(pin, "描边颜色", "蓝色描边");
+        Assert.AreEqual(((PinOutlineColor?)PinOutlineColor.Blue, (double?)null), changes.Last());
+        var accent = ((SolidColorBrush)pin.FindResource("Brush.Accent")).Color;
+        foreach (var width in new[] { 0.5, 1, 1.5, 2, 3, 4 })
+        {
+            var label = FormattableString.Invariant($"{width} px");
+            ChoosePinOption(pin, "描边粗细", label);
+            AssertPinChoice(pin, "描边颜色", "蓝色描边");
+            Assert.AreEqual(((PinOutlineColor?)null, (double?)width), changes.Last());
+            var rendered = RenderPin(pin, image.Width, image.Height);
+            // Total blue coverage across the edge measures the real width, including half-pixel strokes.
+            double coverage = 0;
+            for (var y = 0; y < 5; y++)
+                coverage += (rendered[y * image.Stride + image.Width / 2 * 4] - 24d) / (accent.B - 24d);
+            Assert.AreEqual(width, coverage, 0.08, $"The selected {label} must be visible in the rendered pixels.");
+        }
+
+        ChoosePinOption(pin, "描边颜色", "无描边");
+        AssertPinChoice(pin, "描边粗细", "4 px");
+        ChoosePinOption(pin, "描边颜色", "无描边");
+        var next = NewPin();
+        AssertPinChoice(next, "描边颜色", "无描边");
+        AssertPinChoice(next, "描边粗细", "4 px");
+        Assert.AreEqual(0xFF181818u, PixelAt(RenderPin(next, image.Width, image.Height), image.Stride, image.Width / 2, 0));
+        ChoosePinOption(next, "描边颜色", "蓝色描边");
+        var reopened = RenderPin(next, image.Width, image.Height);
+        Assert.AreEqual((int)accent.B, (int)reopened[3 * image.Stride + image.Width / 2 * 4], "Choosing a new color restores the saved 4 DIP width.");
+        AssertPinChoice(pin, "描边颜色", "无描边");
+    });
+
+    private static IEnumerable<MenuItem> PinOptions(PinWindow pin, string group)
+    {
+        var menu = ((FrameworkElement)pin.Content).ContextMenu!;
+        return menu.Items.OfType<MenuItem>().Single(item => Equals(item.Header, group)).Items.OfType<MenuItem>();
+    }
+
+    private static void ChoosePinOption(PinWindow pin, string group, string name)
+    {
+        var item = PinOptions(pin, group).Single(item => Equals(item.Header, name));
+        // MenuItem toggles its own IsChecked before it raises Click on real input.
+        typeof(MenuItem).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(item, null);
+        pin.Dispatcher.Invoke(DispatcherPriority.ApplicationIdle, new Action(() => { }));
+        AssertPinChoice(pin, group, name);
+    }
+
+    private static void AssertPinChoice(PinWindow pin, string group, string name)
+    {
+        var items = PinOptions(pin, group).ToArray();
+        Assert.IsTrue(items.All(item => item.IsCheckable));
+        CollectionAssert.AreEqual(new[] { name }, items.Where(item => item.IsChecked).Select(item => item.Header).ToArray());
+    }
+
+    private static void AssertPinCornersTransparent(byte[] pixels, int width, int height)
+    {
+        foreach (var x in new[] { 0, width - 1 })
+        {
+            foreach (var y in new[] { 0, height - 1 })
+                Assert.AreEqual(0u, PixelAt(pixels, width * 4, x, y), $"Pin corner at ({x}, {y}) must be transparent.");
+        }
+    }
+
+    private static PinWindow CreateThemedPin(PixelBuffer image, AppSettings? saved = null, Action<PinOutlineColor?, double?>? save = null)
+    {
+        var bounds = new PixelRect(0, 0, image.Width, image.Height);
+        var pin = saved is null ? new PinWindow(image, bounds) : new PinWindow(image, bounds, saved.PinOutlineColor, saved.PinOutlineWidth, save);
+        pin.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Screen;component/Themes/Tokens.xaml", UriKind.Relative) });
+        var menus = new ResourceDictionary { Source = new Uri("/Screen;component/Themes/ShellMenus.xaml", UriKind.Relative) };
+        foreach (var key in new[] { "Pin.OutlineSubtle", "Pin.OutlineLight", "Pin.OutlineDark" })
+            pin.Resources[key] = menus[key];
+        return pin;
+    }
+
+    private static byte[] RenderPin(PinWindow pin, int width, int height)
+    {
         var content = (FrameworkElement)pin.Content;
         content.Measure(new Size(width, height));
         content.Arrange(new Rect(0, 0, width, height));
+        content.UpdateLayout();
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(content);
-        var actual = new byte[pixels.Length];
-        bitmap.CopyPixels(actual, stride, 0);
-
-        CollectionAssert.AreEqual(pixels, actual);
-    });
+        var pixels = new byte[width * height * 4];
+        bitmap.CopyPixels(pixels, width * 4, 0);
+        return pixels;
+    }
 
     [TestMethod]
     public void SelectionDragIncludesTheLastRowAndColumnInEitherDirection()
@@ -229,7 +407,7 @@ public sealed class CaptureBoundaryRegressionTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public void FreehandEndsAtFirstBoundaryIntersection(bool mosaic) => OnSta(() =>
+    public void FreehandReleasedOutsideEndsAtFirstBoundaryIntersection(bool mosaic) => OnSta(() =>
     {
         var surface = CreateSurface();
         surface.Tool = mosaic ? CaptureTool.Mosaic : CaptureTool.Pen;
@@ -246,6 +424,64 @@ public sealed class CaptureBoundaryRegressionTests
             && point.Y >= _region.Y && point.Y <= _region.Bottom));
         surface.Undo();
         Assert.AreEqual(0, Items(surface).Count, "The complete clipped stroke remains one undo operation.");
+    });
+
+    [TestMethod]
+    [DataRow(AnnotationVariants.MosaicPixelate)]
+    [DataRow(AnnotationVariants.MosaicBlur)]
+    public void MosaicBrushResumesOnReentryWithoutJoiningTheGap(int variant) => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        surface.Tool = CaptureTool.Mosaic;
+        surface.MosaicMode = MosaicDrawMode.Brush;
+        surface.CurrentStyle = new AnnotationStyle(0, 10, 16, variant + 100, 0.8);
+        var original = Render(surface);
+        var start = new PixelPoint(42, 36);
+        SetField(surface, "_start", start);
+        SetField(surface, "_drawing", true);
+        WorkingPoints(surface).Add(start);
+        void Move(int x, int y)
+        {
+            var point = new PixelPoint(x, y);
+            SetField(surface, "_cursor", point);
+            Invoke(surface, "UpdateFreehandDrawing", point);
+            surface.InvalidateVisual();
+        }
+
+        // Exit through the right edge, travel down outside, then cross back in at a different height.
+        Move(92, 36);
+        Move(140, 36);
+        Assert.IsTrue(GetField<bool>(surface, "_drawing"), "Leaving the selection while pressed must not finish a mosaic brush stroke.");
+        Move(140, 74);
+        Move(55, 74);
+        Move(42, 74);
+        Move(9, 74);
+        var preview = Render(surface);
+        Invoke(surface, "FinishDrawing", new PixelPoint(9, 30)); // Release at a different height, still outside.
+        surface.InvalidateVisual();
+        var committed = Render(surface);
+
+        foreach (var pixels in new[] { preview, committed })
+        {
+            AssertOnlySelectionChanged(original, pixels, _region);
+            foreach (var y in new[] { 36, 74 })
+            {
+                var edge = (y * Width + _region.Right - 8) * 4;
+                Assert.IsFalse(original.AsSpan(edge, 8 * 4).SequenceEqual(pixels.AsSpan(edge, 8 * 4)),
+                    $"The brush should paint up to the edge on both exit and return (row {y}).");
+            }
+            var gap = (55 * Width + _region.X) * 4;
+            Assert.IsTrue(original.AsSpan(gap, _region.Width * 4).SequenceEqual(pixels.AsSpan(gap, _region.Width * 4)),
+                "Moving outside must not connect the two runs by a line across the selection or along its edge.");
+        }
+        Assert.IsNull(Invoke(surface, "HitTestAnnotation", new PixelPoint(109, 55)), "The gap must not select an invisible stroke.");
+        Assert.IsNotNull(Invoke(surface, "HitTestAnnotation", new PixelPoint(95, 74)));
+        var expectedExport = new PixelBuffer(committed, Width, Height, Width * 4).Crop(_region);
+        CollectionAssert.AreEqual(expectedExport.Pixels, surface.RenderSelection().Pixels, "Export must preserve the same gap as the preview.");
+        surface.Undo();
+        CollectionAssert.AreEqual(original, Render(surface), "One undo must remove the entire mouse gesture.");
+        surface.Redo();
+        CollectionAssert.AreEqual(committed, Render(surface));
     });
 
     [TestMethod]
@@ -300,10 +536,15 @@ public sealed class CaptureBoundaryRegressionTests
     public void LostMouseCaptureCancelsUnfinishedBrushAndSelectionGestures() => OnSta(() =>
     {
         var surface = CreateSurface();
+        surface.Tool = CaptureTool.Mosaic;
+        surface.MosaicMode = MosaicDrawMode.Brush;
+        surface.CurrentStyle = new AnnotationStyle(0, 10, 16, AnnotationVariants.MosaicPixelate + 100);
+        SetField(surface, "_start", new PixelPoint(40, 40));
         SetField(surface, "_drawing", true);
         SetField(surface, "_movingSelection", true);
         SetField(surface, "_resizingSelection", true);
         WorkingPoints(surface).Add(new PixelPoint(40, 40));
+        Invoke(surface, "UpdateFreehandDrawing", new PixelPoint(140, 40));
         Invoke(surface, "OnLostMouseCapture", new MouseEventArgs(Mouse.PrimaryDevice, 0));
         Assert.IsFalse(GetField<bool>(surface, "_drawing"));
         Assert.IsFalse(GetField<bool>(surface, "_movingSelection"));
@@ -311,6 +552,15 @@ public sealed class CaptureBoundaryRegressionTests
         Assert.AreEqual(0, WorkingPoints(surface).Count);
         Assert.AreEqual(0, Items(surface).Count);
         Assert.AreNotEqual(Cursors.None, surface.Cursor);
+
+        var start = new PixelPoint(42, 72);
+        var end = new PixelPoint(55, 72);
+        SetField(surface, "_start", start);
+        SetField(surface, "_drawing", true);
+        WorkingPoints(surface).Add(start);
+        Invoke(surface, "FinishDrawing", end);
+        CollectionAssert.AreEqual(new[] { start, end }, Items(surface).Single().Points.ToArray(),
+            "A new press after capture loss must not resume a run from the previous exit.");
     });
 
     [TestMethod]

@@ -116,7 +116,10 @@ public partial class SettingsWindow : Window
         {
             var glass = (WindowChrome)chrome.CloneCurrentValue();
             glass.GlassFrameThickness = new Thickness(-1);
+            // With full-window glass DWM draws the caption buttons; let it handle their clicks too.
+            glass.UseAeroCaptionButtons = true;
             WindowChrome.SetWindowChrome(this, glass);
+            CustomCaptionButtons.Visibility = Visibility.Collapsed;
             Sidebar.SetResourceReference(Border.BackgroundProperty, "Settings.MicaSidebar");
             ContentSurface.SetResourceReference(Grid.BackgroundProperty, "Settings.MicaContent");
             SetResourceReference(BackgroundProperty, "Brush.Transparent");

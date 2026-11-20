@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Collections.Frozen;
+using System.Text.Json.Serialization;
 
 namespace Screen.Core;
 
@@ -47,6 +49,8 @@ public sealed record CaptureFrame(
     DateTimeOffset CapturedAt)
 {
     public bool MayContainSystemCursor { get; init; }
+    // Physical desktop coordinates of the displays in a multi-monitor selection frame.
+    public IReadOnlyList<PixelRect> DisplayBounds { get; init; } = [];
 
     public PixelBuffer ToPixelBuffer() => new(Pixels, Width, Height, Stride);
 
@@ -124,6 +128,9 @@ public sealed record AnnotationItem(
     // Working images can change scale after a crop. Preserve fractional
     // geometry so repeated conversions do not move mosaic block origins.
     public PreciseAnnotationBounds? PreciseBounds { get; init; }
+
+    // Each index starts a new brush path without connecting to the preceding point.
+    public IReadOnlySet<int> StrokeBreaks { get; init; } = FrozenSet<int>.Empty;
 }
 
 public sealed record OcrWord(string Text, PixelRect Bounds, double Confidence = 0);
@@ -275,12 +282,23 @@ public sealed record StitchResult(
     bool IsComplete,
     string? FailureReason);
 
+public enum PinOutlineColor
+{
+    Subtle = 0,
+    None = 1,
+    Light = 2,
+    Dark = 3,
+    Blue = 4
+}
+
 public sealed class AppSettings
 {
     public const int CurrentSchemaVersion = 4;
     public const string DefaultHotKey = "Ctrl+Shift+A";
     public const string DefaultClickThroughRecoveryHotKey = "F1";
     public const string DefaultRecordHotKey = "Ctrl+Shift+R";
+    public const double DefaultPinOutlineWidth = 1;
+    public static IReadOnlyList<double> PinOutlineWidths { get; } = Array.AsReadOnly<double>([0.5, 1, 1.5, 2, 3, 4]);
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
@@ -289,6 +307,18 @@ public sealed class AppSettings
     public string ClickThroughRecoveryHotKey { get; set; } = DefaultClickThroughRecoveryHotKey;
     public string RecordHotKey { get; set; } = DefaultRecordHotKey;
     public bool HasShownClickThroughHint { get; set; }
+    [JsonConverter(typeof(PinOutlineColorConverter))]
+    public PinOutlineColor PinOutlineColor
+    {
+        get;
+        set => field = Enum.IsDefined(value) ? value : PinOutlineColor.Subtle;
+    } = PinOutlineColor.Subtle;
+    [JsonConverter(typeof(PinOutlineWidthConverter))]
+    public double PinOutlineWidth
+    {
+        get;
+        set => field = PinOutlineWidths.Contains(value) ? value : DefaultPinOutlineWidth;
+    } = DefaultPinOutlineWidth;
     public string OcrLanguage { get; set; } = "zh-CN";
     public OcrProfile Ocr { get; set; } = new();
     public RecordingProfile Recording { get; set; } = new();

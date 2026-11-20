@@ -144,7 +144,7 @@ internal sealed partial class CaptureSurface
             CaptureMouse();
             SelectAnnotation(null);
             _drawing = true;
-            _workingPoints.Clear();
+            ClearWorkingStroke();
             _workingPoints.Add(_start);
         }
         InvalidateVisual();
@@ -159,7 +159,7 @@ internal sealed partial class CaptureSurface
             // A release can be missed when the pointer crosses another native
             // window. Do not let a later button press continue this old stroke.
             _drawing = false;
-            _workingPoints.Clear();
+            ClearWorkingStroke();
             ReleaseMouseCapture();
         }
         if (_resizingSelection && e.LeftButton == MouseButtonState.Pressed)
@@ -214,36 +214,73 @@ internal sealed partial class CaptureSurface
             SelectionChanged?.Invoke(this, EventArgs.Empty);
         }
         else if (_drawing && e.LeftButton == MouseButtonState.Pressed
-                 && (Tool == CaptureTool.Pen || (Tool == CaptureTool.Mosaic && MosaicMode == MosaicDrawMode.Brush)))
+                 && (Tool == CaptureTool.Pen || IsMosaicBrush))
         {
-            if (!Contains(Selection, _cursor))
-            {
-                // Finish at the first boundary crossing. Clamping every later
-                // outside point would paint a false line along the border.
-                FinishDrawing(_cursor);
-            }
-            else if (_workingPoints.Count == 0 || Distance(_workingPoints[^1], _cursor) >= 1.5)
-            {
-                _workingPoints.Add(_cursor);
-            }
+            UpdateFreehandDrawing(_cursor);
         }
         else if (!_draggingSelection && !_drawing && !_selectionCommitted && (Selection.IsEmpty || Tool == CaptureTool.Select))
         {
             var screenPoint = new PixelPoint(_frame.ScreenBounds.X + _cursor.X, _frame.ScreenBounds.Y + _cursor.Y);
             var target = _snapService.HitTest(_windows, screenPoint);
-            if (target is not null)
-            {
-                SelectedWindow = target;
-                Selection = new PixelRect(
+            var bounds = target is not null
+                ? new PixelRect(
                     target.Bounds.X - _frame.ScreenBounds.X,
                     target.Bounds.Y - _frame.ScreenBounds.Y,
                     target.Bounds.Width,
-                    target.Bounds.Height).Intersect(new PixelRect(0, 0, _frame.Width, _frame.Height));
+                    target.Bounds.Height).Intersect(new PixelRect(0, 0, _frame.Width, _frame.Height))
+                : default;
+            if (target != SelectedWindow || bounds != Selection)
+            {
+                SelectedWindow = target;
+                Selection = bounds;
                 SelectionChanged?.Invoke(this, EventArgs.Empty);
             }
         }
         UpdateIdleCursor();
         InvalidateVisual();
+    }
+
+    private void UpdateFreehandDrawing(PixelPoint point)
+    {
+        if (IsMosaicBrush)
+            UpdateMosaicBrush(point);
+        else if (Contains(Selection, point))
+            AppendFreehandPoint(point);
+        else
+            FinishDrawing(point);
+    }
+
+    private void UpdateMosaicBrush(PixelPoint point)
+    {
+        if (!Contains(Selection, point))
+        {
+            if (_lastOutsideMosaicPoint is null)
+            {
+                var previous = _workingPoints[^1];
+                var exit = ClipStrokeEnd(previous, point);
+                if (exit != previous)
+                    _workingPoints.Add(exit);
+            }
+            _lastOutsideMosaicPoint = point;
+            return;
+        }
+
+        if (_lastOutsideMosaicPoint is { } outside)
+        {
+            // Resume at this crossing, not on a line from the previous exit.
+            _workingStrokeBreaks.Add(_workingPoints.Count);
+            _workingPoints.Add(ClipStrokeEnd(point, outside));
+            _lastOutsideMosaicPoint = null;
+        }
+        AppendFreehandPoint(point);
+    }
+
+    private void AppendFreehandPoint(PixelPoint point)
+    {
+        if (_workingPoints.Count == 0 || Distance(_workingPoints[^1], point) >= 1.5)
+        {
+            _workingPoints.Add(point);
+        }
     }
 
     protected override void OnMouseEnter(MouseEventArgs e)
@@ -357,11 +394,16 @@ internal sealed partial class CaptureSurface
     private void FinishDrawing(PixelPoint point)
     {
         _drawing = false;
-        var freehand = Tool == CaptureTool.Pen || Tool == CaptureTool.Mosaic && MosaicMode == MosaicDrawMode.Brush;
-        var end = freehand ? ClipStrokeEnd(point) : ClampAnnotationPoint(point);
-        if (freehand && (_workingPoints.Count == 0 || Distance(_workingPoints[^1], end) >= 1.5))
+        var end = ClampAnnotationPoint(point);
+        if (IsMosaicBrush)
         {
-            _workingPoints.Add(end);
+            UpdateMosaicBrush(point);
+            end = _workingPoints[^1];
+        }
+        else if (Tool == CaptureTool.Pen)
+        {
+            end = ClipStrokeEnd(_workingPoints[^1], point);
+            AppendFreehandPoint(end);
         }
         // Release before a text prompt is opened. The drawing flag is already
         // clear, so capture-loss cleanup retains the completed stroke's points.
@@ -374,12 +416,18 @@ internal sealed partial class CaptureSurface
         {
             SelectAnnotation(null);
         }
-        _workingPoints.Clear();
+        ClearWorkingStroke();
     }
 
-    private PixelPoint ClipStrokeEnd(PixelPoint point)
+    private void ClearWorkingStroke()
     {
-        var previous = _workingPoints.Count > 0 ? _workingPoints[^1] : _start;
+        _workingPoints.Clear();
+        _workingStrokeBreaks.Clear();
+        _lastOutsideMosaicPoint = null;
+    }
+
+    private PixelPoint ClipStrokeEnd(PixelPoint previous, PixelPoint point)
+    {
         var dx = point.X - previous.X;
         var dy = point.Y - previous.Y;
         var fraction = 1.0;
@@ -409,7 +457,7 @@ internal sealed partial class CaptureSurface
         if (_drawing)
         {
             _drawing = false;
-            _workingPoints.Clear();
+            ClearWorkingStroke();
         }
         UpdateIdleCursor();
         InvalidateVisual();

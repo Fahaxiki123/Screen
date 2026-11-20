@@ -61,7 +61,7 @@
             <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid>
                 <TextBlock x:Name="Caption" VerticalAlignment="Center" Margin="22,0,142,0" FontSize="13" FontWeight="SemiBold"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,3,0">
+                <StackPanel x:Name="CustomCaptionButtons" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,3,0">
                     <Button Style="{StaticResource Settings.CaptionButton}" ToolTip="最小化" AutomationProperties.Name="最小化" Click="MinimizeClick">
                         <local:LucideIconElement Kind="Minus" Width="13" Height="13" Stroke="{DynamicResource Brush.Label}"/>
                     </Button>

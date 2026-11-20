@@ -9,7 +9,9 @@ using Screen.Core;
 
 namespace Screen.App;
 
-internal sealed class PinWindowManager : IPinWindowManager
+internal sealed class PinWindowManager(
+    Func<(PinOutlineColor Color, double Thickness)> getDefaults,
+    Action<PinOutlineColor?, double?> saveChange) : IPinWindowManager
 {
     private readonly List<PinWindow> _windows = [];
 
@@ -19,7 +21,8 @@ internal sealed class PinWindowManager : IPinWindowManager
 
     public void Pin(PixelBuffer image, PixelRect sourceBounds)
     {
-        var window = new PinWindow(image, sourceBounds);
+        var (color, thickness) = getDefaults();
+        var window = new PinWindow(image, sourceBounds, color, thickness, saveChange);
         window.Closed += (_, _) => _windows.Remove(window);
         window.ClickThroughChanged += enabled =>
         {
@@ -52,18 +55,24 @@ internal sealed class PinWindowManager : IPinWindowManager
 internal sealed class PinWindow : Window
 {
     private const int MinimumZoomedLongSide = 40;
+    private const double CornerRadiusDip = 12;
     private readonly PixelRect _sourceBounds;
-    private readonly Rectangle _outline;
+    private readonly System.Windows.Shapes.Path _outline;
     private readonly Button _closeButton;
     private MenuItem? _clickThroughMenuItem;
     private NativeMethods.NativePoint _dragStart;
     private NativeMethods.NativeRect _windowStart;
     private bool _dragging;
     private bool _clickThrough;
-    private bool _outlineExplicit;
     private double _zoom = 1;
 
     public PinWindow(PixelBuffer buffer, PixelRect sourceBounds)
+        : this(buffer, sourceBounds, PinOutlineColor.Subtle, AppSettings.DefaultPinOutlineWidth)
+    {
+    }
+
+    public PinWindow(PixelBuffer buffer, PixelRect sourceBounds, PinOutlineColor color, double thickness,
+        Action<PinOutlineColor?, double?>? saveChange = null)
     {
         _sourceBounds = sourceBounds;
         Title = "Screen 贴图";
@@ -112,22 +121,27 @@ internal sealed class PinWindow : Window
         _closeButton.SetResourceReference(StyleProperty, "Pin.Close");
         _closeButton.Click += (_, _) => Close();
 
-        _outline = new Rectangle
+        var silhouette = new RectangleGeometry { RadiusX = CornerRadiusDip, RadiusY = CornerRadiusDip };
+        _outline = new System.Windows.Shapes.Path
         {
-            StrokeThickness = 1.5,
-            Margin = new Thickness(0.75),
-            SnapsToDevicePixels = false,
-            IsHitTestVisible = false,
-            Opacity = 0
+            Data = silhouette,
+            // Only the inner half of a stroke on the clip boundary is visible.
+            StrokeThickness = 2 * thickness,
+            IsHitTestVisible = false
         };
-        _outline.SetResourceReference(StyleProperty, "Pin.Outline");
+        SetOutlineColor(color);
+        // The outline follows the image size; it must not contribute to layout.
+        var outlineLayer = new Canvas { IsHitTestVisible = false };
+        outlineLayer.Children.Add(_outline);
         var root = new Grid
         {
-            ContextMenu = BuildContextMenu(buffer)
+            Clip = silhouette,
+            ContextMenu = BuildContextMenu(buffer, color, thickness, saveChange)
         };
+        root.SizeChanged += (_, e) => silhouette.Rect = new Rect(e.NewSize);
         root.SetResourceReference(Grid.BackgroundProperty, "Brush.Transparent");
         root.Children.Add(image);
-        root.Children.Add(_outline);
+        root.Children.Add(outlineLayer);
         root.Children.Add(_closeButton);
         Content = root;
 
@@ -137,29 +151,8 @@ internal sealed class PinWindow : Window
         PreviewMouseLeftButtonUp += (_, _) => EndDrag();
         MouseDoubleClick += OnMouseDoubleClick;
         MouseWheel += OnMouseWheel;
-        // At rest a pin is pure content: chrome (close button + outline) only
-        // appears while hovered, unless the user pinned an explicit outline.
-        MouseEnter += (_, _) =>
-        {
-            _closeButton.Visibility = Visibility.Visible;
-            ShowHoverOutline(1);
-        };
-        MouseLeave += (_, _) =>
-        {
-            _closeButton.Visibility = Visibility.Collapsed;
-            ShowHoverOutline(0);
-        };
-    }
-
-    private void ShowHoverOutline(double opacity)
-    {
-        if (_outlineExplicit)
-            return;
-        var previous = _outline.Opacity;
-        _outline.BeginAnimation(OpacityProperty, null);
-        _outline.Opacity = opacity;
-        if (SystemParameters.ClientAreaAnimation)
-            _outline.BeginAnimation(OpacityProperty, Motion.Tween(previous, opacity, 150));
+        MouseEnter += (_, _) => _closeButton.Visibility = Visibility.Visible;
+        MouseLeave += (_, _) => _closeButton.Visibility = Visibility.Collapsed;
     }
 
     public bool IsClickThrough => _clickThrough;
@@ -183,7 +176,8 @@ internal sealed class PinWindow : Window
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
     }
 
-    private ContextMenu BuildContextMenu(PixelBuffer buffer)
+    private ContextMenu BuildContextMenu(PixelBuffer buffer, PinOutlineColor initialColor, double initialThickness,
+        Action<PinOutlineColor?, double?>? saveChange)
     {
         var menu = new ContextMenu();
         menu.SetResourceReference(StyleProperty, "GlassMenuStyle");
@@ -195,11 +189,32 @@ internal sealed class PinWindow : Window
             opacity.Items.Add(item);
         }
 
-        var outline = new MenuItem { Header = "描边" };
-        AddOutlineItem(outline, "无描边", "Brush.Transparent", 0);
-        AddOutlineItem(outline, "浅色描边", "Pin.OutlineLight", 1);
-        AddOutlineItem(outline, "深色描边", "Pin.OutlineDark", 1);
-        AddOutlineItem(outline, "蓝色描边", "Brush.Accent", 2);
+        var colors = new MenuItem { Header = "描边颜色" };
+        foreach (var (color, label) in new[]
+        {
+            (PinOutlineColor.Subtle, "淡描边"),
+            (PinOutlineColor.None, "无描边"),
+            (PinOutlineColor.Light, "浅色描边"),
+            (PinOutlineColor.Dark, "深色描边"),
+            (PinOutlineColor.Blue, "蓝色描边")
+        })
+        {
+            AddChoice(colors, label, color == initialColor, () =>
+            {
+                SetOutlineColor(color);
+                saveChange?.Invoke(color, null);
+            });
+        }
+
+        var thicknesses = new MenuItem { Header = "描边粗细" };
+        foreach (var thickness in AppSettings.PinOutlineWidths)
+        {
+            AddChoice(thicknesses, FormattableString.Invariant($"{thickness:0.#} px"), thickness == initialThickness, () =>
+            {
+                _outline.StrokeThickness = 2 * thickness;
+                saveChange?.Invoke(null, thickness);
+            });
+        }
 
         var through = new MenuItem { Header = "鼠标穿透（从托盘恢复）", IsCheckable = true };
         _clickThroughMenuItem = through;
@@ -231,7 +246,8 @@ internal sealed class PinWindow : Window
         var close = new MenuItem { Header = "关闭" };
         close.Click += (_, _) => Close();
         menu.Items.Add(opacity);
-        menu.Items.Add(outline);
+        menu.Items.Add(colors);
+        menu.Items.Add(thicknesses);
         menu.Items.Add(through);
         menu.Items.Add(save);
         menu.Items.Add(new Separator());
@@ -239,17 +255,24 @@ internal sealed class PinWindow : Window
         return menu;
     }
 
-    private void AddOutlineItem(MenuItem parent, string text, string brushKey, double thickness)
+    private void SetOutlineColor(PinOutlineColor color) =>
+        _outline.SetResourceReference(Shape.StrokeProperty, color switch
+        {
+            PinOutlineColor.None => "Brush.Transparent",
+            PinOutlineColor.Light => "Pin.OutlineLight",
+            PinOutlineColor.Dark => "Pin.OutlineDark",
+            PinOutlineColor.Blue => "Brush.Accent",
+            _ => "Pin.OutlineSubtle"
+        });
+
+    private static void AddChoice(MenuItem parent, string label, bool selected, Action apply)
     {
-        var item = new MenuItem { Header = text };
+        var item = new MenuItem { Header = label, IsCheckable = true, IsChecked = selected };
         item.Click += (_, _) =>
         {
-            // An explicitly chosen outline stays visible even when not hovered.
-            _outlineExplicit = thickness > 0;
-            _outline.BeginAnimation(UIElement.OpacityProperty, null);
-            _outline.Opacity = thickness > 0 ? 1 : 0;
-            _outline.SetResourceReference(Shape.StrokeProperty, brushKey);
-            _outline.StrokeThickness = Math.Max(1, thickness);
+            foreach (MenuItem choice in parent.Items)
+                choice.IsChecked = choice == item;
+            apply();
         };
         parent.Items.Add(item);
     }

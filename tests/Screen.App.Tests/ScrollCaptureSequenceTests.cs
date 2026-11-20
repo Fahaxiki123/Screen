@@ -8,6 +8,47 @@ namespace Screen.App.Tests;
 public sealed class ScrollCaptureSequenceTests
 {
     [TestMethod]
+    public async Task CrossMonitorViewportReadsTheRequestedRegionInsteadOfCroppingItsCenterDisplay()
+    {
+        PixelRect[] monitors = [new(-8, 2, 8, 6), new(0, 0, 12, 8)];
+        var region = new PixelRect(-3, 0, 8, 5);
+        var expected = new PixelBuffer(new byte[region.Width * region.Height * 4], region.Width, region.Height, region.Width * 4);
+        using var cancellation = new CancellationTokenSource();
+        var result = await ScrollCaptureController.CaptureViewportAsync(region, monitors,
+            (_, _) => throw new AssertFailedException("The centre monitor does not include the left half."),
+            (requested, layout, token) =>
+            {
+                Assert.AreEqual(region, requested);
+                Assert.AreSame(monitors, layout);
+                Assert.AreEqual(cancellation.Token, token);
+                CollectionAssert.AreEqual(new[] { new PixelRect(-3, 2, 3, 3), new PixelRect(0, 0, 5, 5) },
+                    DesktopRegionCapture.GetVisibleAreas(requested, layout));
+                return Task.FromResult(expected);
+            }, cancellation.Token);
+        Assert.AreSame(expected, result);
+    }
+
+    [TestMethod]
+    public async Task SingleMonitorViewportStillCropsTheHybridFrameAtPhysicalCoordinates()
+    {
+        var monitor = new PixelRect(-8, 2, 8, 6);
+        var region = new PixelRect(-7, 3, 3, 2);
+        var data = Enumerable.Range(0, 8 * 6 * 4).Select(i => (byte)i).ToArray();
+        var frame = new CaptureFrame(data, 8, 6, 32, 144, 144, monitor, CaptureColorSpace.Srgb, DateTimeOffset.UtcNow);
+        var result = await ScrollCaptureController.CaptureViewportAsync(region, [monitor],
+            (point, _) =>
+            {
+                Assert.AreEqual(new PixelPoint(-5.5, 4), point);
+                return Task.FromResult(frame);
+            },
+            (_, _, _) => throw new AssertFailedException("A single-screen selection should keep its normal capture provider."),
+            CancellationToken.None);
+        Assert.AreEqual(region.Width, result.Width);
+        Assert.AreEqual(region.Height, result.Height);
+        CollectionAssert.AreEqual(frame.ToPixelBuffer().Crop(new PixelRect(1, 1, 3, 2)).Pixels, result.Pixels);
+    }
+
+    [TestMethod]
     public async Task ContinuousManualMovementKeepsEveryIntermediateViewportAsync()
     {
         var source = Document();

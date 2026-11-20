@@ -8,16 +8,26 @@
 
 **[获取最新稳定版](https://github.com/Fahaxiki123/Screen/releases/latest)** · [全部版本](https://github.com/Fahaxiki123/Screen/releases)
 
-**[下载 1.1.0 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.1.0/Screen-1.1.0-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v1.1.0) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v1.1.0/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v1.1.0)
+**[下载 1.1.1 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.1.1/Screen-1.1.1-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v1.1.1) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v1.1.1/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v1.1.1)
 
 安装器允许在 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64 上安装，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。Windows 10 实机安装与运行待验收。更新前请完成截图或录屏并退出 Screen。
 
-### 1.1.0 更新
+### 1.1.1 更新
+
+- **截图可以跨屏框选。** 按下快捷键后，可以移到另一块屏再开始，也可以按住鼠标跨两屏拖选；工具栏会留在可见的屏幕内。滚动长截图也会保留跨屏选区的两侧。
+- **固定贴图默认带一圈淡灰细边。** 鼠标移开后仍保留圆角，不再露出方形边角。右键可分别选描边颜色和 0.5～4 px 的六档粗细，新贴图及下次启动都会沿用选择；保存 PNG 不带显示用的描边。
+- **涂马赛克时，出框不再断笔。** 按住左键移回选区即可继续涂；框外绕过的路径不会被连线，一次撤销可撤掉整笔。像素化和模糊两种涂抹都支持。
+- **修复 Windows 11 设置窗口标题栏按钮重影。** 启用 Mica 背景时只显示系统按钮，普通和最大化状态都不再叠画。
+
+<details>
+<summary>1.1.0 更新</summary>
 
 - **截图先框选，再选工具。** 去掉了框选前的模式栏。原有 20 个操作分成四组，窄屏按组换行；文字色点和马赛克滑杆也能随可用空间换行。完成后右下角会显示刚拷贝的截图。
 - **录屏可以直接导出 GIF。** 选「GIF」只会关闭本次录制的声音，不改日常视频设置。录完可裁剪，点「拷贝」就能粘贴 GIF 文件，不用先另存；点「存储」则写到选定位置。两阶段转换降低了内存占用，不降低设定的帧率或分辨率。
 - **设置合并为三页。** 快捷键、保存目录、录屏和翻译设置都保留。原来不匹配预设的画质显示「自定义」，不会因为打开设置就被覆盖；用 Tab 浏览也不会误改快捷键。
 - **不会再因自动录屏重名覆盖旧文件。** 文件名被占用时自动加 ` (1)`、` (2)`。截图已保存但无法记住目录时，会分别提示，不再误报保存失败。
+
+</details>
 
 <details>
 <summary>1.0.16 更新</summary>
@@ -59,10 +69,10 @@ GIF 先保留无声 MP4 素材。在预览点「拷贝」就会生成当前裁�
 
 ## 已实现的功能
 
-- 区域/窗口截图、选区调整、取色和放大镜。
+- 区域/窗口截图、跨屏框选、选区调整、取色和放大镜。
 - 矩形、椭圆、线条、箭头、画笔、文字、序号、像素/模糊马赛克，标注新增与修改支持撤销重做。
 - 向下自动/手动滚动截图、结果编辑和裁剪。
-- 桌面贴图、贴图穿透与恢复。
+- 桌面圆角贴图、可记忆的描边颜色与粗细、贴图穿透与恢复。
 - 随程序分发的 PaddleOCR 模型、腾讯云 OCR、本地/云端识别策略。
 - 腾讯机器翻译、OpenAI 兼容 AI 自然翻译、MyMemory，支持失败回退和模型竞速。
 - 识别时有选区扫光和逐行高亮，翻译卡片可切换原文与译文。在「文字与翻译 → 显示方式」可切换卡片和覆盖原文。
@@ -72,7 +82,7 @@ GIF 先保留无声 MP4 素材。在预览点「拷贝」就会生成当前裁�
 
 原位翻译通过局部底色覆盖文字，复杂图片背景可能出现覆盖痕迹，过长译文会缩小字号。单显示器录屏走 DXGI，要求 SDR。跨显示器选区按桌面物理像素采集，显示器布局中的空白区域填黑。当前翻译提供方以上述列表为准，本地 OCR 模型随项目提供。
 
-跨显示器录屏请从录屏快捷键或托盘「录屏」开始，拖出覆盖多个屏幕的选区。
+跨显示器录屏可以从录屏快捷键或托盘「录屏」开始，也可以先在截图模式框选区域，再从工具栏切换到录屏。
 
 ## 环境与获取源码
 
@@ -81,11 +91,11 @@ GIF 先保留无声 MP4 素材。在预览点「拷贝」就会生成当前裁�
 - Git 和 Git LFS，FFmpeg 二进制通过 Git LFS 保存。
 - 构建安装包时另需 PowerShell 7 和 NSIS 3.12。
 
-复现上方 1.1.0 安装包时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
+复现上方 1.1.1 安装包时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
 
 ```powershell
 git lfs install
-git clone --branch v1.1.0 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
+git clone --branch v1.1.1 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
 Set-Location 开发工程
 git lfs pull
 ```

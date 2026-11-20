@@ -134,28 +134,24 @@ internal sealed partial class CaptureOverlayWindow
         PositionFloatingPanels();
     }
 
-    private void PositionInPlaceTranslation()
+    private void PositionInPlaceTranslation(Rect viewport, Rect selection)
     {
-        var selection = _surface.Selection;
-        if (selection.IsEmpty || ActualWidth <= 0 || ActualHeight <= 0)
-            return;
-        var sx = ActualWidth / _frame.Width;
-        var sy = ActualHeight / _frame.Height;
         if (_inPlaceStatusBar.Visibility != Visibility.Visible)
             return;
-        _inPlaceStatusBar.Width = Math.Min(Math.Max(400, selection.Width * sx), Math.Max(1, ActualWidth - 16));
+        _inPlaceStatusBar.Width = Math.Min(Math.Max(400, selection.Width), Math.Max(1, viewport.Width - 16));
         _inPlaceStatusBar.Measure(new Size(_inPlaceStatusBar.Width, double.PositiveInfinity));
         var height = _inPlaceStatusBar.DesiredSize.Height;
         var toolbar = ToolbarBounds();
-        var top = selection.Y * sy - height - 10;
-        if (top < 8 || new Rect(selection.X * sx, top, _inPlaceStatusBar.Width, height).IntersectsWith(toolbar))
+        var left = FitX(viewport, selection.X, _inPlaceStatusBar.Width);
+        var top = selection.Y - height - 10;
+        if (top < viewport.Top + 8 || new Rect(left, top, _inPlaceStatusBar.Width, height).IntersectsWith(toolbar))
         {
             top = toolbar.Bottom + 6;
-            if (top + height > ActualHeight - 8)
-                top = Math.Max(8, toolbar.Top - height - 6);
+            if (top + height > viewport.Bottom - 8)
+                top = toolbar.Top - height - 6;
         }
-        Canvas.SetLeft(_inPlaceStatusBar, Math.Clamp(selection.X * sx, 8, Math.Max(8, ActualWidth - _inPlaceStatusBar.Width - 8)));
-        Canvas.SetTop(_inPlaceStatusBar, top);
+        Canvas.SetLeft(_inPlaceStatusBar, left);
+        Canvas.SetTop(_inPlaceStatusBar, FitY(viewport, top, height));
     }
 
     private async Task TranslateInPlaceAsync(AppSettings settings, string targetLanguage, CancellationTokenSource operation)

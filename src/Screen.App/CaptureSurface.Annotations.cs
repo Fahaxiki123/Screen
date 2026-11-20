@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -73,6 +74,23 @@ internal sealed partial class CaptureSurface
 
     private static bool IsFreehandStroke(AnnotationItem item) =>
         item.Kind == AnnotationKind.Pen || item.Kind == AnnotationKind.Mosaic && item.Style.Variant >= 100;
+
+    private static IEnumerable<(PixelPoint From, PixelPoint To)> StrokeSegments(
+        IReadOnlyList<PixelPoint> points, IReadOnlySet<int> breaks)
+    {
+        for (var index = 0; index < points.Count; index++)
+        {
+            if (index + 1 < points.Count && !breaks.Contains(index + 1))
+            {
+                yield return (points[index], points[index + 1]);
+            }
+            else if (index == 0 || breaks.Contains(index))
+            {
+                // A path containing only its entry point still leaves a round brush tip.
+                yield return (points[index], points[index]);
+            }
+        }
+    }
 
     public void Undo()
     {
@@ -234,18 +252,22 @@ internal sealed partial class CaptureSurface
             CaptureTool.Mosaic => AnnotationKind.Mosaic,
             _ => throw new InvalidOperationException("Select is not an annotation tool.")
         };
-        var points = kind == AnnotationKind.Pen || (kind == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush)
+        var freehand = kind == AnnotationKind.Pen || (kind == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush);
+        var points = freehand
             ? _workingPoints.Select(ClampAnnotationPoint).ToArray()
             : new[] { start, end };
         var bounds = kind == AnnotationKind.Text
             ? MeasureTextBounds(start, text ?? string.Empty, CurrentStyle)
             : kind == AnnotationKind.Number
                 ? new PixelRect((int)start.X, (int)start.Y, 1, 1)
-            : kind == AnnotationKind.Pen || (kind == AnnotationKind.Mosaic && MosaicMode == MosaicDrawMode.Brush)
+            : freehand
                 ? BoundsAroundPoints(points, CurrentStyle.Thickness / 2)
             : RectFromPoints(start, end);
         var zIndex = _annotations.Count == 0 ? 0 : _annotations[^1].ZIndex + 1;
-        var annotation = new AnnotationItem(Guid.NewGuid(), kind, points, bounds, CurrentStyle, text, number, zIndex);
+        var annotation = new AnnotationItem(Guid.NewGuid(), kind, points, bounds, CurrentStyle, text, number, zIndex)
+        {
+            StrokeBreaks = freehand ? _workingStrokeBreaks.ToFrozenSet() : FrozenSet<int>.Empty
+        };
         _annotations.Add(annotation);
         // A newly drawn mark is finished, not implicitly in transform mode.
         // The user can explicitly choose it later with the pointer tool.
@@ -275,16 +297,8 @@ internal sealed partial class CaptureSurface
         }
         if (Tool is CaptureTool.Pen || Tool == CaptureTool.Mosaic && MosaicMode == MosaicDrawMode.Brush)
         {
-            if (_workingPoints.Count < 2)
-            {
-                return false;
-            }
-            var pathLength = 0.0;
-            for (var index = 1; index < _workingPoints.Count; index++)
-            {
-                pathLength += Distance(_workingPoints[index - 1], _workingPoints[index]);
-            }
-            return pathLength >= minimum;
+            return StrokeSegments(_workingPoints, _workingStrokeBreaks)
+                .Sum(segment => Distance(segment.From, segment.To)) >= minimum;
         }
         return Math.Abs(end.X - start.X) >= minimum
                && Math.Abs(end.Y - start.Y) >= minimum;
@@ -383,18 +397,8 @@ internal sealed partial class CaptureSurface
         if (item.Kind is AnnotationKind.Line or AnnotationKind.Arrow or AnnotationKind.Pen
             || (item.Kind == AnnotationKind.Mosaic && item.Style.Variant >= 100))
         {
-            if (item.Points.Count == 1)
-            {
-                return Distance(item.Points[0], point) <= tolerance;
-            }
-            for (var index = 1; index < item.Points.Count; index++)
-            {
-                if (DistanceToSegment(point, item.Points[index - 1], item.Points[index]) <= tolerance)
-                {
-                    return true;
-                }
-            }
-            return false;
+            return StrokeSegments(item.Points, item.StrokeBreaks)
+                .Any(segment => DistanceToSegment(point, segment.From, segment.To) <= tolerance);
         }
         var bounds = GetVisualBounds(item);
         return item.Kind switch
