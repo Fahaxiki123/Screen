@@ -5,7 +5,7 @@
     <Setter Property="Background" Value="{DynamicResource Brush.WindowBackdrop}" />
     <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI" />
-    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontSize" Value="13" />
   </Style>
   <Style TargetType="TextBox">
     <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
@@ -13,47 +13,13 @@
     <Setter Property="CaretBrush" Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
     <Setter Property="SelectionBrush" Value="{DynamicResource Brush.AccentSubtleHover}" />
-    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontSize" Value="13" />
     <Setter Property="Padding" Value="10,7" />
-  </Style>
-  <Style TargetType="ToolTip">
-    <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
-    <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-    <Setter Property="FontSize" Value="12" />
-    <Setter Property="MaxWidth" Value="360" />
-    <Setter Property="Template">
-      <Setter.Value>
-        <ControlTemplate TargetType="ToolTip">
-          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="10,7">
-            <ContentPresenter />
-          </Border>
-        </ControlTemplate>
-      </Setter.Value>
-    </Setter>
-  </Style>
-  <Style TargetType="ContextMenu">
-    <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI" />
-    <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
-    <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-    <Setter Property="FontSize" Value="14" />
-    <Setter Property="Template">
-      <Setter.Value>
-        <ControlTemplate TargetType="ContextMenu">
-          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="5" MinWidth="190">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="560" CanContentScroll="True">
-              <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
-            </ScrollViewer>
-          </Border>
-        </ControlTemplate>
-      </Setter.Value>
-    </Setter>
   </Style>
   <Style TargetType="MenuItem">
     <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="Padding" Value="10,4" />
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="MenuItem">
@@ -82,8 +48,8 @@
             </Popup>
           </Grid>
           <ControlTemplate.Triggers>
-            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
-            <Trigger Property="IsSubmenuOpen" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
+            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.PrimaryAction}" /></Trigger>
+            <Trigger Property="IsSubmenuOpen" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.PrimaryAction}" /></Trigger>
             <Trigger Property="HasItems" Value="True"><Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible" /></Trigger>
             <Trigger Property="IsChecked" Value="True">
               <Setter TargetName="IconHost" Property="Visibility" Value="Collapsed" />
@@ -110,7 +76,7 @@
         <ControlTemplate TargetType="ComboBoxItem">
           <Border x:Name="Chrome" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}"><ContentPresenter /></Border>
           <ControlTemplate.Triggers>
-            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
+            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.PrimaryAction}" /></Trigger>
             <Trigger Property="IsSelected" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.AccentSubtle}" /><Setter Property="Foreground" Value="{DynamicResource Brush.AccentText}" /></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -121,7 +87,7 @@
     <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontSize" Value="13" />
     <Setter Property="Padding" Value="10,5" />
     <Setter Property="MinHeight" Value="32" />
     <Setter Property="Template">
@@ -132,7 +98,7 @@
               <ToggleButton.Template>
                 <ControlTemplate TargetType="ToggleButton">
                   <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" />
-                  <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger></ControlTemplate.Triggers>
+                  <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.PrimaryAction}" /></Trigger></ControlTemplate.Triggers>
                 </ControlTemplate>
               </ToggleButton.Template>
             </ToggleButton>
@@ -163,7 +129,7 @@
               <RepeatButton x:Name="Increase" Command="ScrollBar.PageDownCommand" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template></RepeatButton>
             </Track.IncreaseRepeatButton>
             <Track.Thumb>
-              <Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border x:Name="Thumb" Background="#4594C5FF" CornerRadius="3" Margin="1,2" /><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Thumb" Property="Background" Value="#7594C5FF" /></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb>
+              <Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border x:Name="Thumb" Background="{DynamicResource Brush.LabelTertiary}" CornerRadius="3" Margin="1,2" /><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Thumb" Property="Background" Value="{DynamicResource Brush.LabelSecondary}" /></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb>
             </Track.Thumb>
           </Track>
           <ControlTemplate.Triggers>

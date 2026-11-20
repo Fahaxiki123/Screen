@@ -1,0 +1,138 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Screen.App">
+  <ResourceDictionary.MergedDictionaries>
+    <ResourceDictionary Source="SettingsControls.xaml" />
+  </ResourceDictionary.MergedDictionaries>
+  <Style TargetType="local:GlassPanel">
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Radius.Bar}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Label}" />
+    <Setter Property="FontFamily" Value="{DynamicResource FontFamily.Body}" />
+    <Setter Property="FontSize" Value="{DynamicResource Font.Body}" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Stretch" />
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="local:GlassPanel">
+      <Grid>
+        <Border CornerRadius="{TemplateBinding CornerRadius}" IsHitTestVisible="False"
+                Background="{DynamicResource Brush.EdgeDark}" Effect="{DynamicResource Shadow.Glass}" />
+        <Border CornerRadius="{TemplateBinding CornerRadius}" BorderThickness="1" BorderBrush="{DynamicResource Brush.EdgeDark}">
+          <Grid>
+            <Border x:Name="Backdrop" CornerRadius="{TemplateBinding CornerRadius}">
+              <Border.Background><ImageBrush ViewboxUnits="Absolute" Stretch="Fill"
+                 ImageSource="{Binding BackdropSource, RelativeSource={RelativeSource TemplatedParent}}"
+                 Viewbox="{Binding BackdropViewbox, RelativeSource={RelativeSource TemplatedParent}}" /></Border.Background>
+            </Border>
+            <Border x:Name="Dim" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource Brush.Dim}" Opacity="0" />
+            <Border x:Name="Tint" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource Brush.GlassTint}" />
+            <Border CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource Brush.GlassWhite}" />
+            <Border CornerRadius="{TemplateBinding CornerRadius}" BorderThickness="1" BorderBrush="{DynamicResource Brush.GlassRim}" />
+            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+          </Grid>
+        </Border>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsDimmed" Value="True"><Setter TargetName="Dim" Property="Opacity" Value="1" /></Trigger>
+        <Trigger Property="BackdropSource" Value="{x:Null}"><Setter TargetName="Tint" Property="Background" Value="{DynamicResource Brush.GlassSolid}" /></Trigger>
+        <Trigger Property="Variant" Value="Solid"><Setter TargetName="Backdrop" Property="Visibility" Value="Hidden" /><Setter TargetName="Tint" Property="Background" Value="{DynamicResource Brush.GlassSolid}" /></Trigger>
+        <Trigger Property="Variant" Value="DarkSolid"><Setter TargetName="Backdrop" Property="Visibility" Value="Hidden" /><Setter TargetName="Tint" Property="Background" Value="{DynamicResource Brush.DarkGlassSolid}" /></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+
+  <Style x:Key="HudButtonBase" TargetType="Control">
+    <Setter Property="Width" Value="34" /><Setter Property="Height" Value="34" /><Setter Property="MinWidth" Value="0" />
+    <Setter Property="Padding" Value="0" /><Setter Property="Margin" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.OverlayIcon}" /><Setter Property="Background" Value="Transparent" />
+    <Setter Property="Cursor" Value="Hand" /><Setter Property="ToolTipService.InitialShowDelay" Value="450" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" /><Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style x:Key="HudIconButtonStyle" TargetType="Button" BasedOn="{StaticResource HudButtonBase}">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource Radius.Button}" BorderThickness="1" BorderBrush="Transparent" RenderTransformOrigin="0.5,0.5">
+        <Border.RenderTransform><ScaleTransform /></Border.RenderTransform>
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+        <Trigger Property="local:HudActiveButton.IsActive" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.AccentSubtleDark}" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.GlassRim}" /></Trigger>
+        <Trigger Property="IsPressed" Value="True">
+          <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.Pressed}" />
+          <Trigger.EnterActions><BeginStoryboard><Storyboard>
+            <DoubleAnimation Storyboard.TargetName="Chrome" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="0.88" Duration="0:0:0.15" />
+            <DoubleAnimation Storyboard.TargetName="Chrome" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="0.88" Duration="0:0:0.15" />
+          </Storyboard></BeginStoryboard></Trigger.EnterActions>
+          <Trigger.ExitActions><BeginStoryboard><Storyboard>
+            <DoubleAnimation Storyboard.TargetName="Chrome" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="1" Duration="0:0:0.25"><DoubleAnimation.EasingFunction><BackEase Amplitude="0.3" EasingMode="EaseOut" /></DoubleAnimation.EasingFunction></DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="Chrome" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="1" Duration="0:0:0.25"><DoubleAnimation.EasingFunction><BackEase Amplitude="0.3" EasingMode="EaseOut" /></DoubleAnimation.EasingFunction></DoubleAnimation>
+          </Storyboard></BeginStoryboard></Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.3" /></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="HudToolButtonStyle" TargetType="RadioButton" BasedOn="{StaticResource HudButtonBase}">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+      <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource Radius.Button}" BorderThickness="1" BorderBrush="Transparent" RenderTransformOrigin="0.5,0.5">
+        <Border.RenderTransform><ScaleTransform /></Border.RenderTransform>
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+        <Trigger Property="local:HudActiveButton.IsActive" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.AccentSubtleDark}" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.GlassRim}" /></Trigger>
+        <Trigger Property="IsPressed" Value="True">
+          <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.Pressed}" />
+          <Trigger.EnterActions><BeginStoryboard><Storyboard>
+            <DoubleAnimation Storyboard.TargetName="Chrome" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="0.88" Duration="0:0:0.15" />
+            <DoubleAnimation Storyboard.TargetName="Chrome" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="0.88" Duration="0:0:0.15" />
+          </Storyboard></BeginStoryboard></Trigger.EnterActions>
+          <Trigger.ExitActions><BeginStoryboard><Storyboard>
+            <DoubleAnimation Storyboard.TargetName="Chrome" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="1" Duration="0:0:0.25"><DoubleAnimation.EasingFunction><BackEase Amplitude="0.3" EasingMode="EaseOut" /></DoubleAnimation.EasingFunction></DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="Chrome" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="1" Duration="0:0:0.25"><DoubleAnimation.EasingFunction><BackEase Amplitude="0.3" EasingMode="EaseOut" /></DoubleAnimation.EasingFunction></DoubleAnimation>
+          </Storyboard></BeginStoryboard></Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.3" /></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <DropShadowEffect x:Key="Shadow.Primary" Color="#0A84FF" Opacity="0.42" BlurRadius="10" ShadowDepth="2" />
+  <DropShadowEffect x:Key="Shadow.Record" Color="#FF453A" Opacity="0.42" BlurRadius="10" ShadowDepth="2" />
+  <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+    <Setter Property="Height" Value="34" /><Setter Property="Padding" Value="12,0" /><Setter Property="Margin" Value="0"/>
+    <Setter Property="Cursor" Value="Hand" /><Setter Property="FontWeight" Value="SemiBold" /><Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.White}" /><Setter Property="Background" Value="{DynamicResource Brush.PrimaryAction}" />
+    <Setter Property="BorderBrush" Value="#61FFFFFF" /><Setter Property="ToolTipService.InitialShowDelay" Value="450" />
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Grid>
+        <Border x:Name="ActionShadow" CornerRadius="{DynamicResource Radius.Button}" Background="{TemplateBinding Background}" Effect="{DynamicResource Shadow.Primary}" />
+        <Border CornerRadius="{DynamicResource Radius.Button}" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1,1,0,0">
+          <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.8" /></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.3" /></Trigger>
+        <Trigger Property="Tag" Value="Record"><Setter TargetName="ActionShadow" Property="Effect" Value="{DynamicResource Shadow.Record}" /></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="RecordButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+    <Setter Property="Tag" Value="Record" /><Setter Property="Background" Value="{DynamicResource Brush.RubySolid}" />
+  </Style>
+  <Style x:Key="GlassToolTipStyle" TargetType="ToolTip">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Label}" /><Setter Property="FontSize" Value="12" /><Setter Property="MaxWidth" Value="360" />
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip">
+      <Border CornerRadius="{DynamicResource Radius.Control}" Background="{DynamicResource Brush.DarkGlassSolid}" BorderBrush="{DynamicResource Brush.Pressed}" BorderThickness="1" Padding="8,4"><ContentPresenter /></Border>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="ToolTip" BasedOn="{StaticResource GlassToolTipStyle}" />
+  <Style x:Key="GlassMenuStyle" TargetType="ContextMenu">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Label}" /><Setter Property="FontSize" Value="13" />
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu">
+      <local:GlassPanel Variant="DarkSolid" CornerRadius="{DynamicResource Radius.Menu}" Padding="4" MinWidth="170">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="560" CanContentScroll="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" /></ScrollViewer>
+      </local:GlassPanel>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="ContextMenu" BasedOn="{StaticResource GlassMenuStyle}" />
+</ResourceDictionary>

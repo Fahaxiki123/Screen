@@ -7,6 +7,7 @@
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="Themes/Tokens.xaml" />
         <ResourceDictionary Source="Themes/GraphiteControls.xaml" />
+        <ResourceDictionary Source="Themes/Controls.xaml" />
       </ResourceDictionary.MergedDictionaries>
 
       <!-- Legacy aliases: existing code references these keys; they now
@@ -150,12 +151,12 @@
                       <Thumb.Template>
                         <ControlTemplate TargetType="Thumb">
                           <Border x:Name="ThumbChrome"
-                                  Background="#4594C5FF"
+                                  Background="{DynamicResource Brush.LabelTertiary}"
                                   CornerRadius="3"
                                   Margin="1,2" />
                           <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                              <Setter TargetName="ThumbChrome" Property="Background" Value="#7594C5FF" />
+                              <Setter TargetName="ThumbChrome" Property="Background" Value="{DynamicResource Brush.LabelSecondary}" />
                             </Trigger>
                             <Trigger Property="IsDragging" Value="True">
                               <Setter TargetName="ThumbChrome" Property="Background" Value="{DynamicResource Brush.Accent}" />
@@ -214,61 +215,7 @@
         </Setter>
       </Style>
 
-      <Style x:Key="CardPrimaryButtonStyle" TargetType="Button">
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="Height" Value="34" />
-        <Setter Property="MinWidth" Value="66" />
-        <Setter Property="Margin" Value="4,1,2,1" />
-        <Setter Property="Padding" Value="10,0,12,0" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Background" Value="{DynamicResource Brush.PrimaryAction}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisualStyle}" />
-        <Setter Property="Template">
-          <Setter.Value>
-            <ControlTemplate TargetType="Button">
-              <Border x:Name="ButtonChrome"
-                      CornerRadius="8"
-                      Background="{TemplateBinding Background}"
-                      BorderThickness="1"
-                      SnapsToDevicePixels="True">
-                <Border.BorderBrush>
-                  <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                    <GradientStop Color="#90FFFFFF" Offset="0" />
-                    <GradientStop Color="#30FFFFFF" Offset="1" />
-                  </LinearGradientBrush>
-                </Border.BorderBrush>
-                <Border CornerRadius="7" BorderThickness="1,1,0,0">
-                  <Border.BorderBrush>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                      <GradientStop Color="#60FFFFFF" Offset="0" />
-                      <GradientStop Color="#00FFFFFF" Offset="0.75" />
-                    </LinearGradientBrush>
-                  </Border.BorderBrush>
-                  <ContentPresenter HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Margin="{TemplateBinding Padding}" />
-                </Border>
-              </Border>
-              <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Effect">
-                    <Setter.Value>
-                      <DropShadowEffect Color="#0EA5E9" BlurRadius="12" Opacity="0.55" ShadowDepth="0" />
-                    </Setter.Value>
-                  </Setter>
-                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.95" />
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.80" />
-                </Trigger>
-              </ControlTemplate.Triggers>
-            </ControlTemplate>
-          </Setter.Value>
-        </Setter>
-      </Style>
+      <Style x:Key="CardPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}" />
 
       <Style x:Key="CardSecondaryButtonStyle" TargetType="Button">
         <Setter Property="FontSize" Value="14" />
