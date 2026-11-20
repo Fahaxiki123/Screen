@@ -3,8 +3,12 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Shell;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Lucide.NET;
 using Screen.Core;
 
@@ -19,7 +23,6 @@ public partial class SettingsWindow : Window
 
     private CancellationTokenSource? _translationTestOperation;
     private TextBlock? _translationTestStatus;
-    private string _activeNavId = string.Empty;
 
     // Optional live registration: when provided, a newly captured hotkey is
     // registered immediately instead of waiting for this window to close.
@@ -50,30 +53,17 @@ public partial class SettingsWindow : Window
         Func<string?>? hotKeyPriorityError = null)
     {
         InitializeComponent();
-        Background = (Brush)FindResource("Brush.WindowBackdrop");
+        // WPF's plain .ico URI selects the small tray frame. Keep the full-resolution
+        // artwork for this 40-DIP tile, including when the window moves between DPIs.
+        using (var icon = Application.GetResourceStream(new Uri("/Screen;component/Assets/Screen.ico", UriKind.Relative)).Stream)
+            ProfileIcon.Source = new IconBitmapDecoder(icon, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad)
+                .Frames.MaxBy(frame => frame.PixelWidth);
         _registerCaptureHotKey = registerCaptureHotKey;
         _registerRecoveryHotKey = registerRecoveryHotKey;
         _registerRecordHotKey = registerRecordHotKey;
         var version = typeof(SettingsWindow).Assembly.GetName().Version;
-        NavVersion.Text = version is null ? "本地构建" : $"v{version.ToString(3)} · 本地构建";
-        SourceInitialized += (_, _) =>
-        {
-            // Match the system title bar to the navy content.
-            var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-            var dark = 1;
-            _ = NativeMethods.DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
-            ApplyTitleBarColor(35, "Brush.WindowBackground"); // DWMWA_CAPTION_COLOR
-            ApplyTitleBarColor(36, "Brush.TextPrimary");      // DWMWA_TEXT_COLOR
-            ApplyTitleBarColor(34, "Brush.Border");           // DWMWA_BORDER_COLOR
-
-            void ApplyTitleBarColor(int attribute, string resourceKey)
-            {
-                var color = ((SolidColorBrush)FindResource(resourceKey)).Color;
-                // DWM expects a COLORREF (0x00BBGGRR), not WPF's ARGB value.
-                var colorRef = color.R | (color.G << 8) | (color.B << 16);
-                _ = NativeMethods.DwmSetWindowAttribute(handle, attribute, ref colorRef, sizeof(int));
-            }
-        };
+        NavVersion.Text = version is null ? "本地构建" : $"版本 {version.ToString(3)}";
+        SourceInitialized += (_, _) => ApplyBackdrop();
 
         _viewModel = new SettingsViewModel(store, credentials, setStartupEnabled, setHotKeyPriority, hotKeyPriorityError);
         DataContext = _viewModel;
@@ -98,217 +88,109 @@ public partial class SettingsWindow : Window
         ShowPage("general");
     }
 
+    private sealed record PageInfo(string Id, string Title, string Summary, LucideIconKind Icon, string Tile);
+
+    private static readonly PageInfo[] PageDefinitions =
+    [
+        new("general", "通用", "启动方式、快捷键和存储位置。", LucideIconKind.Settings2, "Tile.Gray"),
+        new("recording", "录屏", "录下屏幕的一块区域，保存成视频或 GIF。", LucideIconKind.Video, "Tile.Red"),
+        new("translation", "文字与翻译", "截图里的文字，一键提取，随手翻译。", LucideIconKind.Languages, "Tile.Indigo")
+    ];
+
+    private void ApplyBackdrop()
+    {
+        if (HwndSource.FromHwnd(new WindowInteropHelper(this).Handle) is not { CompositionTarget: { } target } source)
+            return;
+        // The XAML defaults deliberately remain opaque until DWM accepts both requests.
+        var dark = 1;
+        var mica = 2;
+        var enabled = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621) && !SystemParameters.HighContrast
+            && NativeMethods.DwmSetWindowAttribute(source.Handle, 20, ref dark, sizeof(int)) >= 0
+            && NativeMethods.DwmSetWindowAttribute(source.Handle, 38, ref mica, sizeof(int)) >= 0;
+        var chrome = WindowChrome.GetWindowChrome(this);
+        if (enabled)
+        {
+            var glass = (WindowChrome)chrome.CloneCurrentValue();
+            glass.GlassFrameThickness = new Thickness(-1);
+            WindowChrome.SetWindowChrome(this, glass);
+            Sidebar.SetResourceReference(Border.BackgroundProperty, "Settings.MicaSidebar");
+            ContentSurface.SetResourceReference(Grid.BackgroundProperty, "Settings.MicaContent");
+            SetResourceReference(BackgroundProperty, "Brush.Transparent");
+        }
+        var brush = (SolidColorBrush)FindResource(enabled ? "Brush.Transparent" : "Brush.Window");
+        target.BackgroundColor = brush.Color;
+    }
+
     private void BuildNavigation()
     {
-        NavHost.Children.Clear();
-        _navigation.Clear();
-
-        AddNavigationSection("基础设置");
-        AddNavigationItem("general", LucideIconKind.Settings2, "通用");
-        AddNavigationItem("shortcuts", LucideIconKind.Keyboard, "快捷键");
-        AddNavigationItem("recording", LucideIconKind.Video, "录屏");
-        AddNavigationSection("文字与翻译");
-        AddNavigationItem("ocr", LucideIconKind.ScanText, "文字识别");
-        AddNavigationItem("translation", LucideIconKind.Languages, "翻译接口");
-    }
-
-    private void AddNavigationSection(string title)
-    {
-        NavHost.Children.Add(new TextBlock
+        foreach (var page in PageDefinitions)
         {
-            Text = title,
-            Margin = new Thickness(12, 14, 0, 9),
-            FontSize = (double)FindResource("Settings.FontSize.Section"),
-            FontWeight = GetFontWeight("Settings.FontWeight.Section"),
-            Foreground = GetResource<Brush>("Settings.Brush.TextTertiary")
-        });
-    }
-
-    private void AddNavigationItem(string id, LucideIconKind icon, string text)
-    {
-        var iconElement = new LucideIconElement
-        {
-            Kind = icon,
-            Width = 18,
-            Height = 18,
-            StrokeThickness = 1.8,
-            Stroke = (Brush)FindResource("Settings.Brush.TextSecondary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        var label = new TextBlock
-        {
-            Text = text,
-            FontSize = (double)FindResource("Settings.FontSize.Nav"),
-            FontWeight = GetFontWeight("Settings.FontWeight.Nav"),
-            Foreground = (Brush)FindResource("Settings.Brush.TextPrimary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        var indicator = new Border
-        {
-            Width = 3,
-            Height = 18,
-            CornerRadius = new CornerRadius(1.5),
-            Margin = new Thickness(-8, 0, 8, 0),
-            Background = Brushes.Transparent,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        var content = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        content.Children.Add(indicator);
-        content.Children.Add(iconElement);
-        content.Children.Add(new Border { Width = 11 });
-        content.Children.Add(label);
-
-        var button = new Button
-        {
-            Tag = id,
-            Content = content,
-            Style = (Style)FindResource("SettingsNavButtonStyle"),
-            ToolTip = text
-        };
-        // Hover lives in code (not the template) so the ACTIVE page can opt
-        // out and keep its selection pill steady.
-        button.MouseEnter += (_, _) =>
-        {
-            if (id != _activeNavId)
-            {
-                button.Background = (Brush)FindResource("Settings.Brush.NavHover");
-            }
-        };
-        button.MouseLeave += (_, _) =>
-        {
-            if (id != _activeNavId)
-            {
-                button.Background = Brushes.Transparent;
-            }
-        };
-        button.Click += (_, _) => ShowPage(id);
-        _navigation[id] = button;
-        NavHost.Children.Add(button);
+            var icon = new LucideIconElement { Kind = page.Icon, Width = 15, Height = 15, StrokeThickness = 1.7 };
+            icon.SetResourceReference(LucideIconElement.StrokeProperty, "Brush.White");
+            var tile = new IconTile { Width = 24, Height = 24, Content = icon };
+            tile.SetResourceReference(BackgroundProperty, page.Tile);
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            row.Children.Add(tile);
+            row.Children.Add(new TextBlock { Text = page.Title, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+            var button = new Button { Content = row, Style = (Style)FindResource("Settings.Navigation") };
+            AutomationProperties.SetName(button, page.Title);
+            button.Click += (_, _) => ShowPage(page.Id);
+            _navigation.Add(page.Id, button);
+            NavHost.Children.Add(button);
+        }
     }
 
     private void ShowPage(string id)
     {
-        _activeNavId = id;
+        var info = PageDefinitions.First(page => page.Id == id);
         foreach (var (key, button) in _navigation)
         {
-            var isActive = key == id;
-            button.Background = isActive
-                ? new SolidColorBrush(Color.FromArgb(0x22, 0x38, 0xBD, 0xF8))
-                : Brushes.Transparent;
-            button.BorderBrush = isActive
-                ? new SolidColorBrush(Color.FromArgb(0x40, 0x7D, 0xD3, 0xFC))
-                : Brushes.Transparent;
-
-            if (button.Content is StackPanel content
-                && content.Children.Count == 4
-                && content.Children[0] is Border indicator
-                && content.Children[1] is LucideIconElement icon
-                && content.Children[3] is TextBlock label)
-            {
-                indicator.Background = isActive
-                    ? (Brush)FindResource("Settings.Brush.AccentText")
-                    : Brushes.Transparent;
-                icon.Stroke = isActive
-                    ? (Brush)FindResource("Settings.Brush.AccentText")
-                    : (Brush)FindResource("Settings.Brush.TextSecondary");
-                label.Foreground = (Brush)FindResource(isActive
-                    ? "Settings.Brush.TextPrimary"
-                    : "Settings.Brush.TextSecondary");
-            }
+            var selected = key == id;
+            HudActiveButton.SetIsActive(button, selected);
+            AutomationProperties.SetItemStatus(button, selected ? "已选中" : string.Empty);
         }
 
         if (!_pages.TryGetValue(id, out var page))
         {
             page = id switch
             {
-                "shortcuts" => BuildShortcutsPage(),
                 "recording" => BuildRecordingPage(),
-                "ocr" => BuildOcrPage(),
                 "translation" => BuildTranslationPage(),
                 _ => BuildGeneralPage()
             };
-            _pages[id] = page;
+            _pages.Add(id, page);
         }
 
+        Caption.Text = PageTitle.Text = info.Title;
+        PageDescription.Text = info.Summary;
+        HeaderIcon.Kind = info.Icon;
+        HeaderTile.SetResourceReference(BackgroundProperty, info.Tile);
+        TranslationStatusBadge.Visibility = id == "translation" ? Visibility.Visible : Visibility.Collapsed;
         PageHost.Content = page;
-        ApplyPageHeader(id);
+        PageScroll.ScrollToTop();
         UpdateTranslationSections();
     }
 
-    private void ApplyPageHeader(string id)
+    private void MinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+    private void MaximizeClick(object sender, RoutedEventArgs e)
     {
-        switch (id)
-        {
-            case "shortcuts":
-                PageTitle.Text = "快捷键";
-                PageDescription.Text = "点击快捷键按钮后直接按下新组合键，设置会自动保存。";
-                break;
-            case "recording":
-                PageTitle.Text = "录屏";
-                PageDescription.Text = "录屏的帧率、清晰度与快捷键；每次录制前仍会先选择区域。";
-                break;
-            case "ocr":
-                PageTitle.Text = "文字识别";
-                PageDescription.Text = "本地识别优先，困难内容可自动使用云端增强。";
-                break;
-            case "translation":
-                PageTitle.Text = "翻译接口";
-                PageDescription.Text = "配置截图翻译使用的服务、密钥和回退策略。";
-                break;
-            default:
-                PageTitle.Text = "通用";
-                PageDescription.Text = "控制 Screen 的启动方式与基础行为。";
-                break;
-        }
+        if (WindowState == WindowState.Maximized)
+            SystemCommands.RestoreWindow(this);
+        else
+            SystemCommands.MaximizeWindow(this);
     }
+    private void CloseClick(object sender, RoutedEventArgs e) => Close();
 
-    private void UpdateTranslationSections()
+    protected override void OnStateChanged(EventArgs e)
     {
-        if (_tencentSection is null || _aiSection is null || _memorySection is null)
-        {
+        base.OnStateChanged(e);
+        if (MaximizeButton is null)
             return;
-        }
-
-        _tencentSection.Visibility = _viewModel.TranslationProviderIndex == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        _aiSection.Visibility = _viewModel.TranslationProviderIndex == 2
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        _memorySection.Visibility = _viewModel.TranslationProviderIndex == 1
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-        if (_racingRows is not null)
-        {
-            _racingRows.Visibility = _viewModel.EnableRacing
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        }
-
-        if (_fastFallbackRow is not null)
-        {
-            _fastFallbackRow.Visibility = _viewModel.EnableFastFallbackRace
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        }
-    }
-
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(SettingsViewModel.TranslationProviderIndex)
-            or nameof(SettingsViewModel.EnableRacing)
-            or nameof(SettingsViewModel.EnableFastFallbackRace))
-        {
-            UpdateTranslationSections();
-        }
+        var maximized = WindowState == WindowState.Maximized;
+        MaximizeIcon.Kind = maximized ? LucideIconKind.Copy : LucideIconKind.Square;
+        MaximizeButton.ToolTip = maximized ? "还原" : "最大化";
+        AutomationProperties.SetName(MaximizeButton, (string)MaximizeButton.ToolTip);
+        Shell.Margin = maximized ? SystemParameters.WindowResizeBorderThickness : new Thickness(0);
     }
 
     private void OnClosed(object? sender, EventArgs e)

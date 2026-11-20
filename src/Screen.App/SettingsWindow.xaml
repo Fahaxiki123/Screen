@@ -1,23 +1,45 @@
 <Window x:Class="Screen.App.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
-        Title="Screen 设置"
-        Width="1000"
-        Height="700"
-        MinWidth="880"
-        MinHeight="600"
-        WindowStartupLocation="CenterScreen"
-        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
-        FontSize="14"
-        Foreground="{DynamicResource Brush.TextPrimary}"
-        Background="{DynamicResource Brush.WindowBackdrop}"
-        UseLayoutRounding="True"
-        TextOptions.TextFormattingMode="Display"
-        TextOptions.TextRenderingMode="ClearType"
-        Closed="OnClosed">
+        xmlns:local="clr-namespace:Screen.App" xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+        Title="Screen 设置" Width="920" Height="620" MinWidth="820" MinHeight="560"
+        ResizeMode="CanResize" WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource Brush.Window}" Foreground="{DynamicResource Brush.Label}"
+        FontFamily="{DynamicResource FontFamily.Body}" FontSize="13" UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display" Closed="OnClosed">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="48" ResizeBorderThickness="6" GlassFrameThickness="0"
+                      CornerRadius="{DynamicResource Radius.Bar}" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
     <Window.Resources>
         <ResourceDictionary>
+            <SolidColorBrush x:Key="Settings.MicaContent" Color="#29000000"/>
+            <SolidColorBrush x:Key="Settings.MicaSidebar" Color="#14000000"/>
+            <LinearGradientBrush x:Key="Settings.NavSelected" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#2EFFFFFF"/><GradientStop Offset="1" Color="#1AFFFFFF"/>
+            </LinearGradientBrush>
+            <Style x:Key="Settings.CaptionButton" TargetType="Button" BasedOn="{StaticResource HudIconButtonStyle}">
+                <Setter Property="Width" Value="42"/><Setter Property="Height" Value="32"/>
+                <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+            </Style>
+            <Style x:Key="Settings.Navigation" TargetType="Button">
+                <Setter Property="Height" Value="32"/><Setter Property="Margin" Value="0,1"/><Setter Property="Padding" Value="6,0"/>
+                <Setter Property="Foreground" Value="{DynamicResource Brush.Label}"/><Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+                <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome" Background="Transparent" BorderBrush="Transparent" BorderThickness="1,1,0,0" CornerRadius="{DynamicResource Radius.Button}" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.Hover}"/></Trigger>
+                        <Trigger Property="local:HudActiveButton.IsActive" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Settings.NavSelected}"/>
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.EdgeHighlight}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate></Setter.Value></Setter>
+            </Style>
 
             <!-- Settings shares the application's moon-blue palette. Local
                  aliases keep the page templates readable without a second
@@ -619,122 +641,65 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="236" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
-
-        <!-- ============ Left Navigation ============ -->
-        <Border Grid.Column="0"
-                Background="{DynamicResource Brush.BrandGradient}"
-                BorderBrush="{StaticResource Settings.Brush.Divider}"
-                BorderThickness="0,0,1,0">
-            <DockPanel Margin="14,28,14,20">
-                <Border DockPanel.Dock="Top"
-                        Margin="10,0,10,26"
-                        Padding="0,0,0,26"
-                        BorderBrush="{StaticResource Settings.Brush.Divider}"
-                        BorderThickness="0,0,0,1">
-                    <StackPanel Orientation="Horizontal">
-                        <Border Width="42"
-                                Height="42"
-                                Background="{DynamicResource Brush.PrimaryAction}"
-                                CornerRadius="12"
-                                VerticalAlignment="Center">
-                            <Path Data="M 7,1 L 1,1 L 1,7 M 13,1 L 19,1 L 19,7 M 1,13 L 1,19 L 7,19 M 13,19 L 19,19 L 19,13"
-                                  Width="20"
-                                  Height="20"
-                                  Stroke="{DynamicResource Brush.OnAccent}"
-                                  StrokeThickness="1.7"
-                                  StrokeStartLineCap="Round"
-                                  StrokeEndLineCap="Round"
-                                  StrokeLineJoin="Round"
-                                  Stretch="Uniform"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center" />
-                        </Border>
-                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                            <TextBlock Text="Screen"
-                                       FontSize="21"
-                                       FontWeight="{StaticResource Settings.FontWeight.PageTitle}"
-                                       Foreground="{StaticResource Settings.Brush.TextPrimary}" />
-                            <TextBlock Text="设置"
-                                       Margin="0,2,0,0"
-                                       FontSize="12"
-                                       Foreground="{StaticResource Settings.Brush.TextSecondary}" />
-                        </StackPanel>
+    <Grid x:Name="Shell">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="216"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Border x:Name="Sidebar" Background="{DynamicResource Brush.Neutral100}" BorderThickness="0,0,1,0" BorderBrush="{DynamicResource Brush.Separator}">
+            <StackPanel Margin="12,22,12,0">
+                <StackPanel Orientation="Horizontal" Margin="8,0,4,20">
+                    <Image x:Name="ProfileIcon" Width="40" Height="40" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="Screen" FontSize="13" FontWeight="Bold"/>
+                        <TextBlock x:Name="NavVersion" FontSize="11" Margin="0,2,0,0" Foreground="{DynamicResource Brush.LabelSecondary}"/>
                     </StackPanel>
-                </Border>
-                <Border DockPanel.Dock="Bottom"
-                        Margin="12,20,12,0"
-                        Padding="0,16,0,0"
-                        BorderBrush="{StaticResource Settings.Brush.Divider}"
-                        BorderThickness="0,1,0,0">
-                    <TextBlock x:Name="NavVersion"
-                               FontSize="{StaticResource Settings.FontSize.Footer}"
-                               Foreground="{DynamicResource Brush.Neutral700}" />
-                </Border>
+                </StackPanel>
                 <StackPanel x:Name="NavHost" />
-            </DockPanel>
-        </Border>
-
-        <!-- ============ Right Content ============ -->
-        <Grid Grid.Column="1">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-
-            <StackPanel Margin="36,32,36,0">
-                <TextBlock x:Name="PageTitle"
-                           FontSize="{StaticResource Settings.FontSize.PageTitle}"
-                           FontWeight="{StaticResource Settings.FontWeight.PageTitle}"
-                           Foreground="{StaticResource Settings.Brush.TextPrimary}" />
-                <TextBlock x:Name="PageDescription"
-                           Margin="0,8,0,0"
-                           FontSize="{StaticResource Settings.FontSize.SettingDescription}"
-                           Foreground="{StaticResource Settings.Brush.TextSecondary}"
-                           TextWrapping="Wrap" />
             </StackPanel>
-
-            <ScrollViewer Grid.Row="1"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          Padding="0,0,0,6">
-                <ContentControl x:Name="PageHost"
-                                Margin="36,26,36,28"
-                                HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch"
-                                VerticalContentAlignment="Top"
-                                Focusable="False" />
+        </Border>
+        <Grid Grid.Column="1" x:Name="ContentSurface" Background="{DynamicResource Brush.Window}">
+            <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid>
+                <TextBlock x:Name="Caption" VerticalAlignment="Center" Margin="22,0,142,0" FontSize="13" FontWeight="SemiBold"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,3,0">
+                    <Button Style="{StaticResource Settings.CaptionButton}" ToolTip="最小化" AutomationProperties.Name="最小化" Click="MinimizeClick">
+                        <local:LucideIconElement Kind="Minus" Width="13" Height="13" Stroke="{DynamicResource Brush.Label}"/>
+                    </Button>
+                    <Button x:Name="MaximizeButton" Style="{StaticResource Settings.CaptionButton}" ToolTip="最大化" AutomationProperties.Name="最大化" Click="MaximizeClick">
+                        <local:LucideIconElement x:Name="MaximizeIcon" Kind="Square" Width="11" Height="11" Stroke="{DynamicResource Brush.Label}"/>
+                    </Button>
+                    <Button Style="{StaticResource Settings.CaptionButton}" ToolTip="关闭" AutomationProperties.Name="关闭" Click="CloseClick">
+                        <local:LucideIconElement Kind="X" Width="14" Height="14" Stroke="{DynamicResource Brush.Label}"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+            <ScrollViewer Grid.Row="1" x:Name="PageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          HorizontalContentAlignment="Stretch" Padding="12,0,12,8">
+                <StackPanel MaxWidth="576" HorizontalAlignment="Stretch" Margin="0,4,0,4">
+                    <Border Style="{DynamicResource SettingsGroup}" Padding="14,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <local:IconTile x:Name="HeaderTile" Width="44" Height="44" VerticalAlignment="Center">
+                                <local:LucideIconElement x:Name="HeaderIcon" Width="26" Height="26" StrokeThickness="1.7" Stroke="{DynamicResource Brush.White}"/>
+                            </local:IconTile>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,8,0">
+                                <TextBlock x:Name="PageTitle" FontSize="15" FontWeight="Bold"/>
+                                <TextBlock x:Name="PageDescription" Margin="0,3,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource Brush.LabelSecondary}"/>
+                            </StackPanel>
+                            <Border x:Name="TranslationStatusBadge" Grid.Column="2" VerticalAlignment="Center" CornerRadius="{DynamicResource Radius.Key}"
+                                    Background="{DynamicResource Brush.Group}" BorderThickness="1" BorderBrush="{DynamicResource Brush.Separator}" Padding="6,3" Visibility="Collapsed">
+                                <TextBlock x:Name="TranslationConnectionStatus" FontSize="11" Text="未测试" Foreground="{DynamicResource Brush.LabelSecondary}"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top" Focusable="False"/>
+                </StackPanel>
             </ScrollViewer>
-
-            <Border Grid.Row="2"
-                    Height="48"
-                    Background="{StaticResource Settings.Brush.WindowBackground}"
-                    BorderBrush="{StaticResource Settings.Brush.Divider}"
-                    BorderThickness="0,1,0,0">
-                <Grid Margin="36,0">
-                    <TextBlock x:Name="AutoSaveStatus"
-                               HorizontalAlignment="Right"
-                               VerticalAlignment="Center"
-                               FontSize="{StaticResource Settings.FontSize.Footer}"
-                               Text="{Binding StatusText, Mode=OneWay}">
-                        <TextBlock.Style>
-                            <Style TargetType="{x:Type TextBlock}">
-                                <Setter Property="Foreground" Value="{StaticResource Settings.Brush.TextTertiary}" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasError}" Value="True">
-                                        <Setter Property="Foreground" Value="{StaticResource Settings.Brush.Error}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
-            </Border>
+            <TextBlock x:Name="AutoSaveStatus" Grid.Row="2" Text="{Binding StatusText}" FontSize="11" Margin="18,3,18,7"
+                       TextWrapping="Wrap" TextAlignment="Right" MaxHeight="58" ToolTip="{Binding StatusText}">
+                <TextBlock.Style><Style TargetType="TextBlock">
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.LabelSecondary}"/>
+                    <Style.Triggers><DataTrigger Binding="{Binding HasError}" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.Record}"/></DataTrigger></Style.Triggers>
+                </Style></TextBlock.Style>
+            </TextBlock>
         </Grid>
     </Grid>
 </Window>

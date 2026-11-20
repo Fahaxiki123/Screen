@@ -11,7 +11,7 @@ namespace Screen.App;
 /// properties; every change is debounced and persisted through the existing
 /// <see cref="JsonSettingsStore"/> without a manual Save button.
 /// </summary>
-internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
+internal sealed partial class SettingsViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly JsonSettingsStore _store;
     private readonly ICredentialStore _credentials;
@@ -166,11 +166,14 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         get => _settings.Recording.FrameRate switch
         {
             15 => 0,
+            30 => 1,
             60 => 2,
-            _ => 1
+            _ => -1
         };
         set
         {
+            if (value is < 0 or > 2)
+                return;
             var frameRate = value switch
             {
                 0 => 15,
@@ -182,6 +185,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
             _settings.Recording = _settings.Recording with { FrameRate = frameRate };
+            NotifyRecordingPreset();
             OnPropertyChanged();
             QueueSave();
         }
@@ -192,11 +196,14 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         get => _settings.Recording.Quality switch
         {
             RecordingQuality.Smooth => 0,
+            RecordingQuality.Standard => 1,
             RecordingQuality.High => 2,
-            _ => 1
+            _ => -1
         };
         set
         {
+            if (value is < 0 or > 2)
+                return;
             var quality = value switch
             {
                 0 => RecordingQuality.Smooth,
@@ -208,6 +215,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
             _settings.Recording = _settings.Recording with { Quality = quality };
+            NotifyRecordingPreset();
             OnPropertyChanged();
             QueueSave();
         }
@@ -353,6 +361,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
             _settings.Translation = _settings.Translation with { Provider = provider };
+            OnPropertyChanged(nameof(TranslationServiceIndex));
             OnPropertyChanged();
             QueueSave();
         }
@@ -710,7 +719,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         nameof(HotKey) or nameof(RecordHotKey) or nameof(ClickThroughRecoveryHotKey) => "hotkeys",
         nameof(PreferScreenHotKeys) => "priority",
         nameof(RecordingTempDirectory) => "storage",
-        nameof(StartWithWindows) => "general",
+        nameof(StartWithWindows) or nameof(SaveDirectory) => "general",
         nameof(OcrModeIndex) or nameof(UseCloudForTranslation) => "ocr",
         nameof(TranslationDisplayModeIndex) => "display",
         _ when property.StartsWith("Recording", StringComparison.Ordinal) => "recording",
@@ -723,6 +732,18 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         var recording = _settings.Recording;
         switch (property)
         {
+            case nameof(SaveDirectory):
+                latest.SaveDirectory = _settings.SaveDirectory;
+                break;
+            case nameof(RecordingFormatIndex):
+                latest.Recording = latest.Recording with { Format = recording.Format };
+                break;
+            case nameof(RecordingGifFrameRateIndex):
+                latest.Recording = latest.Recording with { GifFrameRate = recording.GifFrameRate };
+                break;
+            case nameof(RecordingGifMaxWidthIndex):
+                latest.Recording = latest.Recording with { GifMaxWidth = recording.GifMaxWidth };
+                break;
             case nameof(StartWithWindows):
                 latest.StartWithWindows = _settings.StartWithWindows;
                 break;

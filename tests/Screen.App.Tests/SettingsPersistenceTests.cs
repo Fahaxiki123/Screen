@@ -64,6 +64,55 @@ public sealed class SettingsPersistenceTests
     }
 
     [STATestMethod]
+    public void CustomQualityAndGifSettingsRoundTripWithoutOverwritingConcurrentFields()
+    {
+        _store.Update(s => s.Recording = s.Recording with { FrameRate = 45, Quality = RecordingQuality.High });
+        using var view = new SettingsViewModel(_store, new FakeCredentialStore(), _ => { });
+        Assert.AreEqual(2, view.RecordingPresetIndex);
+        view.RecordingPresetIndex = 2;
+        Assert.IsFalse(view.HasUnsavedChanges);
+        view.RecordingFormatIndex = 1;
+        view.RecordingGifFrameRateIndex = 3;
+        view.RecordingGifMaxWidthIndex = 0;
+        view.SaveDirectory = _directory.FullName;
+        // Another writer changed audio after the window opened.
+        _store.Update(s => s.Recording = s.Recording with { RecordMicrophone = true });
+        view.SaveNow();
+
+        var restored = _store.Load();
+        Assert.AreEqual(_directory.FullName, restored.SaveDirectory);
+        Assert.AreEqual(45, restored.Recording.FrameRate);
+        Assert.AreEqual(RecordingQuality.High, restored.Recording.Quality);
+        Assert.AreEqual(RecordingFormat.Gif, restored.Recording.Format);
+        Assert.AreEqual(30, restored.Recording.GifFrameRate);
+        Assert.AreEqual(0, restored.Recording.GifMaxWidth);
+        Assert.IsTrue(restored.Recording.RecordMicrophone);
+        view.RecordingPresetIndex = 0;
+        view.SaveNow();
+        Assert.AreEqual(30, _store.Load().Recording.FrameRate);
+        Assert.AreEqual(RecordingQuality.Standard, _store.Load().Recording.Quality);
+        view.RecordingPresetIndex = 1;
+        view.SaveNow();
+        Assert.AreEqual(60, _store.Load().Recording.FrameRate);
+        Assert.AreEqual(RecordingQuality.High, _store.Load().Recording.Quality);
+        view.RecordingFrameRateIndex = 0;
+        Assert.AreEqual(2, view.RecordingPresetIndex);
+    }
+
+    [STATestMethod]
+    public void DisplayedServiceOrderUsesExistingProviderAndCredentialSlots()
+    {
+        using var view = new SettingsViewModel(_store, new FakeCredentialStore(), _ => { });
+        foreach (var (index, provider) in new[] { (0, TranslationProviderKind.OpenAiCompatible), (1, TranslationProviderKind.Tencent), (2, TranslationProviderKind.MyMemory) })
+        {
+            view.TranslationServiceIndex = index;
+            view.SaveNow();
+            Assert.AreEqual(index, view.TranslationServiceIndex);
+            Assert.AreEqual(provider, _store.Load().Translation.Provider);
+        }
+    }
+
+    [STATestMethod]
     public void CredentialWriteFailureStaysVisibleAndRetriesOnlyTheFailedCredential()
     {
         var profile = _store.Load().Translation;

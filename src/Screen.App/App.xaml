@@ -13,6 +13,7 @@
         <ResourceDictionary Source="Themes/TextCards.xaml" />
         <ResourceDictionary Source="Themes/RecordingHud.xaml" />
         <ResourceDictionary Source="Themes/RecordingOptions.xaml" />
+        <ResourceDictionary Source="Themes/SettingsFields.xaml" />
       </ResourceDictionary.MergedDictionaries>
 
       <!-- Legacy aliases: existing code references these keys; they now

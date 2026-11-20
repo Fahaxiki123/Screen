@@ -111,19 +111,15 @@ public partial class SettingsWindow
 
     private async void TestTranslationAsync(object sender, RoutedEventArgs e)
     {
-        if (_translationTestStatus is null || sender is not Button button)
+        if (_translationTestStatus is null || sender is not Button)
         {
             return;
         }
 
-        button.IsEnabled = false;
-        // Cancel without disposing: the in-flight test may still be linking
-        // this token, and disposing it surfaces ObjectDisposedException
-        // instead of cancellation (see OcrCard.RecognizeAsync).
         _translationTestOperation?.Cancel();
         var operation = _translationTestOperation = new CancellationTokenSource();
-        _translationTestStatus.Foreground = GetResource<Brush>("Settings.Brush.TextTertiary");
-        _translationTestStatus.Text = "正在连接…";
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        ShowConnectionResult("正在连接…", "正在连接…", "Brush.LabelSecondary", busy: true);
 
         try
         {
@@ -163,10 +159,15 @@ public partial class SettingsWindow
                 return;
             }
 
-            _translationTestStatus.Foreground = GetResource<Brush>("Settings.Brush.Success");
-            _translationTestStatus.Text = result.UsedFallback
-                ? $"回退可用：{result.ProviderName}（首选失败：{result.PrimaryFailure}）"
-                : $"连接成功：{result.ProviderName}";
+            if (result.UsedFallback)
+            {
+                var reason = $"回退可用：{result.ProviderName}（首选失败：{result.PrimaryFailure}）";
+                ShowConnectionResult("首选未连接", reason, "Brush.Warning");
+            }
+            else
+            {
+                ShowConnectionResult("已连接", $"✓ {watch.Elapsed.TotalSeconds:F1} 秒", "Brush.Success", detail: result.ProviderName);
+            }
         }
         catch (OperationCanceledException) when (operation.IsCancellationRequested)
         {
@@ -179,21 +180,45 @@ public partial class SettingsWindow
             }
             else
             {
-                _translationTestStatus.Foreground = GetResource<Brush>("Settings.Brush.Error");
-                _translationTestStatus.Text = exception.Message;
+                ShowConnectionResult("连接失败", exception.Message, "Brush.DangerOnDark");
             }
         }
         finally
         {
             if (ReferenceEquals(_translationTestOperation, operation))
-            {
                 _translationTestOperation = null;
-                if (!operation.IsCancellationRequested)
-                {
-                    button.IsEnabled = true;
-                }
-            }
             operation.Dispose();
         }
+    }
+
+    private void ResetConnectionTest()
+    {
+        // The old request still owns its token until its finally block. Its result
+        // must not repaint the newly edited endpoint or credential as connected.
+        _translationTestOperation?.Cancel();
+        _translationTestOperation = null;
+        ShowConnectionResult("未测试", "", "Brush.LabelSecondary");
+    }
+
+    private void ShowConnectionResult(string header, string status, string color, bool busy = false, string? detail = null)
+    {
+        TranslationConnectionStatus.Text = header;
+        TranslationConnectionStatus.SetResourceReference(TextBlock.ForegroundProperty, color);
+        TranslationConnectionStatus.ToolTip = detail ?? status;
+        if (_translationTestStatus is null || _testConnection is null || _testProgress is null)
+            return;
+        _translationTestStatus.Text = status;
+        _translationTestStatus.Visibility = status.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _translationTestStatus.ToolTip = detail ?? status;
+        _translationTestStatus.SetResourceReference(TextBlock.ForegroundProperty, color);
+        _testConnection.IsEnabled = !busy;
+        _testConnection.Visibility = busy ? Visibility.Collapsed : Visibility.Visible;
+        _testConnection.Content = status.Length == 0 ? "测试连接" : "重新测试";
+        _testProgress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        var spin = (RotateTransform)_testProgress.RenderTransform;
+        spin.BeginAnimation(RotateTransform.AngleProperty, busy && SystemParameters.ClientAreaAnimation
+            ? new System.Windows.Media.Animation.DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(800))
+            { RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever }
+            : null);
     }
 }
