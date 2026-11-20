@@ -2,19 +2,25 @@
 
 个人使用的 Windows 截图、录屏、OCR 与翻译工具，使用 .NET 10 / WPF。
 
-程序、托盘与安装器使用统一的蓝色截图图标。当前分支采用中性深色玻璃主题：截图工具栏从截取画面取样磨砂，完成操作用蓝色，录制用红色。
+程序、托盘与安装器使用统一的蓝色截图图标。界面采用中性深色玻璃主题：截图工具栏从截取画面取样磨砂，完成操作用蓝色，录制用红色。
 
 ## 下载
 
 **[获取最新稳定版](https://github.com/Fahaxiki123/Screen/releases/latest)** · [全部版本](https://github.com/Fahaxiki123/Screen/releases)
 
-下列安装包和校验文件对应已发布的 **v1.0.16**。本页介绍的玻璃界面和 GIF 导出在 `ui/v4-glass` 分支，未包含在这个旧安装包中；可检出本分支后按下文构建。
-
-**[下载 1.0.16 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.16/Screen-1.0.16-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.16) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.16/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v1.0.16)
+**[下载 1.1.0 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.1.0/Screen-1.1.0-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v1.1.0) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v1.1.0/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v1.1.0)
 
 安装器允许在 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64 上安装，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。Windows 10 实机安装与运行待验收。更新前请完成截图或录屏并退出 Screen。
 
-### 1.0.16 更新
+### 1.1.0 更新
+
+- **截图先框选，再选工具。** 去掉了框选前的模式栏。原有 20 个操作分成四组，窄屏按组换行；文字色点和马赛克滑杆也能随可用空间换行。完成后右下角会显示刚拷贝的截图。
+- **录屏可以直接导出 GIF。** 选「GIF」只会关闭本次录制的声音，不改日常视频设置。录完可裁剪，点「拷贝」就能粘贴 GIF 文件，不用先另存；点「存储」则写到选定位置。两阶段转换降低了内存占用，不降低设定的帧率或分辨率。
+- **设置合并为三页。** 快捷键、保存目录、录屏和翻译设置都保留。原来不匹配预设的画质显示「自定义」，不会因为打开设置就被覆盖；用 Tab 浏览也不会误改快捷键。
+- **不会再因自动录屏重名覆盖旧文件。** 文件名被占用时自动加 ` (1)`、` (2)`。截图已保存但无法记住目录时，会分别提示，不再误报保存失败。
+
+<details>
+<summary>1.0.16 更新</summary>
 
 - 英文界面短句和长段落可以自动识别并交给 MyMemory 翻译。源语言不确定时仍可手选。
 - 录屏临时目录支持 UNC 共享路径，空间检查按当前用户在所选目录的可用容量计算。
@@ -30,6 +36,8 @@
 - 录屏页可选择临时目录，开录前检查写权限与空间，录制过程中检查剩余空间。Screen 不再按时间删除录屏恢复目录；用户恢复完成后自行清理。
 
 自动验证包含时间戳视频的真实 FFmpeg 编解码、离线 HTTP、模拟音频、离屏图像和保存失败/取消回归。实际显卡、旋转屏、UAC/锁屏、音频设备拔插及长时间录制仍需实机验收。
+
+</details>
 
 ## 截图与录屏怎么用
 
@@ -73,11 +81,11 @@ GIF 先保留无声 MP4 素材。在预览点「拷贝」就会生成当前裁�
 - Git 和 Git LFS，FFmpeg 二进制通过 Git LFS 保存。
 - 构建安装包时另需 PowerShell 7 和 NSIS 3.12。
 
-复现上方 1.0.16 安装包时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
+复现上方 1.1.0 安装包时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
 
 ```powershell
 git lfs install
-git clone --branch v1.0.16 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
+git clone --branch v1.1.0 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
 Set-Location 开发工程
 git lfs pull
 ```

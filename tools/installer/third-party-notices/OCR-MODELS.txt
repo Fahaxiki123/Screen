@@ -1,6 +1,7 @@
-OCR model files shipped with Screen 1.0.7
+OCR model files shipped with Screen 1.1.0
 
-The existing Screen third-party notice identifies these files as RapidOCR /
+The three PP-OCRv6 files recorded for Screen 1.0.7 are unchanged. The
+existing Screen third-party notice identifies them as RapidOCR /
 PaddleOCR PP-OCRv6 models, under Apache License 2.0. The current official
 project license texts are included. Exact upstream model download receipts
 and source revision metadata were not retained in the project; the hashes
@@ -14,3 +15,7 @@ Licenses: licenses/RapidOCR-LICENSE.txt
 PP-OCRv6_det_small.onnx  9929594 bytes  SHA256 090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f
 PP-OCRv6_rec_small.onnx  21234383 bytes  SHA256 6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884
 ppocrv6_small_dict.txt  74947 bytes  SHA256 b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d
+
+The text-line orientation model is copied unchanged from the NuGet package
+RapidOcrNet 3.0.0 (models/v5/). Verified against that cached package:
+ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx  1018508 bytes  SHA256 54379ae5174d026780215fc748a7f31910dee36818e63d49e17dc598ecc82df7

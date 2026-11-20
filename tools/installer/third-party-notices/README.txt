@@ -1,5 +1,5 @@
-Screen 1.0.12 — Third-party notices
-Inventory updated on 2026-11-12 from the actual win-x64 publication.
+Screen 1.1.0 — Third-party notices
+Release inventory checked on 2026-11-20 for the win-x64 package.
 
 This folder contains third-party license texts, attribution, package versions,
 and source records. Each license applies to its respective component.
@@ -15,7 +15,7 @@ and the included license/notice files. This includes:
   Lucide.NET.Core 0.1.2                       MIT (package declaration)
   Lucide / Feather icon data                  ISC / MIT notices included
   Microsoft.ML.OnnxRuntime[.Managed] 1.27.0    MIT + third-party notices
-  NAudio.Core / NAudio.Wasapi / NAudio.WinMM 3.0.0   MIT
+  NAudio.Core / Midi / Wasapi / WinMM 3.0.0   MIT
   RapidOcrNet 3.0.0                           Apache 2.0
   SharpGen.Runtime[.COM] 2.4.2-beta           MIT
   SkiaSharp[.NativeAssets.Win32] 3.119.1      MIT + third-party notices
@@ -39,11 +39,11 @@ The self-contained publication also includes:
     licenses/Microsoft-Visual-C-V14-2026-License.txt
     licenses/Microsoft-Visual-Studio-2026-Community-License.txt
 
-  PP-OCRv6 model files (RapidOCR / PaddleOCR attribution)
+  PP-OCRv6 text recognition/detection and PP-LCNet orientation model files
     OCR-MODELS.txt
     licenses/RapidOCR-LICENSE.txt and licenses/PaddleOCR-LICENSE.txt
 
-  FFmpeg 9.0.2-screen-minimal (commit 946fcce07b6dcd0331c8cc609192aeff5e1924f8), GPL version 3 or later
+  FFmpeg 9.0.2-screen-minimal (upstream commit 946fcce07b6dcd0331c8cc609192aeff5e1924f8 plus the Screen GIF palette patch), GPL version 3 or later
     Reproducible build scripts: tools/ffmpeg/build-ffmpeg.sh, tools/ffmpeg/Build-Ffmpeg.ps1
     FFMPEG-BUILD-AND-SOURCE.txt
     licenses/FFmpeg-9.0.2-COPYING.GPLv3.txt
@@ -72,7 +72,7 @@ Feather icon notices are included.
 OCR-MODELS.txt records the existing project attribution and actual file hashes
 for the bundled PP-OCRv6 / PP-LCNet ONNX models.
 
-FFmpeg is built reproducibly from pinned upstream release tag n9.0.2 with
+FFmpeg is built from pinned upstream release tag n9.0.2 with
 explicitly enumerated minimal components (x264, libvpl, ffnvcodec-headers,
-AMF headers); exact revisions, source URLs, and ./configure flags are recorded
+AMF headers). The GIF palette patch, exact revisions, source URLs and configure flags are recorded
 in FFMPEG-BUILD-AND-SOURCE.txt.
