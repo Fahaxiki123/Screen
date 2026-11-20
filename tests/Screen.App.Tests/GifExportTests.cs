@@ -12,31 +12,47 @@ public sealed class GifExportTests
     {
         var source = Path.Combine(Path.GetTempPath(), "screen source & sample.mp4");
         var target = Path.Combine(Path.GetTempPath(), "screen target & sample.gif");
-        var info = RecordingPreviewWindow.BuildGifStartInfo("ffmpeg.exe", source, target, new RecordingTrimRange(1.25, 2.5), 20, 960);
-        var args = info.ArgumentList.ToList();
-        Assert.IsFalse(info.UseShellExecute);
-        Assert.IsTrue(info.RedirectStandardOutput);
-        Assert.IsTrue(info.RedirectStandardError);
-        Assert.AreEqual(source, args[args.IndexOf("-i") + 1]);
+        var (palette, encode) = RecordingPreviewWindow.BuildGifStartInfo("ffmpeg.exe", source, target, new RecordingTrimRange(1.25, 2.5), 20, 960);
+        const string sampling = "[0:v:0]fps=fps=20:start_time=0:eof_action=pass,trim=end_frame=25,scale='min(iw,960)':-2:flags=lanczos,format=bgra";
+        foreach (var info in new[] { palette, encode })
+        {
+            var options = info.ArgumentList.ToList();
+            Assert.IsFalse(info.UseShellExecute);
+            Assert.IsTrue(info.RedirectStandardOutput);
+            Assert.IsTrue(info.RedirectStandardError);
+            Assert.AreEqual(source, options[options.IndexOf("-i") + 1]);
+            Assert.AreEqual("1.25", options[options.IndexOf("-ss") + 1]);
+            Assert.DoesNotContain("-to", options, "Do not discard the timestamp that determines a held frame's duration.");
+            Assert.Contains("-an", options);
+            StringAssert.StartsWith(options[options.IndexOf("-filter_complex") + 1], sampling);
+        }
+        var paletteArgs = palette.ArgumentList.ToList();
+        Assert.Contains("palettegen=stats_mode=diff", paletteArgs[paletteArgs.IndexOf("-filter_complex") + 1]);
+        Assert.DoesNotContain("paletteuse", paletteArgs[paletteArgs.IndexOf("-filter_complex") + 1]);
+        var args = encode.ArgumentList.ToList();
+        Assert.AreEqual(paletteArgs[^1], args[args.LastIndexOf("-i") + 1]);
+        Assert.AreEqual("16x16", args[args.IndexOf("-video_size") + 1]);
+        Assert.AreEqual("bgra", args[args.IndexOf("-pixel_format") + 1]);
         Assert.AreEqual(target, args[^1]);
-        Assert.AreEqual("1.25", args[args.IndexOf("-ss") + 1]);
-        Assert.DoesNotContain("-to", args, "Do not discard the timestamp that determines a held frame's duration.");
         Assert.AreEqual("gif", args[args.IndexOf("-c:v") + 1]);
-        Assert.AreEqual("gif", args[args.IndexOf("-f") + 1]);
+        Assert.AreEqual("gif", args[args.LastIndexOf("-f") + 1]);
         Assert.AreEqual("0", args[args.IndexOf("-loop") + 1]);
-        Assert.Contains("-an", args);
-        Assert.AreEqual("fps=20:start_time=0:eof_action=pass,trim=end_frame=25,scale='min(iw,960)':-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle", args[args.IndexOf("-vf") + 1]);
+        Assert.AreEqual(sampling + "[frames];[frames][1:v:0]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle[out]",
+            args[args.IndexOf("-filter_complex") + 1]);
     }
 
     [TestMethod]
     public void OriginalWidthAndEntireRecordingSkipScalingAndSeeking()
     {
-        var args = RecordingPreviewWindow.BuildGifStartInfo("ffmpeg", "recording.mp4", "export.gif", null, 15, 0).ArgumentList.ToList();
-        Assert.DoesNotContain("-ss", args);
-        Assert.DoesNotContain("-to", args);
-        Assert.DoesNotContain("-frames:v", args);
-
-        StringAssert.StartsWith(args[args.IndexOf("-vf") + 1], "fps=15:eof_action=pass,split");
+        var (palette, encode) = RecordingPreviewWindow.BuildGifStartInfo("ffmpeg", "recording.mp4", "export.gif", null, 15, 0);
+        foreach (var info in new[] { palette, encode })
+        {
+            var args = info.ArgumentList.ToList();
+            Assert.DoesNotContain("-ss", args);
+            Assert.DoesNotContain("-to", args);
+            Assert.DoesNotContain("-frames:v", args);
+            StringAssert.StartsWith(args[args.IndexOf("-filter_complex") + 1], "[0:v:0]fps=fps=15:eof_action=pass,format=bgra");
+        }
     }
 
     [TestMethod]
@@ -53,6 +69,7 @@ public sealed class GifExportTests
     [DataRow("Unrecognized option 'loop'.\nError splitting the argument list: Option not found", true)]
     [DataRow("Unknown encoder 'gif'", true)]
     [DataRow("No such filter: 'palettegen'", true)]
+    [DataRow("[AVFilterGraph] No such filter: 'fps'\nError : Filter not found", true)]
     [DataRow("Filter 'paletteuse' not found", true)]
     [DataRow("Requested output format 'gif' is not known.", true)]
     [DataRow("Unrecognized option 'unknown'.\nOption not found", false)]
@@ -70,15 +87,23 @@ public sealed class GifExportTests
             var original = Path.Combine(root.FullName, "movie.mp4");
             var delivered = RecordingFileStore.ClipboardCopyPath(original, RecordingFormat.Gif);
             var cached = Path.Combine(root.FullName, $"gif-preview-{Guid.NewGuid():N}.gif");
+            var palette = Path.ChangeExtension(cached, ".bgra");
+            var unrelated = Path.Combine(root.FullName, "gif-preview-local.bgra");
             Assert.AreEqual(".gif", Path.GetExtension(delivered));
             Assert.AreEqual(root.FullName, Path.GetDirectoryName(delivered));
             File.WriteAllText(cached, "cached");
+            File.WriteAllText(palette, "scratch");
+            File.WriteAllText(unrelated, "not a Screen palette");
             RecordingFileStore.CopyAtomically(cached, delivered);
             var age = DateTime.UtcNow.AddDays(-2);
             File.SetLastWriteTimeUtc(cached, age);
             File.SetLastWriteTimeUtc(delivered, age);
-            Assert.AreEqual(1, RecordingTempCleaner.Clean(root.FullName, DateTime.UtcNow));
+            File.SetLastWriteTimeUtc(palette, age);
+            File.SetLastWriteTimeUtc(unrelated, age);
+            Assert.AreEqual(2, RecordingTempCleaner.Clean(root.FullName, DateTime.UtcNow));
             Assert.IsFalse(File.Exists(cached));
+            Assert.IsFalse(File.Exists(palette));
+            Assert.IsTrue(File.Exists(unrelated));
             Assert.AreEqual("cached", File.ReadAllText(delivered));
         }
         finally

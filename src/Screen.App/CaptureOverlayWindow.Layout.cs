@@ -63,29 +63,13 @@ internal sealed partial class CaptureOverlayWindow
 
         if (_stylePanel.Visibility == Visibility.Visible)
         {
-            _stylePanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-
-            // Contextual callout: align horizontally with the active tool button
-            var targetX = left;
+            double? toolCenter = null;
             if (_toolButtons.TryGetValue(_surface.Tool, out var activeBtn) && activeBtn.IsVisible)
             {
                 var btnPos = activeBtn.TranslatePoint(new Point(0, 0), _toolbar);
-                targetX = left + btnPos.X + (activeBtn.ActualWidth > 0 ? activeBtn.ActualWidth / 2 : 18) - (_stylePanel.DesiredSize.Width / 2);
+                toolCenter = left + btnPos.X + (activeBtn.ActualWidth > 0 ? activeBtn.ActualWidth / 2 : 18);
             }
-            targetX = Math.Clamp(targetX, 8, Math.Max(8, ActualWidth - _stylePanel.DesiredSize.Width - 8));
-            Canvas.SetLeft(_stylePanel, targetX);
-
-            // Prefer docking 8px ABOVE the toolbar. If touching the screen top ceiling, dock below.
-            var aboveToolbar = top - _stylePanel.DesiredSize.Height - 8;
-            if (aboveToolbar >= 8)
-            {
-                Canvas.SetTop(_stylePanel, aboveToolbar);
-            }
-            else
-            {
-                var belowToolbar = top + _toolbar.DesiredSize.Height + 8;
-                Canvas.SetTop(_stylePanel, Math.Min(belowToolbar, ActualHeight - _stylePanel.DesiredSize.Height - 8));
-            }
+            PlaceStylePanel(_stylePanel, new Size(ActualWidth, ActualHeight), FloatingBounds(_toolbar), toolCenter);
         }
 
         if (_ocrCard.Visibility == Visibility.Visible)
@@ -126,6 +110,19 @@ internal sealed partial class CaptureOverlayWindow
         }
         PositionInPlaceTranslation();
         RefreshGlassPanels();
+    }
+
+    internal static void PlaceStylePanel(GlassPanel panel, Size viewport, Rect toolbar, double? toolCenter)
+    {
+        const double gap = 8;
+        panel.MaxWidth = Math.Max(1, viewport.Width - 2 * gap);
+        panel.Measure(new Size(panel.MaxWidth, double.PositiveInfinity));
+        var size = panel.DesiredSize;
+        var left = toolCenter - size.Width / 2 ?? toolbar.Left;
+        var above = toolbar.Top - size.Height - gap;
+        var top = above >= gap ? above : toolbar.Bottom + gap;
+        Canvas.SetLeft(panel, Math.Clamp(left, gap, Math.Max(gap, viewport.Width - size.Width - gap)));
+        Canvas.SetTop(panel, Math.Clamp(top, gap, Math.Max(gap, viewport.Height - size.Height - gap)));
     }
 
     private static Rect FloatingBounds(FrameworkElement element) => new(

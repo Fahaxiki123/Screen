@@ -9,9 +9,9 @@ namespace Screen.App;
 
 internal sealed partial class CaptureOverlayWindow
 {
-    private static GlassPanel BuildStylePanel()
+    internal static GlassPanel BuildStylePanel()
     {
-        var panel = new GlassPanel { Visibility = Visibility.Collapsed, Padding = new Thickness(6, 4, 6, 4) };
+        var panel = new GlassPanel { Content = new WrapPanel(), Visibility = Visibility.Collapsed, Padding = new Thickness(6, 4, 6, 4) };
         panel.SetResourceReference(GlassPanel.CornerRadiusProperty, "Radius.Bar");
         return panel;
     }
@@ -25,13 +25,15 @@ internal sealed partial class CaptureOverlayWindow
             return;
         }
 
-        var row = HorizontalRow();
+        var groups = (WrapPanel)_stylePanel.Content;
+        groups.Children.Clear();
         if (tool == CaptureTool.Mosaic)
-            AddMosaicOptions(row);
+            AddMosaicOptions(groups);
         else
         {
+            var row = AddStyleGroup(groups);
             if (tool == CaptureTool.Text)
-                AddTextOptions(row);
+                AddTextOptions(row, groups);
             else if (tool == CaptureTool.Number)
             {
                 _nextNumberText = new TextBlock { Text = _surface.NextNumber.ToString(), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, FontWeight = FontWeights.SemiBold };
@@ -54,11 +56,20 @@ internal sealed partial class CaptureOverlayWindow
                     _thickness = size;
                     ConfigureStylePanel(tool, true);
                 });
-            row.Children.Add(StyleDivider());
-            AddColorSwatches(row, tool);
+            AddColorSwatches(AddStyleGroup(groups, separated: true), tool);
         }
-        _stylePanel.Content = row;
         UpdateStyle(applyToSelection);
+    }
+
+    // A segment, a set of sizes, the palette, and the intensity label/slider each
+    // wrap as a unit. A divider stays attached to its group rather than wrapping alone.
+    private static StackPanel AddStyleGroup(WrapPanel groups, bool separated = false)
+    {
+        var row = HorizontalRow();
+        if (separated)
+            row.Children.Add(StyleDivider());
+        groups.Children.Add(row);
+        return row;
     }
 
     private static TextBlock Caption(string text)
@@ -77,7 +88,7 @@ internal sealed partial class CaptureOverlayWindow
         VerticalAlignment = VerticalAlignment.Center
     };
 
-    private void AddMosaicOptions(Panel row)
+    private void AddMosaicOptions(WrapPanel groups)
     {
         FrameworkElement Sample(string key, string name)
         {
@@ -96,8 +107,7 @@ internal sealed partial class CaptureOverlayWindow
             _mosaicVariant = variant.SelectedIndex == 0 ? AnnotationVariants.MosaicPixelate : AnnotationVariants.MosaicBlur;
             UpdateStyle(true);
         };
-        row.Children.Add(variant);
-        row.Children.Add(StyleDivider());
+        AddStyleGroup(groups).Children.Add(variant);
         var mode = new SegmentedControl { ItemsSource = new[] { "涂抹", "矩形" }, SelectedIndex = _surface.MosaicMode == MosaicDrawMode.Brush ? 0 : 1 };
         AutomationProperties.SetName(mode, "马赛克绘制方式");
         mode.SelectionChanged += (_, _) =>
@@ -106,14 +116,14 @@ internal sealed partial class CaptureOverlayWindow
             _surface.MosaicMode = mode.SelectedIndex == 0 ? MosaicDrawMode.Brush : MosaicDrawMode.Rectangle;
             UpdateStyle();
         };
-        row.Children.Add(mode);
-        row.Children.Add(StyleDivider());
-        AddSizes(row, [20, 32, 48], _mosaicSize, showLine: false, size =>
+        AddStyleGroup(groups, separated: true).Children.Add(mode);
+        AddSizes(AddStyleGroup(groups, separated: true), [20, 32, 48], _mosaicSize, showLine: false, size =>
         {
             _mosaicSize = size;
             ConfigureStylePanel(CaptureTool.Mosaic, true);
         });
-        row.Children.Add(Caption("强度"));
+        var strength = AddStyleGroup(groups);
+        strength.Children.Add(Caption("强度"));
         var slider = new Slider { Minimum = 0.2, Maximum = 1, Value = _mosaicIntensity, VerticalAlignment = VerticalAlignment.Center };
         slider.SetResourceReference(StyleProperty, "CaptureIntensitySlider");
         AutomationProperties.SetName(slider, "马赛克强度");
@@ -122,10 +132,10 @@ internal sealed partial class CaptureOverlayWindow
             _mosaicIntensity = slider.Value;
             UpdateStyle(true);
         };
-        row.Children.Add(slider);
+        strength.Children.Add(slider);
     }
 
-    private void AddTextOptions(Panel row)
+    private void AddTextOptions(Panel row, WrapPanel groups)
     {
         foreach (var (label, weight, variant) in new[]
         {
@@ -140,7 +150,7 @@ internal sealed partial class CaptureOverlayWindow
                 ConfigureStylePanel(CaptureTool.Text, true);
             }));
         }
-        row.Children.Add(StyleDivider());
+        row = AddStyleGroup(groups, separated: true);
         foreach (var (pt, size, preview) in new[] { (12, 16d, 11), (16, 21d, 14), (20, 27d, 16), (28, 37d, 18) })
         {
             row.Children.Add(StyleOption(new TextBlock { Text = "A", FontSize = preview }, $"{pt} pt", Math.Abs(_fontSize - size) < 0.1, () =>

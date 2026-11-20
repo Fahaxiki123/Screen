@@ -7,6 +7,16 @@ internal enum FeedbackAnchor { Top, Center, BottomRight }
 
 internal static class FeedbackPlacement
 {
+    public static void TryShow(Action show)
+    {
+        try
+        { show(); }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogError("Output succeeded, but the visual confirmation could not be shown", exception);
+        }
+    }
+
     public static void Attach(Window window, FeedbackAnchor anchor, NativeMethods.NativePoint? location, bool clickThrough)
     {
         NativeMethods.TryGetPhysicalCursorPosition(out var cursor);

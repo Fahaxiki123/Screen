@@ -83,6 +83,7 @@ internal sealed partial class RecordingPreviewWindow
         _fps = _preferredPlaybackFps > 0 ? _preferredPlaybackFps : Math.Clamp(info.FramesPerSecond, 15, 60);
         _timeline.Maximum = Math.Max(0.1, _durationSeconds);
         _loaded = true;
+        _copyButton.IsEnabled = _downloadButton.IsEnabled = true;
         UpdateTimeText();
         // Feishu-style: playback starts immediately after recording ends.
         StartDecoderFrom(0);

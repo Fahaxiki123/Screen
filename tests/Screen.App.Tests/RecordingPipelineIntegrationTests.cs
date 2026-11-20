@@ -64,13 +64,17 @@ public sealed class RecordingPipelineIntegrationTests
 
         Assert.IsTrue(saved.Saved, saved.Error);
         Assert.IsNull(saved.RecoveryDirectory);
-        CollectionAssert.AreEqual(encoded, File.ReadAllBytes(destination));
+        var actualPath = saved.SavedPath;
+        Assert.IsNotNull(actualPath);
+        Assert.AreEqual(Path.Combine(_root, "published (1).mp4"), actualPath);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, File.ReadAllBytes(destination));
+        CollectionAssert.AreEqual(encoded, File.ReadAllBytes(actualPath));
         Assert.IsFalse(Directory.Exists(scratch));
         Assert.AreEqual(0, Directory.GetFiles(_root, ".screen-export-*.tmp").Length);
 
         // Decode every frame from the published MP4, rather than only probing
         // its header. -xerror turns damaged packets/frames into a failing exit.
-        var (progress, errors) = await DecodeToNullAsync(ffmpeg, destination);
+        var (progress, errors) = await DecodeToNullAsync(ffmpeg, actualPath);
         Assert.AreEqual(string.Empty, errors.Trim(), errors);
         StringAssert.Contains(progress, "progress=end");
         var finalFrame = LastProgressValue(progress, "frame");
@@ -87,7 +91,6 @@ public sealed class RecordingPipelineIntegrationTests
         const int width = 64, height = 48, sourceFps = 20, gifFps = 10;
         var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin", "ffmpeg.exe");
         var source = Path.Combine(_root, "silent.mp4");
-        var target = Path.Combine(_root, "trimmed.gif");
         Assert.IsTrue(File.Exists(ffmpeg), "The bundled FFmpeg is required.");
 
         // Red/green/blue mark the first half-second, the desired second and the
@@ -114,7 +117,7 @@ public sealed class RecordingPipelineIntegrationTests
             Assert.IsFalse(deadline.IsCancellationRequested, "Source recording did not finish in time.");
         }
 
-        var gif = await ExportGifAsync(ffmpeg, source, target, new RecordingTrimRange(0.5, 1.5), gifFps, 32);
+        var gif = await ExportGifAsync(ffmpeg, source, new RecordingTrimRange(0.5, 1.5), gifFps, 32);
         Assert.AreEqual(gifFps, gif.Frames.Count, "Exactly the selected second should be sampled at 10 FPS.");
         var first = gif.Frames[0];
         Assert.AreEqual(32, first.PixelWidth);
@@ -137,7 +140,6 @@ public sealed class RecordingPipelineIntegrationTests
         const int width = 64, height = 48;
         var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin", "ffmpeg.exe");
         var source = Path.Combine(_root, "sparse.mp4");
-        var target = Path.Combine(_root, "selection.gif");
         using (var pipeline = new RecordingPipeline(source, width, height, 30, 400_000, "bgra"))
         using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
         using (deadline.Token.Register(pipeline.Abort))
@@ -158,7 +160,7 @@ public sealed class RecordingPipelineIntegrationTests
             Assert.IsFalse(deadline.IsCancellationRequested);
         }
 
-        var gif = await ExportGifAsync(ffmpeg, source, target, new RecordingTrimRange(0.6, 1.6), 10, 0);
+        var gif = await ExportGifAsync(ffmpeg, source, new RecordingTrimRange(0.6, 1.6), 10, 0);
         var elapsed = 0;
         int? firstBlueTime = null;
         var seenGreen = false;
@@ -188,36 +190,62 @@ public sealed class RecordingPipelineIntegrationTests
         Assert.AreEqual(100, elapsed, "The GIF must include the held tail, even though there is no new input sample there.");
     }
 
-    private static async Task<GifBitmapDecoder> ExportGifAsync(string ffmpeg, string source, string target,
-        RecordingTrimRange range, int fps, int maxWidth)
+    private sealed class GifProgress(Action<(string Stage, double Fraction)> report) : IProgress<(string Stage, double Fraction)>
     {
-        var info = RecordingPreviewWindow.BuildGifStartInfo(ffmpeg, source, target, range, fps, maxWidth);
-        using (var process = Process.Start(info) ?? throw new InvalidOperationException("GIF export did not start."))
-        using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        public void Report((string Stage, double Fraction) value) => report(value);
+    }
+
+    private async Task<GifBitmapDecoder> ExportGifAsync(string ffmpeg, string source, RecordingTrimRange range, int fps, int maxWidth)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var profile = new Screen.Core.RecordingProfile { GifFrameRate = fps, GifMaxWidth = maxWidth };
+        string target;
+        var updates = new List<(string Stage, double Fraction)>();
+        try
         {
-            var progress = process.StandardOutput.ReadToEndAsync();
-            var diagnostic = process.StandardError.ReadToEndAsync();
-            try
-            {
-                await process.WaitForExitAsync(deadline.Token);
-                await progress;
-                var errors = await diagnostic;
-                if (process.ExitCode != 0 && RecordingPreviewWindow.IsGifUnavailable(errors))
-                    Assert.Inconclusive($"Bundled FFmpeg has no GIF support: {errors}");
-                Assert.AreEqual(0, process.ExitCode, errors);
-            }
-            finally
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-                }
-            }
+            target = await RecordingPreviewWindow.RenderGifScratchAsync(ffmpeg, source, _root, range, true, profile,
+                deadline.Token, new GifProgress(updates.Add));
+        }
+        catch (NotSupportedException ex)
+        {
+            Assert.Inconclusive($"Bundled FFmpeg has no GIF support: {ex.Message}");
+            throw;
         }
 
+        Assert.IsTrue(updates.Any(p => p.Stage == "正在生成 GIF 调色板" && p.Fraction is > 0 and < 0.5));
+        Assert.IsTrue(updates.Any(p => p.Stage == "正在编码 GIF" && p.Fraction > 0.5));
+        Assert.IsTrue(updates.Select(p => p.Fraction).SequenceEqual(updates.Select(p => p.Fraction).Order()));
+        Assert.IsEmpty(Directory.GetFiles(_root, "*.bgra"), "A successful conversion must clean up its intermediate palette.");
         using var stream = File.OpenRead(target);
         return new GifBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+    }
+
+    [TestMethod]
+    [DataRow("正在生成 GIF 调色板")]
+    [DataRow("正在编码 GIF")]
+    public async Task CancellingEitherGifPassKeepsOriginalAndRemovesTransientFilesAsync(string stage)
+    {
+        var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin", "ffmpeg.exe");
+        var source = Path.Combine(_root, "cancel.mp4");
+        using (var input = new RecordingPipeline(source, 64, 64, 20, 400_000, "bgra"))
+        {
+            for (var i = 0; i < 40; i++)
+                input.WriteVideoFrame(CreateFrame(64, 64, i, "bgra"));
+            input.FinalizeFile();
+        }
+        var original = File.ReadAllBytes(source);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var canceled = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+        var cancelAtProgress = new GifProgress(p =>
+        {
+            if (p.Stage == stage && p.Fraction > (stage == "正在编码 GIF" ? 0.5 : 0))
+                canceled.Cancel();
+        });
+        await Assert.ThrowsAsync<OperationCanceledException>(() => RecordingPreviewWindow.RenderGifScratchAsync(ffmpeg, source, _root,
+            new RecordingTrimRange(0, 2), false, new Screen.Core.RecordingProfile(), canceled.Token, cancelAtProgress));
+        Assert.IsFalse(deadline.IsCancellationRequested, "User cancellation, not the test timeout, must stop each pass.");
+        CollectionAssert.AreEqual(original, File.ReadAllBytes(source));
+        CollectionAssert.AreEqual(new[] { source }, Directory.GetFiles(_root));
     }
 
     [TestMethod]

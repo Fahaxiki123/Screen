@@ -376,10 +376,6 @@ internal sealed partial class CaptureOverlayWindow
         {
             return;
         }
-        var settings = _settingsStore.Load();
-        var initialDirectory = Directory.Exists(settings.SaveDirectory)
-            ? settings.SaveDirectory
-            : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
         var dialog = new SaveFileDialog
         {
             Title = "保存截图",
@@ -387,7 +383,7 @@ internal sealed partial class CaptureOverlayWindow
             DefaultExt = ".png",
             AddExtension = true,
             FileName = $"Screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png",
-            InitialDirectory = initialDirectory,
+            InitialDirectory = ScreenshotSaveDirectory.GetInitialDirectory(_settingsStore),
             RestoreDirectory = true
         };
         if (dialog.ShowDialog(this) != true)
@@ -397,17 +393,18 @@ internal sealed partial class CaptureOverlayWindow
         try
         {
             BitmapUtilities.SavePng(_surface.RenderSelection(), dialog.FileName);
-            settings.SaveDirectory = Path.GetDirectoryName(dialog.FileName) ?? initialDirectory;
-            _settingsStore.Update(latest => latest.SaveDirectory = settings.SaveDirectory);
-            var anchor = SelectionCenter();
-            Close();
-            HintToastWindow.Success($"已存储到「{new DirectoryInfo(settings.SaveDirectory).Name}」", anchor);
         }
         catch (Exception ex)
         {
             SimpleLogger.LogError("Failed to save screenshot", ex);
             MessageBox.Show(this, $"保存截图失败：{ex.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
         }
+        var remembered = ScreenshotSaveDirectory.TryRemember(_settingsStore, dialog.FileName);
+        var anchor = SelectionCenter();
+        Close();
+        var folder = new FileInfo(dialog.FileName).Directory?.Name;
+        HintToastWindow.Success(remembered ? $"已存储到「{folder}」" : "截图已保存，无法记住目录", anchor);
     }
 
     private void Finish(object sender, RoutedEventArgs e)
@@ -416,19 +413,21 @@ internal sealed partial class CaptureOverlayWindow
         {
             return;
         }
+        PixelBuffer image;
         try
         {
-            var image = _surface.RenderSelection();
+            image = _surface.RenderSelection();
             BitmapUtilities.CopyToClipboard(image);
-            var anchor = SelectionCenter();
-            Close();
-            CaptureThumbnailWindow.ShowCopied(image, anchor);
         }
         catch (Exception ex)
         {
             SimpleLogger.LogError("Failed to copy screenshot to clipboard", ex);
             MessageBox.Show(this, ex.Message, "Screen", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
+        var anchor = SelectionCenter();
+        Close();
+        FeedbackPlacement.TryShow(() => CaptureThumbnailWindow.ShowCopied(image, anchor));
     }
 
     private NativeMethods.NativePoint SelectionCenter() => new(

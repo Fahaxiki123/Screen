@@ -63,7 +63,11 @@ public partial class SettingsWindow : Window
         _registerRecordHotKey = registerRecordHotKey;
         var version = typeof(SettingsWindow).Assembly.GetName().Version;
         NavVersion.Text = version is null ? "本地构建" : $"版本 {version.ToString(3)}";
-        SourceInitialized += (_, _) => ApplyBackdrop();
+        SourceInitialized += (_, _) =>
+        {
+            TrackWorkArea();
+            ApplyBackdrop();
+        };
 
         _viewModel = new SettingsViewModel(store, credentials, setStartupEnabled, setHotKeyPriority, hotKeyPriorityError);
         DataContext = _viewModel;

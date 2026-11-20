@@ -179,7 +179,6 @@ internal sealed class AppHost : IDisposable
         _recordingFlowActive = true;
         CaptureOverlayWindow? overlay = null;
         RecordingSaveResult result;
-        string filePath;
         RecordingProfile recordingProfile;
         try
         {
@@ -235,7 +234,6 @@ internal sealed class AppHost : IDisposable
             _recordingController = controller;
             controller.ShowControls();
             result = await controller.Completion;
-            filePath = controller.FilePath;
             recordingProfile = controller.Profile;
         }
         catch (Exception exception)
@@ -256,13 +254,14 @@ internal sealed class AppHost : IDisposable
         {
             return;
         }
-        if (GetRecordingSaveNotice(result) is { } notice)
+        var notice = GetRecordingSaveNotice(result);
+        if (result.SavedPath is not { } filePath)
         {
-            if (!result.Saved)
-            {
-                MessageBox.Show(notice, "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
+            MessageBox.Show(notice!, "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+        if (notice is not null)
+        {
             HintToastWindow.Show(notice);
         }
         try

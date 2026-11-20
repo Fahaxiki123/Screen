@@ -22,7 +22,7 @@ public partial class SettingsWindow
         keys.Children.Add(CreateDivider(withIcon: true));
         _recordHotKeyButton = CreateHotKeyButton(nameof(SettingsViewModel.RecordHotKey));
         keys.Children.Add(CreateSettingRow("录屏", _recordHotKeyButton, LucideIconKind.Video, "Tile.Red"));
-        page.Children.Add(CreateFootnote("点按快捷键，然后直接按下新的组合。"));
+        page.Children.Add(CreateFootnote("点击或按 Enter 录入快捷键，按 Esc 保留原值。"));
 
         var advanced = new StackPanel();
         _clickThroughRecoveryHotKeyButton = CreateHotKeyButton(nameof(SettingsViewModel.ClickThroughRecoveryHotKey));

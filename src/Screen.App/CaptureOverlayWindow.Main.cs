@@ -113,6 +113,9 @@ internal sealed partial class CaptureOverlayWindow : Window
         _toolbar = BuildToolbar(out _translationButton, out _translationDropDownButton);
         _root.Children.Add(_toolbar);
         _stylePanel = BuildStylePanel();
+        // WPF can finish measuring a newly selected tool's template after the
+        // selection handler. Anchor again with its final size, before painting.
+        _stylePanel.SizeChanged += (_, _) => PositionFloatingPanels();
         _root.Children.Add(_stylePanel);
         Panel.SetZIndex(_toolbar, 20);
         Panel.SetZIndex(_stylePanel, 21);

@@ -436,24 +436,13 @@ internal sealed class ScrollCaptureController : IDisposable
 
     private (ScrollCaptureFinishAction Action, string? Warning) SaveResultAs(PixelBuffer image)
     {
-        string? saveDirectory = null;
-        try
-        {
-            saveDirectory = _settings.Load().SaveDirectory;
-        }
-        catch (Exception exception)
-        {
-            SimpleLogger.LogError("Could not read the last screenshot directory", exception);
-        }
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
             Title = "保存长截图",
             Filter = "PNG 图片 (*.png)|*.png",
             DefaultExt = ".png",
             AddExtension = true,
-            InitialDirectory = Directory.Exists(saveDirectory)
-                ? saveDirectory
-                : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+            InitialDirectory = ScreenshotSaveDirectory.GetInitialDirectory(_settings),
             FileName = $"Screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png"
         };
         var confirmed = _control is { } owner ? dialog.ShowDialog(owner) : dialog.ShowDialog();
@@ -469,17 +458,7 @@ internal sealed class ScrollCaptureController : IDisposable
     internal string? SavePngAndRememberDirectory(PixelBuffer image, string path)
     {
         BitmapUtilities.SavePng(image, path);
-        try
-        {
-            var directory = Path.GetDirectoryName(Path.GetFullPath(path));
-            _settings.Update(latest => latest.SaveDirectory = directory ?? latest.SaveDirectory);
-            return null;
-        }
-        catch (Exception exception)
-        {
-            SimpleLogger.LogError("Long screenshot saved but the last screenshot directory could not be updated", exception);
-            return "长截图已保存，无法记住保存目录";
-        }
+        return ScreenshotSaveDirectory.TryRemember(_settings, path) ? null : "长截图已保存，无法记住保存目录";
     }
 
     private void Cancel()

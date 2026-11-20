@@ -76,8 +76,9 @@ internal sealed class CaptureThumbnailWindow : Window
         var thumbnail = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         thumbnail.Render(visual);
         thumbnail.Freeze();
-        _current = new CaptureThumbnailWindow(thumbnail, anchor);
-        _current.Show();
+        var window = new CaptureThumbnailWindow(thumbnail, anchor);
+        window.Show();
+        _current = window;
     }
 
     private void ResumeTimer()

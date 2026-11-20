@@ -53,6 +53,13 @@ internal sealed partial class RecordingPreviewWindow : Window
         _exportTempRoot = RecordingStorage.GetRoot(_exportProfile);
         _preferredPlaybackFps = recordingProfile is null ? 0 : Math.Clamp(recordingProfile.FrameRate, 1, 60);
         InitializeComponent();
+        if (IsGifExport)
+        {
+            Title = "编辑 GIF 录屏";
+            _copyButton.ToolTip = "按当前裁剪范围生成 GIF 文件并拷贝";
+            _downloadButton.ToolTip = "按当前裁剪范围另存为 GIF 文件";
+            _statusText.Text = "点「拷贝」或「存储」生成 GIF";
+        }
         Width = Math.Min(1040, SystemParameters.WorkArea.Width * 0.8);
         Height = Math.Min(700, SystemParameters.WorkArea.Height * 0.85);
         _speedChoices.ItemsSource = _playbackSpeeds.Select(speed => speed.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "×").ToArray();

@@ -16,10 +16,8 @@ namespace Screen.App;
 /// </summary>
 public partial class SettingsWindow
 {
-    private void CaptureHotKey(Button input, string propertyName, KeyEventArgs e)
+    private void CaptureHotKey(HotKeyCaptureButton input, string propertyName, Key key, ModifierKeys modifiers)
     {
-        e.Handled = true;
-
         var isClickThroughRecovery = string.Equals(
             propertyName,
             nameof(SettingsViewModel.ClickThroughRecoveryHotKey),
@@ -28,7 +26,6 @@ public partial class SettingsWindow
             propertyName,
             nameof(SettingsViewModel.RecordHotKey),
             StringComparison.Ordinal);
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
 
         if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
             or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin)
@@ -36,12 +33,10 @@ public partial class SettingsWindow
             return;
         }
 
-        var modifiers = Keyboard.Modifiers;
         var isFunctionKey = key is >= Key.F1 and <= Key.F24;
         if (modifiers == ModifierKeys.None && !isFunctionKey)
         {
             _viewModel.SetStatus("可以直接按 F1–F24，其他键请搭配 Ctrl、Shift、Alt 或 Win。", isError: true);
-            input.Content = BuildKeycapPanel(GetHotKeyValue(propertyName));
             return;
         }
 
@@ -72,7 +67,6 @@ public partial class SettingsWindow
         if (otherHotKeys.Any(other => string.Equals(value, other, StringComparison.OrdinalIgnoreCase)))
         {
             _viewModel.SetStatus("该快捷键已分配给另一项功能，请换一个组合。", isError: true);
-            input.Content = BuildKeycapPanel(previous);
             return;
         }
 
@@ -84,7 +78,6 @@ public partial class SettingsWindow
         if (register is not null && !register(value))
         {
             _viewModel.SetStatus($"快捷键 {value} 注册失败，已保留 {previous}。冲突时可启用 Screen 优先。", isError: true);
-            input.Content = BuildKeycapPanel(previous);
             return;
         }
 
@@ -102,10 +95,7 @@ public partial class SettingsWindow
         }
 
         input.Content = BuildKeycapPanel(value);
-        // Return focus to the window instead of advancing to the next control:
-        // focus traversal wraps around to the FIRST sidebar nav button, whose
-        // focused state looked like a stuck selection on "通用".
-        Focus();
+        input.EndCapture();
         _viewModel.SetStatus($"新快捷键：{value}（已生效）", isError: false);
     }
 

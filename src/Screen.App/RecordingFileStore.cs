@@ -1,6 +1,9 @@
 namespace Screen.App;
 
-internal sealed record RecordingSaveResult(bool Saved, string? Warning, string? Error, string? RecoveryDirectory);
+internal sealed record RecordingSaveResult(string? SavedPath, string? Warning, string? Error, string? RecoveryDirectory)
+{
+    public bool Saved => SavedPath is not null;
+}
 
 /// <summary>Publishes completed recordings without consuming the recovery copy until commit succeeds.</summary>
 internal static class RecordingFileStore
@@ -8,21 +11,22 @@ internal static class RecordingFileStore
     public static RecordingSaveResult Save(string source, string destination, string recoveryDirectory, string? warning = null, bool preserveRecovery = false,
         CancellationToken cancellationToken = default)
     {
+        string savedPath;
         try
         {
-            CopyAtomically(source, destination, cancellationToken);
+            savedPath = StageAndPublish(source, destination, keepBoth: true, cancellationToken);
         }
         catch (Exception exception)
         {
             RecordingTempCleaner.PreserveRecovery(recoveryDirectory);
-            return new RecordingSaveResult(false, warning,
+            return new RecordingSaveResult(null, warning,
                 exception is OperationCanceledException ? "已取消保存，录制素材已保留。" : exception.Message, recoveryDirectory);
         }
 
         if (preserveRecovery)
         {
             RecordingTempCleaner.PreserveRecovery(recoveryDirectory);
-            return new RecordingSaveResult(true, warning, null, recoveryDirectory);
+            return new RecordingSaveResult(savedPath, warning, null, recoveryDirectory);
         }
         try
         {
@@ -35,20 +39,23 @@ internal static class RecordingFileStore
         catch (UnauthorizedAccessException)
         {
         }
-        return new RecordingSaveResult(true, warning, null, null);
+        return new RecordingSaveResult(savedPath, warning, null, null);
     }
 
-    public static void CopyAtomically(string source, string destination, CancellationToken cancellationToken = default)
+    public static void CopyAtomically(string source, string destination, CancellationToken cancellationToken = default) =>
+        StageAndPublish(source, destination, keepBoth: false, cancellationToken);
+
+    private static string StageAndPublish(string source, string destination, bool keepBoth, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var target = Path.GetFullPath(destination);
-        if (string.Equals(Path.GetFullPath(source), target, StringComparison.OrdinalIgnoreCase))
+        if (!keepBoth && string.Equals(Path.GetFullPath(source), target, StringComparison.OrdinalIgnoreCase))
         {
             if (!File.Exists(source))
             {
                 throw new FileNotFoundException("导出文件不存在。", source);
             }
-            return;
+            return target;
         }
         var directory = Path.GetDirectoryName(target)!;
         var staging = Path.Combine(directory, $".screen-export-{Guid.NewGuid():N}.tmp");
@@ -73,11 +80,36 @@ internal static class RecordingFileStore
                 output.Flush(flushToDisk: true);
             }
             cancellationToken.ThrowIfCancellationRequested();
+            if (keepBoth)
+                return PublishWithAvailableName(staging, target, cancellationToken);
             File.Move(staging, target, overwrite: true);
+            return target;
         }
         finally
         {
             DeleteFileQuietly(staging);
+        }
+    }
+
+    private static string PublishWithAvailableName(string staging, string target, CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(target)!;
+        var stem = Path.GetFileNameWithoutExtension(target);
+        var extension = Path.GetExtension(target);
+        for (var suffix = 0; ; suffix++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidate = suffix == 0 ? target : Path.Combine(directory, $"{stem} ({suffix}){extension}");
+            try
+            {
+                // Only the no-overwrite rename decides the winner, including across processes on a share.
+                File.Move(staging, candidate, overwrite: false);
+                return candidate;
+            }
+            catch (IOException ex) when ((ex.HResult & 0xffff) is 80 or 183)
+            {
+                // Win32 ERROR_FILE_EXISTS / ERROR_ALREADY_EXISTS. Reuse the completed staging file.
+            }
         }
     }
 

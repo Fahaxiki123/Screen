@@ -83,7 +83,6 @@ internal sealed class RecordingController : IDisposable
         };
     }
 
-    public string FilePath => _filePath;
     public RecordingProfile Profile { get; private set; } = new();
     public Task<RecordingSaveResult> Completion => _completion.Task;
 
@@ -267,7 +266,7 @@ internal sealed class RecordingController : IDisposable
             {
                 SimpleLogger.LogError("Recording could not be saved; recovery materials retained", exception);
                 RecordingTempCleaner.PreserveRecovery(_tempDir);
-                return new RecordingSaveResult(false, null, exception.Message, _tempDir);
+                return new RecordingSaveResult(null, null, exception.Message, _tempDir);
             }
         });
         return _finishTask;

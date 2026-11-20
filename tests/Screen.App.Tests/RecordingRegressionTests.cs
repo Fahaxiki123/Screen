@@ -57,8 +57,14 @@ public sealed class RecordingRegressionTests
 
         using (var locked = new FileStream(destination, FileMode.Open, FileAccess.Read, FileShare.None))
         {
+            // Explicit overwrites still fail if the selected destination is locked.
+            var error = Assert.Throws<Exception>(() => RecordingFileStore.CopyAtomically(source, destination));
+            Assert.IsTrue(error is IOException or UnauthorizedAccessException, error.Message);
+            // An automatic save would now pick another name. Lock its input to exercise recovery.
+            using var lockedSource = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.None);
             var result = RecordingFileStore.Save(source, destination, scratch);
             Assert.IsFalse(result.Saved);
+            Assert.AreEqual(scratch, result.RecoveryDirectory);
             Assert.IsTrue(File.Exists(source));
         }
 
@@ -77,11 +83,48 @@ public sealed class RecordingRegressionTests
         var result = RecordingFileStore.Save(source, destination, scratch, "audio unavailable");
 
         Assert.IsTrue(result.Saved);
+        Assert.AreEqual(destination, result.SavedPath);
         Assert.AreEqual("audio unavailable", result.Warning);
         Assert.IsNull(result.Error);
         Assert.IsNull(result.RecoveryDirectory);
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, File.ReadAllBytes(destination));
         Assert.IsFalse(Directory.Exists(scratch));
+    }
+
+    [TestMethod]
+    public async Task ConcurrentAutoSavesPreserveExistingNamesAndReturnTheirOwnFilesAsync()
+    {
+        var target = Path.Combine(_root, "Recording.mp4");
+        var firstSuffix = Path.Combine(_root, "Recording (1).mp4");
+        File.WriteAllText(target, "old recording");
+        File.WriteAllText(firstSuffix, "old numbered recording");
+        using var start = new Barrier(2);
+
+        Task<RecordingSaveResult> SaveAsync(string payload)
+        {
+            var session = Directory.CreateDirectory(Path.Combine(_root, payload)).FullName;
+            var source = Path.Combine(session, "video.mp4");
+            File.WriteAllText(source, payload);
+            return Task.Run(() =>
+            {
+                Assert.IsTrue(start.SignalAndWait(TimeSpan.FromSeconds(10)));
+                return RecordingFileStore.Save(source, target, session);
+            });
+        }
+
+        RecordingSaveResult[] results;
+        using (var locked = new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            results = await Task.WhenAll(SaveAsync("session-a"), SaveAsync("session-b"));
+        }
+        Assert.AreEqual("old recording", File.ReadAllText(target));
+        Assert.AreEqual("old numbered recording", File.ReadAllText(firstSuffix));
+        Assert.IsTrue(results.All(result => result.Saved));
+        CollectionAssert.AreEquivalent(new[] { "Recording (2).mp4", "Recording (3).mp4" },
+            results.Select(result => Path.GetFileName(result.SavedPath)).ToArray());
+        Assert.AreEqual("session-a", File.ReadAllText(results[0].SavedPath!));
+        Assert.AreEqual("session-b", File.ReadAllText(results[1].SavedPath!));
+        Assert.IsEmpty(Directory.GetFiles(_root, ".screen-export-*.tmp"));
     }
 
     [TestMethod]

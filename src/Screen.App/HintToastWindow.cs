@@ -74,12 +74,14 @@ internal sealed class HintToastWindow : Window
     }
 
     public static void Show(string message) => Display(message, false, null);
-    public static void Success(string message, NativeMethods.NativePoint? anchor = null) => Display(message, true, anchor);
+    public static void Success(string message, NativeMethods.NativePoint? anchor = null) =>
+        FeedbackPlacement.TryShow(() => Display(message, true, anchor));
 
     private static void Display(string message, bool success, NativeMethods.NativePoint? anchor)
     {
         _current?.Close();
-        _current = new HintToastWindow(message, success, anchor);
-        _current.Show();
+        var toast = new HintToastWindow(message, success, anchor);
+        toast.Show();
+        _current = toast;
     }
 }

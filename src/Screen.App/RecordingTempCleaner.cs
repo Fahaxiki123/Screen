@@ -41,9 +41,10 @@ internal static class RecordingTempCleaner
                               && name.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase));
             // GIF clipboard deliveries live alongside the original and must never be aged out.
             // Match only our uniquely named transient palette exports after an interrupted preview.
-            scratch |= name.Length == "gif-preview-".Length + 32 + ".gif".Length
+            var extension = Path.GetExtension(name);
+            scratch |= name.Length == "gif-preview-".Length + 32 + extension.Length
                        && name.StartsWith("gif-preview-", StringComparison.OrdinalIgnoreCase)
-                       && name.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)
+                       && (extension.Equals(".gif", StringComparison.OrdinalIgnoreCase) || extension.Equals(".bgra", StringComparison.OrdinalIgnoreCase))
                        && Guid.TryParseExact(name.AsSpan("gif-preview-".Length, 32), "N", out _);
             if (scratch && utcNow - File.GetLastWriteTimeUtc(file) > _scratchRetention && TryDelete(() => File.Delete(file)))
             {

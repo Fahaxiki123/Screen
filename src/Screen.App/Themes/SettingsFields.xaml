@@ -74,11 +74,18 @@
                 <Border x:Name="Wash" CornerRadius="{DynamicResource Radius.Control}" Background="Transparent"/>
                 <Border x:Name="Rim" CornerRadius="{DynamicResource Radius.Control}" BorderBrush="{DynamicResource Brush.Accent}"
                         BorderThickness="1" Opacity="0"/>
-                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                <ContentPresenter x:Name="Keycaps" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                <TextBlock x:Name="Listening" Visibility="Collapsed" Text="按下新的快捷键…" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.AccentText}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
             </Grid>
             <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Wash" Property="Background" Value="{DynamicResource Brush.Hover}"/></Trigger>
                 <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter TargetName="Rim" Property="Opacity" Value="1"/>
+                </Trigger>
+                <Trigger Property="local:HudActiveButton.IsActive" Value="True">
+                    <Setter TargetName="Keycaps" Property="Visibility" Value="Collapsed"/>
+                    <Setter TargetName="Listening" Property="Visibility" Value="Visible"/>
                     <Setter TargetName="Wash" Property="Background" Value="{DynamicResource Brush.AccentSubtle}"/>
                     <Trigger.EnterActions><BeginStoryboard x:Name="CapturePulse"><Storyboard>
                         <DoubleAnimation Storyboard.TargetName="Rim" Storyboard.TargetProperty="Opacity" From="0.5" To="1"

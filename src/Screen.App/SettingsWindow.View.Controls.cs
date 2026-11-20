@@ -178,29 +178,13 @@ public partial class SettingsWindow
         new() { Content = text, Style = GetResource<Style>("SettingsFieldButton") };
     private Button CreateHotKeyButton(string propertyName)
     {
-        var button = new Button
+        var button = new HotKeyCaptureButton
         {
             Style = GetResource<Style>("SettingsKeyCaptureButton"),
             Content = BuildKeycapPanel(GetHotKeyValue(propertyName)),
-            ToolTip = "点击后直接按新的快捷键"
+            ToolTip = "点击或按 Enter 开始录入，Esc 取消"
         };
-        button.Click += (_, _) => button.Focus();
-        button.GotKeyboardFocus += (_, _) =>
-        {
-            button.Content = new TextBlock
-            {
-                Text = "按下新的快捷键…",
-                FontSize = 13,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = GetResource<Brush>("Brush.AccentText"),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-        };
-        button.LostKeyboardFocus += (_, _) =>
-        {
-            button.Content = BuildKeycapPanel(GetHotKeyValue(propertyName));
-        };
-        button.PreviewKeyDown += (_, e) => CaptureHotKey(button, propertyName, e);
+        button.ShortcutEntered += (key, modifiers) => CaptureHotKey(button, propertyName, key, modifiers);
         return button;
     }
 
