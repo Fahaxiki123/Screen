@@ -1,15 +1,15 @@
 FFmpeg build identity and source information
-Recorded for Screen 1.0.12 on 2026-11-12
+Recorded for Screen 1.0.16 (v4 UI branch) on 2026-11-20
 
 Distributed file: ffmpeg/bin/ffmpeg.exe
-Size: 10568704 bytes (10.08 MiB)
-SHA256: b90645b82d188ca1a973f58cd6e9e364221151bfc2d96b05065f4d1cdb8a579f
+Size: 10629120 bytes (10.14 MiB)
+SHA256: f069c4d8f3993d79997670ee3b34ca2b673a787886c232a373463c3d4a04eb22
 License reported by ffmpeg -L: GNU General Public License version 3 or later.
 Full GPLv3 text: licenses/FFmpeg-9.0.2-COPYING.GPLv3.txt
 FFmpeg licensing notes: licenses/FFmpeg-9.0.2-LICENSE.txt
 Screen starts FFmpeg as a separate child process for screen recording, audio
-muxing, preview playback, and trim export, and does not link against FFmpeg
-libraries in-process.
+muxing, preview playback, trimmed video export, and palette-based GIF export.
+Screen does not link against FFmpeg libraries in-process.
 
 Reproducible build scripts in this repository:
   tools/ffmpeg/build-ffmpeg.sh
@@ -20,6 +20,23 @@ Incorporated upstream sources and exact revisions:
    https://github.com/FFmpeg/FFmpeg/tree/946fcce07b6dcd0331c8cc609192aeff5e1924f8
    https://github.com/FFmpeg/FFmpeg/archive/946fcce07b6dcd0331c8cc609192aeff5e1924f8.tar.gz
    License: GPL-3.0-or-later (with --enable-gpl --enable-version3)
+
+Screen change to FFmpeg n9.0.2 (2026-11-20): GIF palettegen's diff mode
+must count the incoming pixel, not the pixel in the previous frame.
+Without this change a newly introduced final color may be absent. No
+video or audio codec was modified. The build applies the patch in an
+isolated source copy, leaving the supplied checkout unchanged.
+
+Repository patch: tools/ffmpeg/palettegen-diff-current-frame.patch
+Exact patch to the upstream revision above:
+--- a/libavfilter/vf_palettegen.c
++++ b/libavfilter/vf_palettegen.c
+@@ -477,4 +477,4 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
+-    ret = s->prev_frame ? update_histogram_diff(s->histogram, s->prev_frame, in)
++    ret = s->prev_frame ? update_histogram_diff(s->histogram, in, s->prev_frame)
+                         : update_histogram_frame(s->histogram, in);
+     if (ret > 0)
+         s->nb_refs += ret;
 
 2. x264 (libx264 static archive): 0.165.r3222.b35605a (MSYS2 mingw-w64-x86_64-libx264 0.165.r3222.b35605a-3)
    https://code.videolan.org/videolan/x264/-/tree/b35605ace3ddf7c1a5d67a2eb553f034aef41d55
@@ -38,7 +55,7 @@ Incorporated upstream sources and exact revisions:
    License: MIT (licenses/AMF-headers-1.5.3-LICENSE.txt)
 
 6. Toolchain runtime libraries (statically linked):
-   MSYS2 mingw-w64-x86_64-gcc 16.2.0-6 / mingw-w64-x86_64-crt 14.0.0.r598.ge3d18511f-1
+   MSYS2 mingw-w64-x86_64-gcc 16.2.0-7 / mingw-w64-x86_64-crt 14.0.0.r598.ge3d18511f-1
    License: GPL-3.0-or-later WITH GCC-exception-3.1 / ZPL-2.1
 
 PE runtime DLL imports (Windows OS system libraries only):
@@ -46,8 +63,8 @@ PE runtime DLL imports (Windows OS system libraries only):
 
 ----- Actual ffmpeg -version output -----
 ffmpeg version 9.0.2-screen-minimal Copyright (c) 2000-2026 the FFmpeg developers
-built with gcc 16.2.0 (Rev6, Built by MSYS2 project)
-configuration: --prefix=/d/Screengit/artifacts/tooling/ffmpeg-build/out/prefix --arch=x86_64 --target-os=mingw32 --pkg-config=pkgconf --pkg-config-flags=--static --extra-cflags='-O2 -UX264_API_IMPORTS' --extra-ldflags='-static -static-libgcc -static-libstdc++' --extra-libs=-lstdc++ --extra-version=screen-minimal --enable-gpl --enable-version3 --enable-static --disable-shared --disable-debug --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages --disable-network --disable-autodetect --disable-avdevice --disable-ffplay --disable-ffprobe --enable-ffmpeg --enable-swscale --enable-swresample --enable-avcodec --enable-avformat --enable-avfilter --enable-w32threads --enable-d3d11va --enable-dxva2 --enable-ffnvcodec --enable-nvenc --enable-amf --enable-libvpl --enable-libx264 --disable-everything --enable-protocol='file,pipe,fd' --enable-hwaccel='h264_d3d11va,h264_d3d11va2,h264_dxva2' --enable-encoder='libx264,h264_nvenc,h264_qsv,h264_amf,aac,rawvideo,pcm_s16le,pcm_f32le,wrapped_avframe' --enable-decoder='h264,aac,rawvideo,pcm_s16le,pcm_f32le,wrapped_avframe' --enable-parser='h264,aac' --enable-demuxer='mov,rawvideo,pcm_s16le,pcm_f32le,h264,aac' --enable-muxer='mp4,mov,ipod,rawvideo,pcm_s16le,pcm_f32le,image2pipe,null' --enable-bsf='aac_adtstoasc,h264_mp4toannexb,extract_extradata,null' --enable-filter='buffer,buffersink,abuffer,abuffersink,scale,format,aformat,null,anull,aresample,apad,amix,atempo,hwdownload,hwupload'
+built with gcc 16.2.0 (Rev7, Built by MSYS2 project)
+configuration: --prefix=/d/Screen-v4-tooling/fixed-release/out/prefix --arch=x86_64 --target-os=mingw32 --pkg-config=pkgconf --pkg-config-flags=--static --extra-cflags='-O2 -UX264_API_IMPORTS' --extra-ldflags='-static -static-libgcc -static-libstdc++' --extra-libs=-lstdc++ --extra-version=screen-minimal --enable-gpl --enable-version3 --enable-static --disable-shared --disable-debug --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages --disable-network --disable-autodetect --disable-avdevice --disable-ffplay --disable-ffprobe --enable-ffmpeg --enable-swscale --enable-swresample --enable-avcodec --enable-avformat --enable-avfilter --enable-w32threads --enable-d3d11va --enable-dxva2 --enable-ffnvcodec --enable-nvenc --enable-amf --enable-libvpl --enable-libx264 --disable-everything --enable-protocol='file,pipe,fd' --enable-hwaccel='h264_d3d11va,h264_d3d11va2,h264_dxva2' --enable-encoder='libx264,h264_nvenc,h264_qsv,h264_amf,aac,rawvideo,pcm_s16le,pcm_f32le,wrapped_avframe,gif' --enable-decoder='h264,aac,rawvideo,pcm_s16le,pcm_f32le,wrapped_avframe' --enable-parser='h264,aac' --enable-demuxer='mov,rawvideo,pcm_s16le,pcm_f32le,h264,aac' --enable-muxer='mp4,mov,ipod,rawvideo,pcm_s16le,pcm_f32le,image2pipe,null,gif' --enable-bsf='aac_adtstoasc,h264_mp4toannexb,extract_extradata,null' --enable-filter='buffer,buffersink,abuffer,abuffersink,scale,format,aformat,null,anull,aresample,apad,amix,atempo,hwdownload,hwupload,fps,split,palettegen,paletteuse'
 libavutil      61.  1.102 / 61.  1.102
 libavcodec     63.  1.102 / 63.  1.102
 libavformat    63.  1.102 / 63.  1.102
@@ -55,9 +72,12 @@ libavfilter    12.  1.102 / 12.  1.102
 libswscale     10.  1.102 / 10.  1.102
 libswresample   7.  1.102 /  7.  1.102
 
+Exiting with exit code 0
+
 ----- Actual ffmpeg -buildconf output -----
+
   configuration:
-    --prefix=/d/Screengit/artifacts/tooling/ffmpeg-build/out/prefix
+    --prefix=/d/Screen-v4-tooling/fixed-release/out/prefix
     --arch=x86_64
     --target-os=mingw32
     --pkg-config=pkgconf
@@ -98,10 +118,12 @@ libswresample   7.  1.102 /  7.  1.102
     --disable-everything
     --enable-protocol='file,pipe,fd'
     --enable-hwaccel='h264_d3d11va,h264_d3d11va2,h264_dxva2'
-    --enable-encoder='libx264,h264_nvenc,h264_qsv,h264_amf,aac,rawvideo,pcm_s16le,pcm_f32le,wrapped_avframe'
+    --enable-encoder='libx264,h264_nvenc,h264_qsv,h264_amf,aac,rawvideo,pcm_s16le,pcm_f32le,wrapped_avframe,gif'
     --enable-decoder='h264,aac,rawvideo,pcm_s16le,pcm_f32le,wrapped_avframe'
     --enable-parser='h264,aac'
     --enable-demuxer='mov,rawvideo,pcm_s16le,pcm_f32le,h264,aac'
-    --enable-muxer='mp4,mov,ipod,rawvideo,pcm_s16le,pcm_f32le,image2pipe,null'
+    --enable-muxer='mp4,mov,ipod,rawvideo,pcm_s16le,pcm_f32le,image2pipe,null,gif'
     --enable-bsf='aac_adtstoasc,h264_mp4toannexb,extract_extradata,null'
-    --enable-filter='buffer,buffersink,abuffer,abuffersink,scale,format,aformat,null,anull,aresample,apad,amix,atempo,hwdownload,hwupload'
+    --enable-filter='buffer,buffersink,abuffer,abuffersink,scale,format,aformat,null,anull,aresample,apad,amix,atempo,hwdownload,hwupload,fps,split,palettegen,paletteuse'
+
+Exiting with exit code 0

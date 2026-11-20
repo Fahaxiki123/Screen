@@ -15,13 +15,13 @@ $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $msysFull = [IO.Path]::GetFullPath($MsysRoot)
 $bashPath = Join-Path $msysFull 'usr\bin\bash.exe'
 if (-not (Test-Path -LiteralPath $bashPath -PathType Leaf)) {
-    throw "MSYS2 bash.exe was not found at $bashPath. Provide -MsysRoot pointing to an MSYS2 installation with mingw64 gcc, nasm, pkgconf, libx264, libvpl, amf-headers, and ffnvcodec-headers."
+    throw "MSYS2 bash.exe was not found at $bashPath. Provide -MsysRoot pointing to an MSYS2 installation with make, patch, mingw64 gcc, nasm, pkgconf, libx264, libvpl, amf-headers, and ffnvcodec-headers."
 }
 
 $srcFull = [IO.Path]::GetFullPath($FfmpegSource)
 if (-not (Test-Path -LiteralPath (Join-Path $srcFull 'configure') -PathType Leaf)) {
     New-Item -ItemType Directory -Path (Split-Path $srcFull -Parent) -Force | Out-Null
-    & git clone --depth 1 --branch $FfmpegTag https://github.com/FFmpeg/FFmpeg.git $srcFull
+    & git clone -c core.autocrlf=false --depth 1 --branch $FfmpegTag https://github.com/FFmpeg/FFmpeg.git $srcFull
     if ($LASTEXITCODE -ne 0) { throw "Failed to clone FFmpeg tag $FfmpegTag." }
 }
 
@@ -42,7 +42,7 @@ $msysSrc = Convert-ToMsysPath $srcFull
 $msysBuild = Convert-ToMsysPath $buildFull
 $msysOut = Convert-ToMsysPath $outFull
 
-& $bashPath -lc "'$msysScript' '$msysSrc' '$msysBuild' '$msysOut'"
+& $bashPath --login $msysScript $msysSrc $msysBuild $msysOut
 if ($LASTEXITCODE -ne 0) {
     throw "Minimal FFmpeg build failed with exit code $LASTEXITCODE."
 }
@@ -56,8 +56,24 @@ $manifest = Get-Content -LiteralPath (Join-Path $outFull 'build-manifest.txt') -
 $dllImports = @([regex]::Matches($manifest, 'DLL Name:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value.ToLowerInvariant() })
 $allowedDllPatterns = '^(kernel32|msvcrt|advapi32|user32|gdi32|ole32|oleaut32|shell32|shlwapi|ws2_32|bcrypt|crypt32|secur32|ncrypt|imm32|winmm|cfgmgr32|dxva2|d3d11|dxgi|version|setupapi|rpcrt4|api-ms-win-.*)\.dll$'
 $unexpectedDlls = @($dllImports | Where-Object { $_ -notmatch $allowedDllPatterns })
+if ($dllImports.Count -eq 0) { throw 'The build manifest has no PE import table.' }
 if ($unexpectedDlls.Count -gt 0) {
     throw "Built ffmpeg.exe links non-OS runtime DLLs: $($unexpectedDlls -join ', ')"
+}
+
+$requiredComponents = @{
+    encoders = 'libx264','h264_nvenc','h264_qsv','h264_amf','aac','gif'
+    muxers = 'mp4','gif'
+    filters = 'fps','scale','split','palettegen','paletteuse'
+}
+foreach ($kind in $requiredComponents.Keys) {
+    $listing = (& $builtExe -hide_banner "-$kind" 2>&1) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "Cannot inspect built FFmpeg $kind." }
+    foreach ($component in $requiredComponents[$kind]) {
+        if ($listing -notmatch "(?m)^\s*[A-Z.]+\s+$([regex]::Escape($component))\s") {
+            throw "Built FFmpeg is missing $kind component: $component"
+        }
+    }
 }
 
 if ($Install) {

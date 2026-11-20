@@ -21,6 +21,48 @@ public sealed class SettingsPersistenceTests
     [TestCleanup]
     public void Cleanup() => _directory.Delete(recursive: true);
 
+    [TestMethod]
+    public void PreGifSettingsKeepVideoOptionsAndReceiveGifDefaultsWithoutMigration()
+    {
+        const string legacy = """{"SchemaVersion":4,"Recording":{"FrameRate":15,"Quality":2,"RecordSystemAudio":false,"RecordMicrophone":true}}""";
+        File.WriteAllText(_store.Path, legacy);
+
+        var settings = _store.Load();
+        Assert.AreEqual(4, settings.SchemaVersion);
+        Assert.AreEqual(RecordingFormat.Mp4, settings.Recording.Format);
+        Assert.AreEqual(15, settings.Recording.GifFrameRate);
+        Assert.AreEqual(1280, settings.Recording.GifMaxWidth);
+        Assert.AreEqual(15, settings.Recording.FrameRate);
+        Assert.AreEqual(RecordingQuality.High, settings.Recording.Quality);
+        Assert.IsFalse(settings.Recording.RecordSystemAudio);
+        Assert.IsTrue(settings.Recording.RecordMicrophone);
+        Assert.AreEqual(legacy, File.ReadAllText(_store.Path));
+    }
+
+    [TestMethod]
+    [DataRow(10, 0)]
+    [DataRow(20, 960)]
+    [DataRow(30, 1920)]
+    public void GifOptionsSurviveRestartAndAnUnrelatedUpdate(int fps, int maxWidth)
+    {
+        var expected = new RecordingProfile
+        {
+            Format = RecordingFormat.Gif,
+            GifFrameRate = fps,
+            GifMaxWidth = maxWidth,
+            RecordSystemAudio = true,
+            RecordMicrophone = true,
+            FrameRate = 60,
+            Quality = RecordingQuality.Smooth
+        };
+        _store.Update(settings => settings.Recording = expected);
+        new JsonSettingsStore(_store.Path).Update(settings => settings.RecordHotKey = "F9");
+        var reloaded = new JsonSettingsStore(_store.Path).Load();
+        Assert.AreEqual(4, reloaded.SchemaVersion);
+        Assert.AreEqual(expected, reloaded.Recording);
+        Assert.AreEqual("F9", reloaded.RecordHotKey);
+    }
+
     [STATestMethod]
     public void CredentialWriteFailureStaysVisibleAndRetriesOnlyTheFailedCredential()
     {

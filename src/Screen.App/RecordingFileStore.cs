@@ -86,9 +86,7 @@ internal static class RecordingFileStore
         // Clipboard file drops contain paths, not file contents. Treat the
         // trimmed copy as a delivered recording, with the same lifetime as an
         // ordinary saved video, independent of the preview window/cache.
-        var destination = Path.Combine(
-            Path.GetDirectoryName(Path.GetFullPath(recordingPath))!,
-            $"{Path.GetFileNameWithoutExtension(recordingPath)}-裁切-{Guid.NewGuid():N}.mp4");
+        var destination = ClipboardCopyPath(recordingPath);
         CopyAtomically(source, destination);
         return destination;
     }
@@ -140,9 +138,11 @@ internal static class RecordingFileStore
         }
     }, cancellationToken);
 
-    public static string ClipboardCopyPath(string recordingPath) => Path.Combine(
-        Path.GetDirectoryName(Path.GetFullPath(recordingPath))!,
-        $"{Path.GetFileNameWithoutExtension(recordingPath)}-裁切-{Guid.NewGuid():N}.mp4");
+    public static string ClipboardCopyPath(string recordingPath, Screen.Core.RecordingFormat format = Screen.Core.RecordingFormat.Mp4)
+    {
+        var suffix = format == Screen.Core.RecordingFormat.Gif ? $"动图-{Guid.NewGuid():N}.gif" : $"裁切-{Guid.NewGuid():N}.mp4";
+        return Path.Combine(Path.GetDirectoryName(Path.GetFullPath(recordingPath))!, $"{Path.GetFileNameWithoutExtension(recordingPath)}-{suffix}");
+    }
 
     internal static void DeleteFileQuietly(string path)
     {

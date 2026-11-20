@@ -39,6 +39,12 @@ internal static class RecordingTempCleaner
             var scratch = name.Equals("preview-audio.log", StringComparison.OrdinalIgnoreCase)
                           || (name.StartsWith("trim-", StringComparison.OrdinalIgnoreCase)
                               && name.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase));
+            // GIF clipboard deliveries live alongside the original and must never be aged out.
+            // Match only our uniquely named transient palette exports after an interrupted preview.
+            scratch |= name.Length == "gif-preview-".Length + 32 + ".gif".Length
+                       && name.StartsWith("gif-preview-", StringComparison.OrdinalIgnoreCase)
+                       && name.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)
+                       && Guid.TryParseExact(name.AsSpan("gif-preview-".Length, 32), "N", out _);
             if (scratch && utcNow - File.GetLastWriteTimeUtc(file) > ScratchRetention && TryDelete(() => File.Delete(file)))
             {
                 removed++;

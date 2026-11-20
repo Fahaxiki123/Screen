@@ -3,22 +3,26 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using Microsoft.Win32;
+using Screen.Core;
 
 namespace Screen.App;
 
 internal sealed partial class RecordingPreviewWindow
 {
+    private bool IsGifExport => _exportProfile.Format == RecordingFormat.Gif;
+
     private async void SaveAs(object sender, RoutedEventArgs e)
     {
         if (!_loaded || _closed || _exportOperation is not null)
             return;
+        var extension = IsGifExport ? ".gif" : ".mp4";
         var dialog = new SaveFileDialog
         {
             Title = "保存录屏",
-            Filter = "MP4 视频 (*.mp4)|*.mp4",
-            DefaultExt = ".mp4",
+            Filter = IsGifExport ? "GIF 动图 (*.gif)|*.gif" : "MP4 视频 (*.mp4)|*.mp4",
+            DefaultExt = extension,
             AddExtension = true,
-            FileName = Path.GetFileNameWithoutExtension(_filePath) + (_timeline.IsTrimmed ? "-裁切" : string.Empty) + ".mp4"
+            FileName = Path.GetFileNameWithoutExtension(_filePath) + (_timeline.IsTrimmed ? "-裁切" : string.Empty) + extension
         };
         if (dialog.ShowDialog(this) == true)
             await DeliverExportAsync(dialog.FileName, clipboard: false);
@@ -41,20 +45,25 @@ internal sealed partial class RecordingPreviewWindow
         string? clipboardCopy = null;
         var delivered = false;
         SetStatus(_timeline.IsTrimmed ? "正在裁切…" : "正在导出…", persistent: true);
-        var progress = new Progress<double>(value =>
+        void Report(double value)
         {
             if (!_closed && ReferenceEquals(_exportOperation, operation) && !operation.IsCancellationRequested)
                 SetStatus($"正在导出 {value:P0}", persistent: true);
-        });
+        }
+        // GIF palette/encoding is the expensive part; keep progress monotone through the atomic copy.
+        var progress = new Progress<double>(value => Report(IsGifExport ? 0.9 + 0.1 * value : value));
+        var encodingProgress = new Progress<double>(value => Report(0.9 * value));
         try
         {
-            source = await GetTrimmedOrOriginalAsync(operation.Token);
+            if (IsGifExport && destination is not null)
+                ValidateGifDestination(_filePath, destination);
+            source = await GetExportSourceAsync(operation.Token, encodingProgress);
             operation.Token.ThrowIfCancellationRequested();
             if (clipboard)
             {
                 if (!string.Equals(source, _filePath, StringComparison.OrdinalIgnoreCase))
                 {
-                    clipboardCopy = RecordingFileStore.ClipboardCopyPath(_filePath);
+                    clipboardCopy = RecordingFileStore.ClipboardCopyPath(_filePath, _exportProfile.Format);
                     await RecordingFileStore.CopyAtomicallyAsync(source, clipboardCopy, operation.Token, progress);
                 }
                 operation.Token.ThrowIfCancellationRequested();
@@ -95,16 +104,82 @@ internal sealed partial class RecordingPreviewWindow
         }
     }
 
-    private Task<string> GetTrimmedOrOriginalAsync(CancellationToken cancellationToken)
+    private Task<string> GetExportSourceAsync(CancellationToken cancellationToken, IProgress<double> encodingProgress)
     {
-        if (!_timeline.IsTrimmed)
+        // Format and GIF options belong to this immutable recording session; the cache only needs the range.
+        var isTrimmed = _timeline.IsTrimmed;
+        if (!IsGifExport && !isTrimmed)
             return Task.FromResult(_filePath);
-        var range = new RecordingTrimRange(_timeline.TrimStart, _timeline.TrimEnd);
+        var range = isTrimmed
+            ? new RecordingTrimRange(_timeline.TrimStart, _timeline.TrimEnd)
+            : new RecordingTrimRange(0, _durationSeconds);
         return _exportCache.GetAsync(range, async (selected, lifetime) =>
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime, cancellationToken);
-            return await ExportTrimAsync(selected, linked.Token).ConfigureAwait(false);
+            return await RenderExportAsync(selected, isTrimmed, linked.Token, encodingProgress).ConfigureAwait(false);
         });
+    }
+
+    internal static void ValidateGifDestination(string source, string target)
+    {
+        if (string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Path.GetExtension(target), ".gif", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("请选择 .gif 文件名；原始 MP4 不能被 GIF 覆盖。", nameof(target));
+    }
+
+    internal static ProcessStartInfo BuildGifStartInfo(string ffmpeg, string source, string target, RecordingTrimRange? range,
+        int fps, int maxWidth)
+    {
+        ValidateGifDestination(source, target);
+        if (fps is < 10 or > 30)
+            throw new ArgumentOutOfRangeException(nameof(fps), "GIF 帧率必须在 10–30 之间。");
+        ArgumentOutOfRangeException.ThrowIfNegative(maxWidth);
+        var info = new ProcessStartInfo(ffmpeg)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true
+        };
+        void Add(params string[] args)
+        {
+            foreach (var arg in args)
+                info.ArgumentList.Add(arg);
+        }
+        Add("-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-progress", "pipe:1", "-nostats");
+        var frameTrim = string.Empty;
+        if (range is { } selected)
+        {
+            if (!double.IsFinite(selected.Start) || !double.IsFinite(selected.End) || selected.Start < 0 || selected.End <= selected.Start)
+                throw new ArgumentOutOfRangeException(nameof(range), "裁切区间无效。");
+            // Retain the preroll frame that may span Start in variable-frame-rate screen recordings.
+            Add("-noaccurate_seek", "-ss", selected.Start.ToString("0.######", CultureInfo.InvariantCulture));
+            // Don't put -to on the input: the next VFR timestamp can be AFTER End and still
+            // define how long the last selected frame is displayed. Stop after sampling the
+            // requested frames, before split, so the palette and GIF cover the same interval.
+            var frames = Math.Max(1, checked((long)Math.Ceiling((selected.End - selected.Start) * fps - 0.00000001)));
+            frameTrim = FormattableString.Invariant($"trim=end_frame={frames},");
+        }
+        Add("-i", Path.GetFullPath(source), "-map", "0:v:0", "-an");
+        var scale = maxWidth == 0 ? string.Empty : FormattableString.Invariant($"scale='min(iw,{maxWidth})':-2:flags=lanczos,");
+        // Keep at least the final held sample, even for a one-frame recording shorter than a GIF frame.
+        var rate = FormattableString.Invariant($"fps={fps}") + (range.HasValue ? ":start_time=0" : string.Empty) + ":eof_action=pass";
+        Add("-vf", $"{rate},{frameTrim}{scale}split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle");
+        Add("-c:v", "gif", "-f", "gif", "-loop", "0", Path.GetFullPath(target));
+        return info;
+    }
+
+    internal static bool IsGifUnavailable(string errors)
+    {
+        // Older bundled builds may lack the muxer as well as the encoder or one filter.
+        // Do not report bad input, lack of disk space, or palette runtime failures as a missing feature.
+        return errors.Contains("Unrecognized option 'loop'.", StringComparison.OrdinalIgnoreCase)
+            || errors.Contains("Unknown encoder 'gif'", StringComparison.OrdinalIgnoreCase)
+            || errors.Contains("Encoder (codec gif) not found", StringComparison.OrdinalIgnoreCase)
+            || errors.Contains("Requested output format 'gif' is not known", StringComparison.OrdinalIgnoreCase)
+            || new[] { "fps", "trim", "scale", "split", "palettegen", "paletteuse" }.Any(name =>
+                errors.Contains($"No such filter: '{name}'", StringComparison.OrdinalIgnoreCase)
+                || errors.Contains($"Filter '{name}' not found", StringComparison.OrdinalIgnoreCase));
     }
 
     internal static ProcessStartInfo BuildTrimStartInfo(string ffmpeg, string source, string target, RecordingTrimRange range,
@@ -140,16 +215,33 @@ internal sealed partial class RecordingPreviewWindow
         return startInfo;
     }
 
-    private async Task<string> ExportTrimAsync(RecordingTrimRange range, CancellationToken cancellationToken)
+    private async Task<string> RenderExportAsync(RecordingTrimRange range, bool isTrimmed, CancellationToken cancellationToken,
+        IProgress<double> progress)
     {
         var root = _exportTempRoot;
         Directory.CreateDirectory(root);
         RecordingStorage.EnsureAvailableSpace(root);
-        var tempPath = Path.Combine(root, $"trim-{Guid.NewGuid():N}.mp4");
+        var tempPath = Path.Combine(root, IsGifExport ? $"gif-preview-{Guid.NewGuid():N}.gif" : $"trim-{Guid.NewGuid():N}.mp4");
         cancellationToken.ThrowIfCancellationRequested();
-        using var process = Process.Start(BuildTrimStartInfo(FfmpegLocator.Resolve(), _filePath, tempPath, range, _fps))
+        var ffmpeg = FfmpegLocator.Resolve();
+        var info = IsGifExport
+            ? BuildGifStartInfo(ffmpeg, _filePath, tempPath, isTrimmed ? range : null, _exportProfile.GifFrameRate, _exportProfile.GifMaxWidth)
+            : BuildTrimStartInfo(ffmpeg, _filePath, tempPath, range, _fps);
+        using var process = Process.Start(info)
             ?? throw new InvalidOperationException("无法启动 ffmpeg。");
         var errors = ProcessErrorTail.Attach(process);
+        if (info.RedirectStandardOutput)
+        {
+            var duration = range.End - range.Start;
+            const string key = "out_time_us=";
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is { } line && line.StartsWith(key, StringComparison.Ordinal)
+                    && long.TryParse(line.AsSpan(key.Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out var microseconds))
+                    progress.Report(Math.Clamp(microseconds / (duration * 1_000_000d), 0, 1));
+            };
+            process.BeginOutputReadLine();
+        }
         using var cancellation = cancellationToken.Register(() =>
         {
             try
@@ -161,7 +253,13 @@ internal sealed partial class RecordingPreviewWindow
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (process.ExitCode != 0)
+            {
+                if (IsGifExport && IsGifUnavailable(errors.Text))
+                    throw new InvalidOperationException("当前 FFmpeg 不支持 GIF，请更新 Screen。原始 MP4 已保留。");
                 throw new InvalidOperationException(errors.Text);
+            }
+            if (IsGifExport && new FileInfo(tempPath).Length == 0)
+                throw new IOException("GIF 导出为空，原始 MP4 已保留。");
             return tempPath;
         }
         catch

@@ -21,6 +21,7 @@ namespace Screen.App;
 internal sealed partial class RecordingPreviewWindow : Window
 {
     private readonly string _filePath;
+    private readonly Screen.Core.RecordingProfile _exportProfile;
     private readonly string _exportTempRoot;
     private readonly int _preferredPlaybackFps;
     private readonly DispatcherTimer _ticker;
@@ -48,7 +49,8 @@ internal sealed partial class RecordingPreviewWindow : Window
     public RecordingPreviewWindow(string filePath, Screen.Core.RecordingProfile? recordingProfile = null)
     {
         _filePath = filePath;
-        _exportTempRoot = RecordingStorage.GetRoot(recordingProfile ?? new Screen.Core.RecordingProfile());
+        _exportProfile = recordingProfile ?? new Screen.Core.RecordingProfile();
+        _exportTempRoot = RecordingStorage.GetRoot(_exportProfile);
         _preferredPlaybackFps = recordingProfile is null ? 0 : Math.Clamp(recordingProfile.FrameRate, 1, 60);
         InitializeComponent();
         Width = Math.Min(1040, SystemParameters.WorkArea.Width * 0.8);

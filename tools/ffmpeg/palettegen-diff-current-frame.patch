@@ -1,0 +1,8 @@
+--- a/libavfilter/vf_palettegen.c
++++ b/libavfilter/vf_palettegen.c
+@@ -477,4 +477,4 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
+-    ret = s->prev_frame ? update_histogram_diff(s->histogram, s->prev_frame, in)
++    ret = s->prev_frame ? update_histogram_diff(s->histogram, in, s->prev_frame)
+                         : update_histogram_frame(s->histogram, in);
+     if (ret > 0)
+         s->nb_refs += ret;
