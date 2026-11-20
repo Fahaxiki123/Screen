@@ -13,6 +13,23 @@
     <Pen x:Key="Capture.BrushCursorRim" Brush="#DCFFFFFF" Thickness="1.5"/>
     <SolidColorBrush x:Key="Capture.BrushCursorFill" Color="#18FFFFFF"/>
     <SolidColorBrush x:Key="Capture.HandleFill" Color="White"/>
+    <LinearGradientBrush x:Key="Capture.ScanBand" StartPoint="0.5,0" EndPoint="0.5,1">
+        <GradientStop Offset="0" Color="#000A84FF"/>
+        <GradientStop Offset="0.25" Color="#100A84FF"/>
+        <GradientStop Offset="0.5" Color="#540A84FF"/>
+        <GradientStop Offset="0.75" Color="#100A84FF"/>
+        <GradientStop Offset="1" Color="#000A84FF"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="Capture.ScanLine" Color="#D70A84FF"/>
+    <Style x:Key="Capture.OcrHighlight" TargetType="Border">
+        <Setter Property="Background" Value="#170A84FF"/>
+        <Setter Property="BorderBrush" Value="#610A84FF"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="5"/>
+        <Setter Property="Effect">
+            <Setter.Value><DropShadowEffect Color="#0A84FF" Opacity="0.18" BlurRadius="12" ShadowDepth="0"/></Setter.Value>
+        </Setter>
+    </Style>
     <DrawingImage x:Key="Capture.Handle">
         <DrawingImage.Drawing>
             <DrawingGroup>

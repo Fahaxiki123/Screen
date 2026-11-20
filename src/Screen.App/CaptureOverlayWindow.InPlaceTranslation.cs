@@ -32,7 +32,10 @@ internal sealed partial class CaptureOverlayWindow
         _copyTranslation = CreateInlineButton("复制译文", (_, _) =>
         {
             try
-            { BitmapUtilities.SetClipboardTextWithRetry(_inPlaceText); }
+            {
+                BitmapUtilities.SetClipboardTextWithRetry(_inPlaceText);
+                HintToastWindow.Success("已拷贝", SelectionCenter());
+            }
             catch (Exception exception) { SetInPlaceStatus($"复制失败：{exception.Message}"); }
         });
         actions.Children.Add(_originalToggle);
@@ -88,6 +91,7 @@ internal sealed partial class CaptureOverlayWindow
     private void CancelTextOperations(bool keepInPlace = false)
     {
         CancelTranslation();
+        _surface.ShowOcrLines(null);
         _ocrCard.CancelRecognition();
         _ocrCard.Visibility = Visibility.Collapsed;
         _translationCard.Visibility = Visibility.Collapsed;

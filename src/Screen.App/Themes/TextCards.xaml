@@ -1,0 +1,63 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Style x:Key="TextCardActionStyle" TargetType="Button">
+        <Setter Property="Height" Value="26"/><Setter Property="MinWidth" Value="24"/>
+        <Setter Property="Margin" Value="1,0"/><Setter Property="Padding" Value="6,0"/>
+        <Setter Property="FontSize" Value="{DynamicResource Font.Body}"/><Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Brush.AccentText}"/>
+        <Setter Property="Background" Value="Transparent"/><Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource Radius.Control}"
+                    Padding="{TemplateBinding Padding}" BorderThickness="1">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#2E0A84FF"/></Trigger>
+                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.AccentSubtleDark}"/></Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.AccentText}"/></Trigger>
+                <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="TextCardCloseStyle" TargetType="Button">
+        <Setter Property="Width" Value="24"/><Setter Property="MinWidth" Value="24"/><Setter Property="Height" Value="24"/>
+        <Setter Property="Margin" Value="0"/><Setter Property="Padding" Value="0"/>
+        <Setter Property="Foreground" Value="{DynamicResource Brush.LabelSecondary}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+            <Grid>
+                <Ellipse x:Name="Disc" Fill="#1AFFFFFF"/>
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Disc" Property="Fill" Value="{DynamicResource Brush.EdgeHighlight}"/></Trigger>
+                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Disc" Property="Fill" Value="{DynamicResource Brush.Pressed}"/></Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Disc" Property="Stroke" Value="{DynamicResource Brush.AccentText}"/></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="TextCardBodyStyle" TargetType="TextBox">
+        <Setter Property="AcceptsReturn" Value="True"/><Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="FontFamily" Value="{DynamicResource FontFamily.Body}"/><Setter Property="FontSize" Value="13"/>
+        <Setter Property="TextBlock.LineHeight" Value="21"/><Setter Property="Padding" Value="3,2"/>
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Label}"/><Setter Property="CaretBrush" Value="{DynamicResource Brush.Label}"/>
+        <Setter Property="SelectionBrush" Value="{DynamicResource Brush.Accent}"/><Setter Property="SelectionOpacity" Value="0.4"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+            <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                <ScrollViewer x:Name="PART_ContentHost" Focusable="False"/>
+            </Border>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="TextCardFootnoteStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="{DynamicResource Font.Badge}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Brush.LabelSecondary}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+    <Style x:Key="TextCardFooterStyle" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Separator}"/>
+        <Setter Property="BorderThickness" Value="0,1,0,0"/><Setter Property="Padding" Value="0,5,0,0"/>
+        <Setter Property="Margin" Value="0,7,0,0"/>
+    </Style>
+</ResourceDictionary>

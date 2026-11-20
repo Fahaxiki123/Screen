@@ -10,6 +10,7 @@
         <ResourceDictionary Source="Themes/Controls.xaml" />
         <ResourceDictionary Source="Themes/CaptureSurface.xaml" />
         <ResourceDictionary Source="Themes/CaptureToolbar.xaml" />
+        <ResourceDictionary Source="Themes/TextCards.xaml" />
       </ResourceDictionary.MergedDictionaries>
 
       <!-- Legacy aliases: existing code references these keys; they now

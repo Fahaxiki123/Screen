@@ -97,6 +97,9 @@ internal sealed partial class CaptureSurface : FrameworkElement
         public Pen BrushRim { get; } = (Pen)resources["Capture.BrushCursorRim"];
         public Brush BrushFill { get; } = (Brush)resources["Capture.BrushCursorFill"];
         public Brush HandleFill { get; } = (Brush)resources["Capture.HandleFill"];
+        public Brush ScanBand { get; } = (Brush)resources["Capture.ScanBand"];
+        public Brush ScanLine { get; } = (Brush)resources["Capture.ScanLine"];
+        public Style OcrHighlight { get; } = (Style)resources["Capture.OcrHighlight"];
         public ImageSource Handle { get; } = (ImageSource)resources["Capture.Handle"];
     }
 

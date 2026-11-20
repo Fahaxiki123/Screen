@@ -135,4 +135,10 @@
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style TargetType="ContextMenu" BasedOn="{StaticResource GlassMenuStyle}" />
+  <Style x:Key="SuccessCheckStyle" TargetType="Path">
+    <Setter Property="Width" Value="50" /><Setter Property="Height" Value="50" /><Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="Data" Value="M 2,12 L 9,19 26,2" /><Setter Property="Stroke" Value="{DynamicResource Brush.White}" />
+    <Setter Property="StrokeThickness" Value="3" /><Setter Property="StrokeDashArray" Value="20,20" />
+    <Setter Property="StrokeStartLineCap" Value="Round" /><Setter Property="StrokeEndLineCap" Value="Round" /><Setter Property="StrokeLineJoin" Value="Round" />
+  </Style>
 </ResourceDictionary>

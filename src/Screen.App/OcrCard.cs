@@ -25,7 +25,7 @@ internal sealed class OcrCard : Grid, IDisposable
     private readonly Button _copyButton;
     private readonly Button _installButton;
     private readonly Polygon _pointer;
-    private readonly Border _card;
+    private readonly GlassPanel _card;
     private CancellationTokenSource? _operation;
     private bool _editing;
     private bool _dragging;
@@ -43,146 +43,83 @@ internal sealed class OcrCard : Grid, IDisposable
         _ocr = ocr;
         _imageProvider = imageProvider;
         _directTextProvider = directTextProvider;
-        Width = 460;
+        Width = 320;
 
-        _text = new TextBox
-        {
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            MinHeight = 210,
-            MaxHeight = 340,
-            IsReadOnly = true,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI"),
-            FontSize = 17,
-            Foreground = Token("Brush.TextPrimary"),
-            CaretBrush = Token("Brush.TextPrimary"),
-            Padding = new Thickness(16, 14, 12, 14),
-            SelectionBrush = Token("Brush.Accent"),
-            SelectionOpacity = 0.28
-        };
+        _text = new TextBox { IsReadOnly = true, MinHeight = 70, MaxHeight = 280 };
+        _text.SetResourceReference(StyleProperty, "TextCardBodyStyle");
         _text.Resources[typeof(ScrollBar)] = Application.Current.FindResource("DarkScrollBarStyle");
-        TextBlock.SetLineHeight(_text, 27);
-        TextOptions.SetTextFormattingMode(_text, TextFormattingMode.Display);
-        TextOptions.SetTextRenderingMode(_text, TextRenderingMode.ClearType);
-        _textBorder = new Border
-        {
-            CornerRadius = new CornerRadius(10),
-            BorderBrush = Brushes.Transparent,
-            BorderThickness = new Thickness(1),
-            Background = Token("Brush.SurfaceSunken"),
-            Padding = new Thickness(0),
-            Child = _text
-        };
+        _textBorder = new Border { Child = _text, BorderThickness = new Thickness(1), Margin = new Thickness(0, 7, 0, 0) };
+        _textBorder.SetResourceReference(Border.CornerRadiusProperty, "Radius.Control");
 
         var close = new Button
         {
-            Content = new LucideIconElement
-            {
-                Kind = LucideIconKind.X,
-                Width = 18,
-                Height = 18,
-                Stroke = Token("Brush.TextSecondary"),
-                StrokeThickness = 2
-            },
+            Content = new LucideIconElement { Kind = LucideIconKind.X, Width = 12, Height = 12, StrokeThickness = 2, Stroke = Token("Brush.LabelSecondary") },
             ToolTip = "关闭"
         };
-        close.SetResourceReference(StyleProperty, "CardIconButtonStyle");
+        close.SetResourceReference(StyleProperty, "TextCardCloseStyle");
+        System.Windows.Automation.AutomationProperties.SetName(close, "关闭文字卡片");
         close.Click += (_, _) => Visibility = Visibility.Collapsed;
 
-        var header = new Grid();
-        header.ColumnDefinitions.Add(new ColumnDefinition());
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new TextBlock
         {
             Text = "提取文字",
-            FontSize = 18,
+            FontSize = 15,
             FontWeight = FontWeights.SemiBold,
-            Foreground = Token("Brush.TextPrimary"),
+            Foreground = Token("Brush.Label"),
             VerticalAlignment = VerticalAlignment.Center,
-            Cursor = Cursors.SizeAll
+            Cursor = Cursors.SizeAll,
+            Background = Token("Brush.Transparent")
         };
         title.MouseLeftButtonDown += BeginDrag;
         title.MouseMove += Drag;
         title.MouseLeftButtonUp += EndDrag;
-        header.Children.Add(title);
-        Grid.SetColumn(close, 1);
-        header.Children.Add(close);
 
-        // Quiet indeterminate progress: a pulsing accent hairline between the
-        // header and the text body replaces status-text flicker.
+        var header = new DockPanel();
+        DockPanel.SetDock(close, Dock.Right);
+        header.Children.Add(close);
+        header.Children.Add(title);
         _progress = new Border
         {
             Height = 2,
-            CornerRadius = new CornerRadius(1),
             Background = Token("Brush.Accent"),
-            Margin = new Thickness(0, 14, 0, 0),
-            Opacity = 0,
+            Margin = new Thickness(0, 4, 0, 0),
             Visibility = Visibility.Collapsed
         };
 
-        _status = new TextBlock
-        {
-            FontSize = 11,
-            Foreground = Token("Brush.TextSecondary"),
-            VerticalAlignment = VerticalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(0, 8, 0, 0),
-            Height = 16
-        };
+        _status = new TextBlock();
+        _status.SetResourceReference(StyleProperty, "TextCardFootnoteStyle");
         _status.SetBinding(ToolTipProperty, new Binding(nameof(TextBlock.Text)) { Source = _status });
-        _installButton = CreateCardButton("安装语言包", LucideIconKind.Download, true, 112);
+        _installButton = CardAction("安装语言包");
         _installButton.Visibility = Visibility.Collapsed;
         _installButton.Click += (_, _) => Process.Start(new ProcessStartInfo("ms-settings:regionlanguage") { UseShellExecute = true });
 
-        _editButton = CreateCardButton("编辑文字", LucideIconKind.Pencil, false, 154);
+        _editButton = CardAction("编辑");
         _editButton.Click += (_, _) => SetEditing(!_editing);
-        _copyButton = CreateCardButton("复制文字", LucideIconKind.Copy, true, 154);
+        _copyButton = CardAction("拷贝");
         _copyButton.Click += (_, _) => CopyText();
-
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         actions.Children.Add(_installButton);
         actions.Children.Add(_editButton);
-
-        var footer = new Grid { Margin = new Thickness(0, 12, 0, 0) };
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        footer.ColumnDefinitions.Add(new ColumnDefinition());
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actions.Children.Add(_copyButton);
+        var footer = new DockPanel();
+        DockPanel.SetDock(actions, Dock.Right);
         footer.Children.Add(actions);
-        Grid.SetColumn(_copyButton, 2);
-        footer.Children.Add(_copyButton);
+        footer.Children.Add(_status);
+        var footerBorder = new Border { Child = footer };
+        footerBorder.SetResourceReference(StyleProperty, "TextCardFooterStyle");
 
-        var content = new Grid();
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var content = new StackPanel();
         content.Children.Add(header);
-        Grid.SetRow(_progress, 1);
         content.Children.Add(_progress);
-        Grid.SetRow(_textBorder, 2);
-        _textBorder.Margin = new Thickness(0, 12, 0, 0);
         content.Children.Add(_textBorder);
-        Grid.SetRow(_status, 3);
-        content.Children.Add(_status);
-        Grid.SetRow(footer, 4);
-        content.Children.Add(footer);
-
-        _card = new Border
+        content.Children.Add(footerBorder);
+        _card = new GlassPanel { Content = content, Padding = new Thickness(12, 10, 12, 10) };
+        _card.SetResourceReference(GlassPanel.CornerRadiusProperty, "Radius.Card");
+        IsVisibleChanged += (_, e) =>
         {
-            Background = Token("Brush.AuroraCard"),
-            BorderBrush = Token("Brush.GlassRim"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(20, 16, 18, 16),
-            Margin = new Thickness(0, 0, 0, 10),
-            Effect = (System.Windows.Media.Effects.DropShadowEffect)Application.Current.FindResource("Shadow.Floating"),
-            Child = content
+            if (e.NewValue is true)
+                Motion.PopIn(this, horizontal: true);
         };
-
         _pointer = new Polygon
         {
             Points = new PointCollection { new(0, 0), new(18, 0), new(9, 10) },
@@ -202,14 +139,14 @@ internal sealed class OcrCard : Grid, IDisposable
     public string CurrentText => _text.Text;
     public bool IsRecognizing { get; private set; }
     public event EventHandler? RecognitionStateChanged;
+    internal event Action<OcrDocument>? DocumentRecognized;
     public bool IsUserPositioned { get; private set; }
 
     public void SetAvailableSize(double availableWidth, double availableHeight)
     {
-        Width = Math.Min(Math.Clamp(availableWidth * 0.34, 440, 480), Math.Max(340, availableWidth - 32));
-        _editButton.Width = _copyButton.Width = Math.Min(154, (Width - 64) / 2);
-        var bodyHeight = Math.Clamp(availableHeight - 180, 100, 340);
-        _text.MinHeight = Math.Min(210, bodyHeight);
+        Width = Math.Max(1, Math.Min(Math.Clamp(availableWidth * 0.28, 300, 370), availableWidth - 16));
+        var bodyHeight = Math.Clamp(availableHeight - 115, 40, 280);
+        _text.MinHeight = Math.Min(70, bodyHeight);
         _text.MaxHeight = bodyHeight;
     }
 
@@ -268,8 +205,8 @@ internal sealed class OcrCard : Grid, IDisposable
         {
             ShowProgress(false);
             SetRecognizing(false);
-            _text.Clear();
-            _status.Text = "缺少可用的中、英或日文 OCR 语言包";
+            _text.Text = "缺少可用的中、英或日文 OCR 语言包。安装后，再次点按提取文字。";
+            _status.Text = "需要语言包";
             _installButton.Visibility = Visibility.Visible;
             _editButton.Visibility = Visibility.Collapsed;
             _copyButton.Visibility = Visibility.Collapsed;
@@ -299,9 +236,10 @@ internal sealed class OcrCard : Grid, IDisposable
             _text.Text = OcrTextFormatter.Format(document);
             _status.Text = _text.Text.Length == 0
                 ? "未识别到文字"
-                : $"已识别 {document.Lines.Count} 行 · {ProviderName(document)}";
+                : $"{LanguageName(document.LanguageTag)} · {ProviderName(document)}";
             _editButton.Visibility = Visibility.Visible;
             _copyButton.Visibility = Visibility.Visible;
+            DocumentRecognized?.Invoke(document);
         }
         catch (OperationCanceledException)
         {
@@ -451,13 +389,13 @@ internal sealed class OcrCard : Grid, IDisposable
         : languageTag.StartsWith("ja", StringComparison.OrdinalIgnoreCase)
             ? "日文"
             : languageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase)
-                ? "英文"
+                ? "英语"
                 : "文字";
 
     private static string ProviderName(OcrDocument document) =>
         string.IsNullOrWhiteSpace(document.ProviderName)
-            ? $"自动识别{LanguageName(document.LanguageTag)}"
-            : document.ProviderName;
+            ? (document.UsedOnlineService ? "云端识别" : "本机识别")
+            : document.ProviderName == "PP-OCRv6 本地" ? "本机识别" : document.ProviderName;
 
     private void BeginDrag(object sender, MouseButtonEventArgs e)
     {
@@ -499,15 +437,8 @@ internal sealed class OcrCard : Grid, IDisposable
     {
         _editing = editing;
         _text.IsReadOnly = !editing;
-        _textBorder.BorderThickness = new Thickness(1);
-        _textBorder.BorderBrush = editing
-            ? Token("Brush.Accent")
-            : Brushes.Transparent;
-        _textBorder.Padding = new Thickness(0);
-        _text.Background = Brushes.Transparent;
-        _editButton.Content = CreateButtonContent(
-            editing ? "完成编辑" : "编辑文字",
-            editing ? LucideIconKind.Check : LucideIconKind.Pencil);
+        _textBorder.SetResourceReference(Border.BorderBrushProperty, editing ? "Brush.Accent" : "Brush.Transparent");
+        _editButton.Content = editing ? "完成编辑" : "编辑";
         _copyButton.Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
         if (editing)
         {
@@ -525,7 +456,7 @@ internal sealed class OcrCard : Grid, IDisposable
         try
         {
             BitmapUtilities.SetClipboardTextWithRetry(_text.Text);
-            _status.Text = "已复制";
+            HintToastWindow.Success("已拷贝");
         }
         catch (Exception exception)
         {
@@ -533,47 +464,12 @@ internal sealed class OcrCard : Grid, IDisposable
         }
     }
 
-    private static Button CreateCardButton(string text, LucideIconKind icon, bool primary, double width)
+    private static Button CardAction(string label)
     {
-        var button = new Button
-        {
-            Content = CreateButtonContent(text, icon),
-            Width = width,
-            MinWidth = Math.Min(112, width),
-            Height = 40,
-            Margin = new Thickness(0),
-            BorderBrush = Token("Brush.Border"),
-            BorderThickness = primary ? new Thickness(0) : new Thickness(1)
-        };
-        if (!primary)
-        {
-            button.Background = Brushes.Transparent;
-        }
-        button.SetResourceReference(StyleProperty, primary ? "CardPrimaryButtonStyle" : "CardSecondaryButtonStyle");
+        var button = new Button { Content = label };
+        button.SetResourceReference(StyleProperty, "TextCardActionStyle");
         return button;
     }
-
-    private static StackPanel CreateButtonContent(string text, LucideIconKind icon)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
-        var iconElement = new LucideIconElement
-        {
-            Kind = icon,
-            Width = 18,
-            Height = 18,
-            StrokeThickness = 2,
-            Margin = new Thickness(0, 0, 6, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        iconElement.SetBinding(LucideIconElement.StrokeProperty, new Binding(nameof(Control.Foreground))
-        {
-            RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1)
-        });
-        row.Children.Add(iconElement);
-        row.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center });
-        return row;
-    }
-
     public void Dispose()
     {
         // Cancel without disposing: an in-flight recognition may still be

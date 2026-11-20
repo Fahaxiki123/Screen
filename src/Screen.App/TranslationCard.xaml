@@ -1,0 +1,66 @@
+<Grid x:Class="Screen.App.TranslationCard" x:ClassModifier="internal"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:local="clr-namespace:Screen.App"
+      Width="338" AutomationProperties.Name="翻译卡片">
+    <Grid.Resources>
+        <LinearGradientBrush x:Key="Translation.Ring" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#FF6AC1" Offset="0" />
+            <GradientStop Color="#FFB86B" Offset="0.25" />
+            <GradientStop Color="#FFE36B" Offset="0.5" />
+            <GradientStop Color="#5BD2FF" Offset="0.75" />
+            <GradientStop Color="#A77BFF" Offset="1" />
+        </LinearGradientBrush>
+        <DoubleAnimation x:Key="Translation.Rotation" From="0" To="360" Duration="0:0:2.2" RepeatBehavior="Forever" />
+        <DropShadowEffect x:Key="Translation.Glow" Color="#9582FF" BlurRadius="12" ShadowDepth="0" Opacity="0.52" />
+    </Grid.Resources>
+    <Grid x:Name="_chrome">
+        <local:GlassPanel x:Name="_card" CornerRadius="{DynamicResource Radius.Card}" Padding="12,10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <DockPanel LastChildFill="False">
+                    <Button DockPanel.Dock="Right" x:Name="_close" Style="{DynamicResource TextCardCloseStyle}"
+                            ToolTip="关闭" AutomationProperties.Name="关闭翻译卡片" Click="CloseClick">
+                        <Path Width="10" Height="10" Data="M1,1 L9,9 M9,1 L1,9" Stroke="{DynamicResource Brush.OverlayIcon}" StrokeThickness="1.6" />
+                    </Button>
+                    <local:SegmentedControl x:Name="_tab" Width="114" Height="28" AutomationProperties.Name="原文或译文" />
+                </DockPanel>
+                <TextBox Grid.Row="1" x:Name="_text" Style="{DynamicResource TextCardBodyStyle}" Margin="0,8"
+                         IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                         AutomationProperties.Name="翻译正文" />
+                <Border Grid.Row="2" Style="{DynamicResource TextCardFooterStyle}">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="_languageButton" HorizontalAlignment="Left" Height="28"
+                                    Style="{DynamicResource TextCardActionStyle}" ToolTip="翻译成…" Click="ChooseLanguage">
+                                <TextBlock x:Name="_languagePair" TextTrimming="CharacterEllipsis" />
+                            </Button>
+                            <Button Grid.Column="1" x:Name="_retranslate" Width="28" Height="28" Padding="0" ToolTip="重新翻译"
+                                    AutomationProperties.Name="重新翻译" Style="{DynamicResource TextCardActionStyle}" Click="RetryClick">
+                                <Path Width="15" Height="15" Stretch="Uniform" Data="M13,5 C10,0 2,1 2,8 C2,15 12,16 14,9 M13,1 L13,5 L9,5"
+                                      StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Stroke="{DynamicResource Brush.AccentText}" />
+                            </Button>
+                            <Button Grid.Column="2" x:Name="_copy" Height="28" Content="拷贝" Style="{DynamicResource TextCardActionStyle}" Click="CopyClick" />
+                        </Grid>
+                        <TextBlock x:Name="_provider" Style="{DynamicResource TextCardFootnoteStyle}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="_status" Style="{DynamicResource TextCardFootnoteStyle}" TextWrapping="Wrap" MaxHeight="38" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </local:GlassPanel>
+        <!-- Only this empty border casts the moving glow; body text is never in an effect layer. -->
+        <Border x:Name="_ring" CornerRadius="{DynamicResource Radius.Card}" BorderThickness="2" Opacity="0"
+                IsHitTestVisible="False" Effect="{StaticResource Translation.Glow}" />
+    </Grid>
+    <Polygon x:Name="_pointer" Visibility="Collapsed" IsHitTestVisible="False" StrokeThickness="1"
+             Fill="{DynamicResource Brush.GlassSolid}" Stroke="{DynamicResource Brush.OverlayBorder}" />
+</Grid>

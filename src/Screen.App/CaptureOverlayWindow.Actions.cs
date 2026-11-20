@@ -196,6 +196,7 @@ internal sealed partial class CaptureOverlayWindow
         _ocrCard.Visibility = Visibility.Collapsed;
         _surface.ClearAnnotationSelection();
         _surface.Tool = CaptureTool.Select;
+        _surface.ShowOcrLines(null);
         UpdateToolIndicator(true);
         var settings = _settingsStore.Load();
         _inPlaceMode = settings.TranslationDisplayMode == TranslationDisplayMode.InPlace;
@@ -248,6 +249,8 @@ internal sealed partial class CaptureOverlayWindow
                 return;
             }
             var sourceText = OcrTextFormatter.Format(document);
+            _translationCard.SetOriginalText(sourceText);
+            _surface.ShowOcrLines(document);
             _translationCard.SetSourceLanguage(document.LanguageTag);
             if (string.IsNullOrWhiteSpace(sourceText))
             {
@@ -294,6 +297,7 @@ internal sealed partial class CaptureOverlayWindow
             _translationCard.SetStatus(result.UsedFallback
                 ? $"已使用 {result.ProviderName}（首选服务失败：{result.PrimaryFailure}）· {timing}"
                 : $"翻译完成 · {timing}");
+            _translationCard.SetElapsed(translationSeconds);
             _translationCard.Complete();
             PositionFloatingPanels();
         }
@@ -356,12 +360,14 @@ internal sealed partial class CaptureOverlayWindow
         }
         var image = _surface.RenderSelection();
         var region = _surface.Selection;
+        var anchor = SelectionCenter();
         _pinManager.Pin(image, new PixelRect(
             _frame.ScreenBounds.X + region.X,
             _frame.ScreenBounds.Y + region.Y,
             region.Width,
             region.Height));
         Close();
+        HintToastWindow.Success("已贴到桌面", anchor);
     }
 
     private void Save(object sender, RoutedEventArgs e)
@@ -393,7 +399,9 @@ internal sealed partial class CaptureOverlayWindow
             BitmapUtilities.SavePng(_surface.RenderSelection(), dialog.FileName);
             settings.SaveDirectory = Path.GetDirectoryName(dialog.FileName) ?? initialDirectory;
             _settingsStore.Update(latest => latest.SaveDirectory = settings.SaveDirectory);
+            var anchor = SelectionCenter();
             Close();
+            HintToastWindow.Success($"已存储到「{new DirectoryInfo(settings.SaveDirectory).Name}」", anchor);
         }
         catch (Exception ex)
         {
@@ -410,8 +418,11 @@ internal sealed partial class CaptureOverlayWindow
         }
         try
         {
-            BitmapUtilities.CopyToClipboard(_surface.RenderSelection());
+            var image = _surface.RenderSelection();
+            BitmapUtilities.CopyToClipboard(image);
+            var anchor = SelectionCenter();
             Close();
+            CaptureThumbnailWindow.ShowCopied(image, anchor);
         }
         catch (Exception ex)
         {
@@ -419,6 +430,10 @@ internal sealed partial class CaptureOverlayWindow
             MessageBox.Show(this, ex.Message, "Screen", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
+
+    private NativeMethods.NativePoint SelectionCenter() => new(
+        _frame.ScreenBounds.X + _surface.Selection.X + _surface.Selection.Width / 2,
+        _frame.ScreenBounds.Y + _surface.Selection.Y + _surface.Selection.Height / 2);
 
     private void StartLongCapture(object sender, RoutedEventArgs e)
     {

@@ -124,6 +124,7 @@ internal sealed partial class CaptureOverlayWindow : Window
             Visibility = Visibility.Collapsed
         };
         _root.Children.Add(_ocrCard);
+        _ocrCard.DocumentRecognized += document => _surface.ShowOcrLines(document);
         _translationCard = new TranslationCard { Visibility = Visibility.Collapsed };
         _translationCard.RetranslateRequested += (_, _) => TranslateWithCurrentLanguage(this, new RoutedEventArgs());
         _translationCard.TargetLanguageChanged += async (_, language) =>
@@ -148,12 +149,18 @@ internal sealed partial class CaptureOverlayWindow : Window
         _ocrCard.IsVisibleChanged += (_, _) =>
         {
             if (_ocrCard.Visibility != Visibility.Visible)
+            {
                 _ocrCard.CancelRecognition();
+                _surface.ShowOcrLines(null);
+            }
         };
         _translationCard.IsVisibleChanged += (_, _) =>
         {
             if (_translationCard.Visibility != Visibility.Visible && !_inPlaceMode)
+            {
+                _surface.ShowOcrLines(null);
                 CancelTranslation();
+            }
         };
 
         SourceInitialized += OnSourceInitialized;

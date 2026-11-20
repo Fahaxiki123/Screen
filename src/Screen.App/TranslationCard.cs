@@ -1,372 +1,135 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Data;
 using System.Windows.Media;
-using System.Windows.Shapes;
-using Lucide.NET;
+using System.Windows.Media.Animation;
 
 namespace Screen.App;
 
-internal sealed class TranslationCard : Grid
+internal sealed partial class TranslationCard : Grid
 {
-    private readonly TextBox _text;
-    private readonly TextBlock _status;
-    private readonly Ellipse _statusDot;
-    private readonly TextBlock _sourceLanguage;
-    private readonly TextBlock _targetLanguage;
-    private readonly TextBlock _provider;
-    private readonly Button _retranslate;
-    private readonly Button _copy;
-    private readonly Border _card;
-    private readonly Polygon _pointer;
-    private bool _hasTranslation;
+    private static readonly string[] TargetLanguages = ["简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch"];
+    private readonly RotateTransform _rotation = new(0, 0.5, 0.5);
+    private string _source = string.Empty;
+    private string _translation = string.Empty;
+    private string _sourceLanguage = "自动识别";
+    private string _service = "AI 翻译";
+    private string _placeholder = "正在识别选区文字…";
+    private bool _busy;
+    private bool _failed;
+    private bool _rotating;
+    private double? _elapsed;
 
     public event EventHandler? RetranslateRequested;
     public event EventHandler<string>? TargetLanguageChanged;
-
     public string TargetLanguage { get; private set; } = "简体中文";
-
-    private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
 
     public TranslationCard()
     {
-        Width = 450;
-
-        // Top bar: language switch takes center stage, AI provider badge + close on the right
-        _sourceLanguage = new TextBlock
+        InitializeComponent();
+        var brush = ((LinearGradientBrush)FindResource("Translation.Ring")).Clone();
+        brush.RelativeTransform = _rotation;
+        _ring.BorderBrush = brush;
+        _tab.ItemsSource = new[] { "原文", "译文" };
+        _tab.SelectedIndex = 1;
+        _tab.SelectionChanged += (_, _) => ShowBody(animate: true, resetScroll: true);
+        IsVisibleChanged += (_, _) =>
         {
-            Text = "自动识别",
-            FontSize = 13,
-            Foreground = Token("Brush.TextSecondary"),
-            VerticalAlignment = VerticalAlignment.Center
+            if (IsVisible)
+                Motion.PopIn(this, horizontal: true);
+            UpdateRing();
         };
-
-        _targetLanguage = new TextBlock
-        {
-            Text = TargetLanguage,
-            FontSize = 13,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = Token("Brush.TextPrimary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var targetContent = new StackPanel { Orientation = Orientation.Horizontal };
-        targetContent.Children.Add(_targetLanguage);
-        targetContent.Children.Add(new LucideIconElement
-        {
-            Kind = LucideIconKind.ChevronDown,
-            Width = 13,
-            Height = 13,
-            Stroke = Token("Brush.AccentText"),
-            Margin = new Thickness(6, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        });
-        var targetButton = new Button
-        {
-            Content = targetContent,
-            Height = 28,
-            Margin = new Thickness(0),
-            Padding = new Thickness(10, 0, 9, 0),
-            Background = Token("Brush.AccentSubtleDark"),
-            BorderBrush = Token("Brush.AccentSubtleDarkBorder"),
-            BorderThickness = new Thickness(1),
-            ToolTip = "选择目标语言"
-        };
-        targetButton.SetResourceReference(StyleProperty, "CardSecondaryButtonStyle");
-        targetButton.Click += (_, _) => ShowTargetLanguageMenu(targetButton);
-
-        var langGroup = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        langGroup.Children.Add(_sourceLanguage);
-        langGroup.Children.Add(new LucideIconElement
-        {
-            Kind = LucideIconKind.ArrowRight,
-            Width = 14,
-            Height = 14,
-            Stroke = Token("Brush.TextTertiary"),
-            Margin = new Thickness(8, 0, 8, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        });
-        langGroup.Children.Add(targetButton);
-
-        _provider = new TextBlock
-        {
-            Text = "✦ AI 自然翻译",
-            FontSize = 11.5,
-            FontWeight = FontWeights.Medium,
-            Foreground = Token("Brush.AccentText"),
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var providerPill = new Border
-        {
-            Background = new SolidColorBrush(Color.FromArgb(0x1E, 0x38, 0xBD, 0xF8)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x38, 0x38, 0xBD, 0xF8)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(11),
-            Padding = new Thickness(9, 3, 9, 3),
-            Margin = new Thickness(8, 0, 6, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-            Child = _provider
-        };
-
-        var close = new Button
-        {
-            Content = new LucideIconElement
-            {
-                Kind = LucideIconKind.X,
-                Width = 16,
-                Height = 16,
-                Stroke = Token("Brush.TextSecondary"),
-                StrokeThickness = 1.9
-            },
-            ToolTip = "关闭"
-        };
-        close.SetResourceReference(StyleProperty, "CardIconButtonStyle");
-        close.Click += (_, _) => Visibility = Visibility.Collapsed;
-
-        var headerGrid = new Grid();
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        headerGrid.Children.Add(langGroup);
-        Grid.SetColumn(providerPill, 1);
-        headerGrid.Children.Add(providerPill);
-        Grid.SetColumn(close, 2);
-        headerGrid.Children.Add(close);
-
-        var headerBar = new Border
-        {
-            Padding = new Thickness(18, 12, 12, 11),
-            BorderBrush = Token("Brush.BorderSubtle"),
-            BorderThickness = new Thickness(0, 0, 0, 1),
-            Child = headerGrid
-        };
-
-        // Frameless reading surface: text breathes directly inside the aurora card
-        _text = new TextBox
-        {
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            MinHeight = 186,
-            MaxHeight = 330,
-            IsReadOnly = true,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI"),
-            FontSize = 15.5,
-            Foreground = Token("Brush.TextPrimary"),
-            CaretBrush = Token("Brush.TextPrimary"),
-            SelectionBrush = Token("Brush.Accent"),
-            SelectionOpacity = 0.28,
-            Padding = new Thickness(20, 16, 16, 16)
-        };
-        _text.Resources[typeof(ScrollBar)] = Application.Current.FindResource("DarkScrollBarStyle");
-        TextBlock.SetLineHeight(_text, 26);
-        TextOptions.SetTextFormattingMode(_text, TextFormattingMode.Display);
-        TextOptions.SetTextRenderingMode(_text, TextRenderingMode.ClearType);
-
-        // Quiet bottom action bar with live status dot + ghost retry + luminous copy CTA
-        _statusDot = new Ellipse
-        {
-            Width = 6,
-            Height = 6,
-            Fill = Token("Brush.Success"),
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 7, 0)
-        };
-        _status = new TextBlock
-        {
-            FontSize = 12,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            Foreground = Token("Brush.TextTertiary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var statusGroup = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        statusGroup.Children.Add(_statusDot);
-        statusGroup.Children.Add(_status);
-
-        _retranslate = new Button
-        {
-            Content = ButtonContent("重新翻译", LucideIconKind.RotateCw, 14),
-            Height = 32,
-            MinWidth = 88,
-            Margin = new Thickness(0, 0, 8, 0),
-            Padding = new Thickness(10, 0, 10, 0),
-            Background = Brushes.Transparent,
-            Foreground = Token("Brush.TextSecondary"),
-            BorderThickness = new Thickness(0),
-            FontSize = 12.5
-        };
-        _retranslate.SetResourceReference(StyleProperty, "CardSecondaryButtonStyle");
-        _retranslate.Click += (_, _) => RetranslateRequested?.Invoke(this, EventArgs.Empty);
-
-        _copy = new Button
-        {
-            Content = ButtonContent("复制译文", LucideIconKind.Copy, 14),
-            Height = 32,
-            MinWidth = 98,
-            Margin = new Thickness(0),
-            Padding = new Thickness(12, 0, 14, 0)
-        };
-        _copy.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
-        _copy.Click += (_, _) =>
-        {
-            if (_hasTranslation && !string.IsNullOrWhiteSpace(_text.Text))
-            {
-                try
-                {
-                    BitmapUtilities.SetClipboardTextWithRetry(_text.Text);
-                    SetStatus("译文已复制");
-                }
-                catch (Exception exception)
-                {
-                    SetStatus(exception.Message);
-                }
-            }
-        };
-
-        var actionButtons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        actionButtons.Children.Add(_retranslate);
-        actionButtons.Children.Add(_copy);
-
-        var footerGrid = new Grid();
-        footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        footerGrid.Children.Add(statusGroup);
-        Grid.SetColumn(actionButtons, 1);
-        footerGrid.Children.Add(actionButtons);
-
-        var footerBar = new Border
-        {
-            Background = new SolidColorBrush(Color.FromArgb(0x52, 0x06, 0x0C, 0x18)),
-            BorderBrush = Token("Brush.BorderSubtle"),
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            CornerRadius = new CornerRadius(0, 0, 15, 15),
-            Padding = new Thickness(18, 9, 12, 9),
-            Child = footerGrid
-        };
-
-        var content = new Grid();
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.Children.Add(headerBar);
-        Grid.SetRow(_text, 1);
-        content.Children.Add(_text);
-        Grid.SetRow(footerBar, 2);
-        content.Children.Add(footerBar);
-
-        // Subtle aurora glow bloom at top center of the card
-        var auroraGlow = new Border
-        {
-            CornerRadius = new CornerRadius(15),
-            Background = new RadialGradientBrush
-            {
-                GradientOrigin = new Point(0.5, 0.0),
-                Center = new Point(0.5, 0.0),
-                RadiusX = 0.72,
-                RadiusY = 0.35,
-                GradientStops = new GradientStopCollection
-                {
-                    new(Color.FromArgb(0x2E, 0x38, 0xBD, 0xF8), 0),
-                    new(Color.FromArgb(0x00, 0x38, 0xBD, 0xF8), 1)
-                }
-            },
-            Child = content
-        };
-
-        _card = new Border
-        {
-            Background = Token("Brush.AuroraCard"),
-            BorderBrush = Token("Brush.GlassRim"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Margin = new Thickness(0, 0, 0, 10),
-            Effect = (System.Windows.Media.Effects.DropShadowEffect)Application.Current.FindResource("Shadow.Floating"),
-            Child = auroraGlow
-        };
-        _pointer = new Polygon
-        {
-            Points = new PointCollection { new(0, 0), new(18, 0), new(9, 10) },
-            Fill = Token("Brush.Surface"),
-            Stroke = Token("Brush.Border"),
-            StrokeThickness = 1,
-            Width = 18,
-            Height = 10,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0, 0, 0, 1)
-        };
-        Children.Add(_card);
-        Children.Add(_pointer);
+        UpdateLanguagePair();
+        UpdateProvider();
+        ShowBody();
     }
 
     public void Begin(string targetLanguage)
     {
+        _busy = true;
+        _failed = false;
+        _source = _translation = string.Empty;
+        _elapsed = null;
+        _placeholder = "正在识别选区文字…";
         TargetLanguage = targetLanguage;
-        _targetLanguage.Text = targetLanguage;
-        _sourceLanguage.Text = "自动识别";
-        _hasTranslation = false;
-        _copy.IsEnabled = false;
+        _sourceLanguage = "自动识别";
+        _tab.SelectedIndex = 1;
         _retranslate.IsEnabled = false;
-        _text.Text = "正在识别选区文字…";
-        _text.ScrollToHome();
-        _text.Foreground = Token("Brush.TextSecondary");
-        _statusDot.Fill = Token("Brush.Accent");
+        UpdateLanguagePair();
+        UpdateProvider();
         SetStatus("正在准备翻译");
+        ShowBody(resetScroll: true);
         Visibility = Visibility.Visible;
+        UpdateRing();
     }
 
     public void SetAvailableSize(double availableWidth, double availableHeight)
     {
-        Width = Math.Min(Math.Clamp(availableWidth * 0.34, 430, 470), Math.Max(340, availableWidth - 32));
-        var bodyHeight = Math.Clamp(availableHeight - 170, 100, 330);
-        _text.MinHeight = Math.Min(186, bodyHeight);
+        Width = Math.Min(Math.Clamp(availableWidth * 0.32, 320, 392), Math.Max(1, availableWidth - 16));
+        var bodyHeight = Math.Clamp(availableHeight - 150, 46, 260);
+        _text.MinHeight = Math.Min(98, bodyHeight);
         _text.MaxHeight = bodyHeight;
+    }
+
+    public void SetOriginalText(string source)
+    {
+        _source = source;
+        if (_busy && !string.IsNullOrWhiteSpace(source))
+            _placeholder = "正在翻译…";
+        ShowBody(animate: _tab.SelectedIndex == 0);
     }
 
     public void SetText(string text)
     {
-        _text.Foreground = Token("Brush.TextPrimary");
-        _hasTranslation = !string.IsNullOrWhiteSpace(text);
-        if (string.Equals(_text.Text, text, StringComparison.Ordinal))
-        {
-            return;
-        }
+        var wasEmpty = string.IsNullOrEmpty(_translation);
+        _translation = text;
+        if (_tab.SelectedIndex != 0)
+            ShowBody(animate: wasEmpty);
+    }
 
-        var selectionStart = Math.Min(_text.SelectionStart, text.Length);
-        var selectionLength = Math.Min(_text.SelectionLength, text.Length - selectionStart);
-        var horizontalOffset = _text.HorizontalOffset;
-        var verticalOffset = _text.VerticalOffset;
-        _text.Text = text;
-        _text.Select(selectionStart, selectionLength);
-        _text.ScrollToHorizontalOffset(horizontalOffset);
-        _text.ScrollToVerticalOffset(verticalOffset);
+    private void ShowBody(bool animate = false, bool resetScroll = false)
+    {
+        var original = _tab.SelectedIndex == 0;
+        var value = original ? _source : _translation;
+        var available = !string.IsNullOrWhiteSpace(value);
+        _copy.IsEnabled = available && (original || !_busy);
+        _copy.ToolTip = original ? "拷贝原文" : "拷贝译文";
+        _text.SetResourceReference(Control.ForegroundProperty, available ? "Brush.OverlayText" :
+            _failed && !original ? "Brush.DangerOnDark" : "Brush.OverlayTextDim");
+        if (!available)
+            value = original ? (_busy ? "正在识别选区文字…" : "未识别到原文") : _placeholder;
+
+        if (!string.Equals(_text.Text, value, StringComparison.Ordinal))
+        {
+            // Stream updates must not move the user's selection or their scroll position.
+            var start = resetScroll ? 0 : Math.Min(_text.SelectionStart, value.Length);
+            var length = resetScroll ? 0 : Math.Min(_text.SelectionLength, value.Length - start);
+            var horizontal = resetScroll ? 0 : _text.HorizontalOffset;
+            var vertical = resetScroll ? 0 : _text.VerticalOffset;
+            _text.Text = value;
+            _text.Select(start, length);
+            _text.ScrollToHorizontalOffset(horizontal);
+            _text.ScrollToVerticalOffset(vertical);
+            if (animate && SystemParameters.ClientAreaAnimation)
+                _text.BeginAnimation(OpacityProperty, Motion.Tween(0.25, 1, 180));
+        }
+        if (resetScroll)
+            _text.ScrollToHome();
     }
 
     public void SetStatus(string status)
     {
         _status.Text = status;
         _status.ToolTip = status;
+        _status.Visibility = string.IsNullOrEmpty(status) ? Visibility.Collapsed : Visibility.Visible;
+        _provider.ToolTip = status;
+        AutomationProperties.SetHelpText(_provider, status);
     }
 
     public void SetSourceLanguage(string languageTag)
     {
-        var language = languageTag.Split('-')[0].ToLowerInvariant();
-        _sourceLanguage.Text = language switch
+        _sourceLanguage = languageTag.Split('-')[0].ToLowerInvariant() switch
         {
             "zh" => "中文",
             "en" => "英语",
@@ -378,70 +141,118 @@ internal sealed class TranslationCard : Grid
             "de" => "德语",
             _ => "自动识别"
         };
+        UpdateLanguagePair();
+    }
+
+    private void UpdateLanguagePair()
+    {
+        _languagePair.Text = $"{_sourceLanguage} → {TargetLanguage} ⌄";
+        AutomationProperties.SetName(_languageButton, $"翻译成{TargetLanguage}");
     }
 
     public void SetProvider(string providerName)
     {
-        _provider.Text = string.IsNullOrWhiteSpace(providerName) ? "✦ AI 翻译" : $"✦ {providerName}";
-        _provider.ToolTip = providerName;
+        _service = providerName switch
+        {
+            "" or "AI 自然翻译" => "AI 翻译",
+            _ => providerName
+        };
+        UpdateProvider();
     }
+
+    public void SetElapsed(double seconds)
+    {
+        _elapsed = seconds;
+        UpdateProvider();
+    }
+
+    private void UpdateProvider() =>
+        _provider.Text = _elapsed is { } duration ? $"{_service} · {duration:F1} 秒" : _service;
 
     public void Complete()
     {
+        _busy = false;
         _retranslate.IsEnabled = true;
-        _copy.IsEnabled = _hasTranslation;
-        _statusDot.Fill = _hasTranslation ? Token("Brush.Success") : Token("Brush.Warning");
-        if (!_hasTranslation)
-        {
-            _text.Text = "未识别到可翻译文字";
-        }
+        _placeholder = "未识别到可翻译文字";
+        // Keep the normal timing details in the provider tooltip; errors and fallback explanations stay visible.
+        if (_status.Text.StartsWith("翻译完成", StringComparison.Ordinal))
+            _status.Visibility = Visibility.Collapsed;
+        ShowBody();
+        UpdateRing();
     }
 
     public void SetError(string message)
     {
-        _text.Foreground = Token("Brush.DangerOnDark");
-        _text.Text = message;
-        _hasTranslation = false;
-        _copy.IsEnabled = false;
+        _busy = false;
+        _failed = true;
+        _translation = string.Empty;
+        _placeholder = message;
         _retranslate.IsEnabled = true;
-        _statusDot.Fill = Token("Brush.Danger");
+        _tab.SelectedIndex = 1;
         SetStatus("请求失败，请检查接口配置");
+        ShowBody(animate: true);
+        UpdateRing();
     }
 
-    private void ShowTargetLanguageMenu(Button target)
+    private void UpdateRing()
     {
-        var menu = new ContextMenu
+        var spinning = _busy && IsVisible && SystemParameters.ClientAreaAnimation;
+        if (spinning != _rotating)
         {
-            PlacementTarget = target,
-            Placement = PlacementMode.Bottom,
-            Background = Token("Brush.SurfaceRaised"),
-            Foreground = Token("Brush.TextPrimary"),
-            BorderBrush = Token("Brush.Border"),
-            BorderThickness = new Thickness(1)
-        };
-        foreach (var language in new[] { "简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch" })
+            _rotation.BeginAnimation(RotateTransform.AngleProperty, spinning
+                ? (DoubleAnimation)FindResource("Translation.Rotation")
+                : null);
+            _rotating = spinning;
+        }
+        var target = _busy && IsVisible ? 1d : 0d;
+        var previous = _ring.Opacity;
+        _ring.BeginAnimation(OpacityProperty, null);
+        _ring.Opacity = target;
+        if (IsVisible && SystemParameters.ClientAreaAnimation && previous != target)
+            _ring.BeginAnimation(OpacityProperty, Motion.Tween(previous, target, 180));
+    }
+
+    private void CloseClick(object sender, RoutedEventArgs e) => Visibility = Visibility.Collapsed;
+
+    private void RetryClick(object sender, RoutedEventArgs e) => RetranslateRequested?.Invoke(this, EventArgs.Empty);
+
+    private void CopyClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            BitmapUtilities.SetClipboardTextWithRetry(_tab.SelectedIndex == 0 ? _source : _translation);
+            HintToastWindow.Success("已拷贝");
+        }
+        catch (Exception exception)
+        {
+            SetStatus(exception.Message);
+        }
+    }
+
+    private void ChooseLanguage(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = _languageButton, Placement = PlacementMode.Bottom };
+        menu.SetResourceReference(StyleProperty, "GlassMenuStyle");
+        foreach (var language in TargetLanguages)
         {
             var item = new MenuItem { Header = language, IsCheckable = true, IsChecked = language == TargetLanguage };
             item.Click += (_, _) =>
             {
                 if (TargetLanguage == language)
-                {
                     return;
-                }
                 TargetLanguage = language;
-                _targetLanguage.Text = language;
+                UpdateLanguagePair();
                 TargetLanguageChanged?.Invoke(this, language);
             };
             menu.Items.Add(item);
         }
-        target.ContextMenu = menu;
+        _languageButton.ContextMenu = menu;
         menu.IsOpen = true;
     }
-
     public void SetPointer(CalloutPointerSide side, double offset)
     {
         _pointer.Visibility = side == CalloutPointerSide.None ? Visibility.Collapsed : Visibility.Visible;
-        _card.Margin = side switch
+        _chrome.Margin = side switch
         {
             CalloutPointerSide.Top => new Thickness(0, 10, 0, 0),
             CalloutPointerSide.Right => new Thickness(0, 0, 10, 0),
@@ -477,24 +288,4 @@ internal sealed class TranslationCard : Grid
         };
     }
 
-    private static StackPanel ButtonContent(string text, LucideIconKind icon, double iconSize = 16)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
-        var iconElement = new LucideIconElement
-        {
-            Kind = icon,
-            Width = iconSize,
-            Height = iconSize,
-            StrokeThickness = 1.9,
-            Margin = new Thickness(0, 0, 6, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        iconElement.SetBinding(LucideIconElement.StrokeProperty, new Binding(nameof(Control.Foreground))
-        {
-            RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1)
-        });
-        row.Children.Add(iconElement);
-        row.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center });
-        return row;
-    }
 }

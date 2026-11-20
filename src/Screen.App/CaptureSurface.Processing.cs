@@ -17,16 +17,29 @@ internal sealed partial class CaptureSurface
 
     public bool IsProcessing { get; private set; }
 
-    protected override int VisualChildrenCount => 1;
+    protected override int VisualChildrenCount => 2;
 
-    protected override Visual GetVisualChild(int index) => index == 0
-        ? _processingVisual
-        : throw new ArgumentOutOfRangeException(nameof(index));
+    protected override Visual GetVisualChild(int index) => index switch
+    {
+        0 => _processingVisual,
+        1 => _ocrHighlights,
+        _ => throw new ArgumentOutOfRangeException(nameof(index))
+    };
 
     private void InitializeProcessingVisual()
     {
         AddVisualChild(_processingVisual);
-        Unloaded += (_, _) => SetProcessing(false);
+        AddVisualChild(_ocrHighlights);
+        Unloaded += (_, _) =>
+        {
+            SetProcessing(false);
+            ShowOcrLines(null);
+        };
+        SelectionChanged += (_, _) =>
+        {
+            if (_ocrDocument is not null && _recognizedRegion != Selection)
+                ShowOcrLines(null);
+        };
     }
 
     public void SetProcessing(bool isProcessing)
@@ -45,6 +58,7 @@ internal sealed partial class CaptureSurface
     {
         base.OnRenderSizeChanged(sizeInfo);
         RefreshProcessingVisual();
+        LayoutOcrLines(animate: false);
     }
 
     private void RefreshProcessingVisual()
@@ -70,24 +84,6 @@ internal sealed partial class CaptureSurface
         _processingBounds = Selection;
         _processingSize = size;
         _processingVisualActive = true;
-        var accent = (_accentBrush as SolidColorBrush)?.Color ?? Color.FromRgb(167, 207, 223);
-        var glow = new LinearGradientBrush
-        {
-            StartPoint = new Point(0.5, 0),
-            EndPoint = new Point(0.5, 1),
-            GradientStops =
-            [
-                new GradientStop(Color.FromArgb(0, accent.R, accent.G, accent.B), 0),
-                new GradientStop(Color.FromArgb(16, accent.R, accent.G, accent.B), 0.25),
-                new GradientStop(Color.FromArgb(84, accent.R, accent.G, accent.B), 0.5),
-                new GradientStop(Color.FromArgb(16, accent.R, accent.G, accent.B), 0.75),
-                new GradientStop(Color.FromArgb(0, accent.R, accent.G, accent.B), 1)
-            ]
-        };
-        glow.Freeze();
-        var line = new SolidColorBrush(Color.FromArgb(215, accent.R, accent.G, accent.B));
-        line.Freeze();
-
         var bandHeight = Math.Clamp(Selection.Height * 0.32, 24, 120);
         var lineHeight = Math.Min(1.5, Selection.Height);
         var start = Selection.Y - bandHeight / 2 + lineHeight / 2;
@@ -99,8 +95,8 @@ internal sealed partial class CaptureSurface
             dc.PushTransform(new ScaleTransform(ActualWidth / _frame.Width, ActualHeight / _frame.Height));
             dc.PushClip(new RectangleGeometry(ToRect(Selection)));
             dc.PushTransform(_processingTranslate);
-            dc.DrawRectangle(glow, null, new Rect(Selection.X, 0, Selection.Width, bandHeight));
-            dc.DrawRectangle(line, null, new Rect(Selection.X, bandHeight / 2 - lineHeight / 2, Selection.Width, lineHeight));
+            dc.DrawRectangle(_chrome.ScanBand, null, new Rect(Selection.X, 0, Selection.Width, bandHeight));
+            dc.DrawRectangle(_chrome.ScanLine, null, new Rect(Selection.X, bandHeight / 2 - lineHeight / 2, Selection.Width, lineHeight));
             dc.Pop();
             dc.Pop();
             dc.Pop();

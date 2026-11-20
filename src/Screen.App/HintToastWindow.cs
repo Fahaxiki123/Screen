@@ -1,96 +1,85 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using System.Windows.Threading;
+using ShapePath = System.Windows.Shapes.Path;
 
 namespace Screen.App;
 
-/// <summary>
-/// Small navy toast shown at the top of the screen for flow-guard
-/// messages ("截图进行中…" etc.).  Tray balloons are invisible whenever a
-/// fullscreen overlay is up, so guards need an on-screen channel.  The toast
-/// is click-through and carries WDA_EXCLUDEFROMCAPTURE so it never leaks
-/// into an ongoing recording.
-/// </summary>
 internal sealed class HintToastWindow : Window
 {
     private static HintToastWindow? _current;
-    private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
+    private readonly DispatcherTimer _timer = new();
 
-    private HintToastWindow(string message)
+    private HintToastWindow(string message, bool success, NativeMethods.NativePoint? anchor)
     {
         Title = "Screen 提示";
-        WindowStyle = WindowStyle.None;
-        ResizeMode = ResizeMode.NoResize;
-        Topmost = true;
-        ShowInTaskbar = false;
-        AllowsTransparency = true;
-        Background = Brushes.Transparent;
-        IsHitTestVisible = false;
         SizeToContent = SizeToContent.WidthAndHeight;
-
-        Content = new Border
+        var panel = new GlassPanel { Variant = GlassVariant.Solid, Padding = new Thickness(16, 9, 16, 9) };
+        var label = new TextBlock
         {
-            CornerRadius = new CornerRadius(16),
-            Background = Token("Brush.ChromeGradient"),
-            BorderBrush = Token("Brush.Border"),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(16, 9, 16, 9),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect
+            Text = message,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (success)
+        {
+            var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var check = new ShapePath();
+            check.SetResourceReference(StyleProperty, "SuccessCheckStyle");
+            stack.Children.Add(check);
+            label.Margin = new Thickness(0, 12, 0, 0);
+            label.FontWeight = FontWeights.SemiBold;
+            stack.Children.Add(label);
+            panel.Width = panel.Height = 156;
+            panel.SetResourceReference(GlassPanel.CornerRadiusProperty, "Radius.Card");
+            panel.Content = stack;
+            Loaded += (_, _) =>
             {
-                BlurRadius = 16,
-                Color = Colors.Black,
-                Opacity = 0.3,
-                ShadowDepth = 2
-            },
-            Child = new TextBlock
+                if (!SystemParameters.ClientAreaAnimation)
+                    return;
+                check.BeginAnimation(Shape.StrokeDashOffsetProperty, Motion.Tween(20, 0, 400));
+                panel.BeginAnimation(OpacityProperty, Motion.Tween(0, 1, 450));
+                var scale = new ScaleTransform();
+                panel.RenderTransformOrigin = new Point(0.5, 0.5);
+                panel.RenderTransform = scale;
+                scale.BeginAnimation(ScaleTransform.ScaleXProperty, Motion.Tween(0.92, 1, 450, Motion.Spring()));
+                scale.BeginAnimation(ScaleTransform.ScaleYProperty, Motion.Tween(0.92, 1, 450, Motion.Spring()));
+            };
+        }
+        else
+        {
+            panel.Content = label;
+        }
+        Content = panel;
+        FeedbackPlacement.Attach(this, success ? FeedbackAnchor.Center : FeedbackAnchor.Top, anchor, clickThrough: true);
+        _timer.Interval = TimeSpan.FromMilliseconds(success ? 1750 : 2200);
+        _timer.Tick += (_, _) =>
+        {
+            _timer.Stop();
+            if (!success || !SystemParameters.ClientAreaAnimation)
             {
-                Text = message,
-                FontSize = 13,
-                Foreground = Token("Brush.TextPrimary")
+                Close();
+                return;
             }
+            var fade = Motion.Tween(1, 0, 250);
+            fade.Completed += (_, _) => { if (IsVisible) Close(); };
+            panel.BeginAnimation(OpacityProperty, fade);
         };
-
-        SourceInitialized += (_, _) =>
-        {
-            var handle = new WindowInteropHelper(this).Handle;
-            var style = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlExStyle).ToInt64();
-            NativeMethods.SetWindowLongPtr(
-                handle,
-                NativeMethods.GwlExStyle,
-                (nint)(style | NativeMethods.WsExTransparent | NativeMethods.WsExNoActivate));
-            NativeMethods.SetWindowDisplayAffinity(handle, NativeMethods.WdaExcludeFromCapture);
-
-            // Top-center of the monitor under the cursor (DPI-aware).
-            NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
-            var dpi = NativeMethods.GetDpiAtPoint(cursor) / 96.0;
-            var monitor = System.Windows.Forms.Screen.FromPoint(
-                new System.Drawing.Point(cursor.X, cursor.Y)).Bounds;
-            Left = (monitor.X + monitor.Width / 2.0 - ActualWidth * dpi / 2) / dpi;
-            Top = (monitor.Y + 24) / dpi;
-        };
-        Closed += (_, _) =>
-        {
-            if (_current == this)
-            {
-                _current = null;
-            }
-        };
+        Loaded += (_, _) => _timer.Start();
+        Closed += (_, _) => { _timer.Stop(); if (_current == this) _current = null; };
     }
 
-    public static void Show(string message)
+    public static void Show(string message) => Display(message, false, null);
+    public static void Success(string message, NativeMethods.NativePoint? anchor = null) => Display(message, true, anchor);
+
+    private static void Display(string message, bool success, NativeMethods.NativePoint? anchor)
     {
         _current?.Close();
-        var toast = new HintToastWindow(message);
-        _current = toast;
-        toast.Show();
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2200) };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            toast.Close();
-        };
-        timer.Start();
+        _current = new HintToastWindow(message, success, anchor);
+        _current.Show();
     }
 }

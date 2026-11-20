@@ -72,6 +72,39 @@ public sealed class CaptureProcessingRegressionTests
     });
 
     [TestMethod]
+    [DataRow(1)]
+    [DataRow(2)]
+    public void RecognizedLinesMapFromTheCropClipAtItsEdgesAndNeverEnterExport(int scale) => OnSta(() =>
+    {
+        var surface = CreateSurface(Region, scale);
+        var before = Render(surface, scale);
+        var export = surface.RenderSelection().Pixels;
+        var document = new OcrDocument("en", "A", [new OcrLine("A", new PixelRect(-4, 12, 30, 14), []),
+            new OcrLine("outside", new PixelRect(Region.Width + 8, 0, 4, 4), [])]);
+        surface.ShowOcrLines(document);
+        var layer = (System.Windows.Controls.Canvas)VisualTreeHelper.GetChild(surface, 1);
+        var line = layer.Children.OfType<System.Windows.Controls.Border>().Single();
+        Assert.AreEqual(26 * scale, line.ActualWidth);
+        Assert.AreEqual(14 * scale, line.ActualHeight);
+        Assert.AreEqual(0d, System.Windows.Controls.Canvas.GetLeft(line));
+        Assert.AreEqual(12 * scale, System.Windows.Controls.Canvas.GetTop(line));
+        Assert.AreEqual(new Vector(Region.X * scale, Region.Y * scale), VisualTreeHelper.GetOffset(layer));
+        Assert.IsFalse(layer.IsHitTestVisible);
+
+        // Check the settled state without sleeping for animation clocks.
+        var changes = new PixelRect(Region.X, Region.Y + 4, 34, 30);
+        surface.Arrange(new Rect(0, 0, Width * scale + 1, Height * scale));
+        surface.Arrange(new Rect(0, 0, Width * scale, Height * scale));
+        AssertOnlySelectionChanged(before, Render(surface, scale), changes, scale);
+        CollectionAssert.AreEqual(export, surface.RenderSelection().Pixels);
+        surface.ShowOcrLines(null);
+        CollectionAssert.AreEqual(before, Render(surface, scale));
+        surface.ShowOcrLines(document);
+        surface.InitializeCommittedSelection(new PixelRect(6, 8, 45, 25), showSelectionChrome: false);
+        Assert.AreEqual(0, layer.Children.Count, "Old OCR boxes must not move onto a new crop.");
+    });
+
+    [TestMethod]
     public void UndoRedoNotifyTextOperationsOnlyWhenImageContentChanges() => OnSta(() =>
     {
         var surface = CreateSurface(Region);
