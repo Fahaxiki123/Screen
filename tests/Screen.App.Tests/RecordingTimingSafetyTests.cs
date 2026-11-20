@@ -12,7 +12,7 @@ public sealed class RecordingTimingSafetyTests
     [TestMethod]
     [DataRow("bgra")]
     [DataRow("nv12")]
-    public async Task CaptureTimestampsPreserveGapsPauseExclusionAndFinalHeldFrame(string format)
+    public async Task CaptureTimestampsPreserveGapsPauseExclusionAndFinalHeldFrameAsync(string format)
     {
         var root = Path.Combine(Path.GetTempPath(), "Screen.Timing.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -207,7 +207,7 @@ public sealed class RecordingTimingSafetyTests
     }
 
     [TestMethod]
-    public async Task Nv12RangeSurvivesActualFfmpegEncodingAndDecoding()
+    public async Task Nv12RangeSurvivesActualFfmpegEncodingAndDecodingAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "Screen.Nv12Range.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -254,7 +254,7 @@ public sealed class RecordingTimingSafetyTests
     [DataRow(4.0, 4.5, 30.0, 15, false)]
     [DataRow(2.0, 2.8, 30.0, 24, false)]
     [DataRow(2.0, 4.0, 60.0, 120, false)]
-    public async Task TrimKeepsTheFrameCoveringItsStartAndAccuratelySeeksAudio(
+    public async Task TrimKeepsTheFrameCoveringItsStartAndAccuratelySeeksAudioAsync(
         double start, double end, double frameRate, int expectedFrames, bool withAudio)
     {
         var root = Path.Combine(Path.GetTempPath(), "Screen.VfrTrim.Tests", Guid.NewGuid().ToString("N"));

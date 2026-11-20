@@ -16,7 +16,7 @@ public sealed class CaptureBoundaryRegressionTests
 {
     private const int Width = 160;
     private const int Height = 120;
-    private static readonly PixelRect Region = new(30, 25, 80, 60);
+    private static readonly PixelRect _region = new(30, 25, 80, 60);
 
     [TestMethod]
     public void PinRendersSourcePixelsToEveryEdgeWhenNotHovered() => OnSta(() =>
@@ -141,7 +141,7 @@ public sealed class CaptureBoundaryRegressionTests
     public void MosaicSuppressesWindowTextUntilUndone(bool useBrush, int variant) => OnSta(() =>
     {
         var surface = CreateSurface();
-        var target = new WindowTarget(1, "Source", Region);
+        var target = new WindowTarget(1, "Source", _region);
         typeof(CaptureSurface).GetProperty(nameof(CaptureSurface.SelectedWindow))!.SetValue(surface, target);
 
         var start = new PixelPoint(40, 35);
@@ -242,8 +242,8 @@ public sealed class CaptureBoundaryRegressionTests
         Assert.AreEqual(new PixelPoint(110, 75), annotation.Points[^1], "Clip the actual segment, not its two coordinates independently.");
         Assert.IsFalse(GetField<bool>(surface, "_drawing"));
         Assert.AreEqual(0, WorkingPoints(surface).Count);
-        Assert.IsTrue(annotation.Points.All(point => point.X >= Region.X && point.X <= Region.Right
-            && point.Y >= Region.Y && point.Y <= Region.Bottom));
+        Assert.IsTrue(annotation.Points.All(point => point.X >= _region.X && point.X <= _region.Right
+            && point.Y >= _region.Y && point.Y <= _region.Bottom));
         surface.Undo();
         Assert.AreEqual(0, Items(surface).Count, "The complete clipped stroke remains one undo operation.");
     });
@@ -260,8 +260,8 @@ public sealed class CaptureBoundaryRegressionTests
         surface.CurrentStyle = new AnnotationStyle(0xFFFF0000, 24, 16, variant, 0.8);
         Invoke(surface, "AddAnnotation", new PixelPoint(15, 15), new PixelPoint(140, 105));
         Render(surface); // Populate the incremental mosaic cache before resizing.
-        surface.InitializeCommittedSelection(Region, showSelectionChrome: false);
-        AssertOnlySelectionChanged(Render(CreateSurface()), Render(surface), Region);
+        surface.InitializeCommittedSelection(_region, showSelectionChrome: false);
+        AssertOnlySelectionChanged(Render(CreateSurface()), Render(surface), _region);
         surface.Undo();
         CollectionAssert.AreEqual(Render(CreateSurface()), Render(surface));
     });
@@ -278,10 +278,10 @@ public sealed class CaptureBoundaryRegressionTests
         WorkingPoints(surface).AddRange([new PixelPoint(32, 30), new PixelPoint(32, 78)]);
         SetField(surface, "_drawing", true);
         surface.InvalidateVisual();
-        AssertOnlySelectionChanged(baseline, Render(surface), Region);
+        AssertOnlySelectionChanged(baseline, Render(surface), _region);
         Invoke(surface, "FinishDrawing", new PixelPoint(32, 78));
         surface.InvalidateVisual();
-        AssertOnlySelectionChanged(baseline, Render(surface), Region);
+        AssertOnlySelectionChanged(baseline, Render(surface), _region);
     });
 
     [TestMethod]
@@ -292,8 +292,8 @@ public sealed class CaptureBoundaryRegressionTests
         Invoke(surface, "AddAnnotation", new PixelPoint(40, 40), new PixelPoint(155, 115));
         var shape = Items(surface).Single();
         Assert.AreEqual(new PixelPoint(110, 85), shape.Points[^1]);
-        Assert.AreEqual(Region.Right, shape.Bounds.Right);
-        Assert.AreEqual(Region.Bottom, shape.Bounds.Bottom);
+        Assert.AreEqual(_region.Right, shape.Bounds.Right);
+        Assert.AreEqual(_region.Bottom, shape.Bounds.Bottom);
     });
 
     [TestMethod]
@@ -329,7 +329,7 @@ public sealed class CaptureBoundaryRegressionTests
         var pen = Items(surface).Single();
         Assert.IsGreaterThanOrEqualTo(79, pen.Bounds.Bottom,
             "Pen bounds must enclose intermediate stroke points plus half-thickness, not just start/end.");
-        Assert.IsLessThanOrEqualTo(Region.Bottom, pen.Bounds.Bottom);
+        Assert.IsLessThanOrEqualTo(_region.Bottom, pen.Bounds.Bottom);
     });
 
     [TestMethod]
@@ -411,7 +411,7 @@ public sealed class CaptureBoundaryRegressionTests
         var frame = new CaptureFrame(pixels, Width, Height, Width * 4, 96, 96,
             new PixelRect(0, 0, Width, Height), CaptureColorSpace.Srgb, DateTimeOffset.UtcNow);
         var surface = new CaptureSurface(frame, [], new WindowSnapService(), resources);
-        surface.InitializeCommittedSelection(Region, showSelectionChrome: false);
+        surface.InitializeCommittedSelection(_region, showSelectionChrome: false);
         surface.Measure(new Size(Width, Height));
         surface.Arrange(new Rect(0, 0, Width, Height));
         return surface;
@@ -419,7 +419,7 @@ public sealed class CaptureBoundaryRegressionTests
 
     private static PixelBuffer FillSelection(uint argb)
     {
-        var pixels = new byte[Region.Width * Region.Height * 4];
+        var pixels = new byte[_region.Width * _region.Height * 4];
         for (var i = 0; i < pixels.Length; i += 4)
         {
             pixels[i] = (byte)argb;
@@ -427,7 +427,7 @@ public sealed class CaptureBoundaryRegressionTests
             pixels[i + 2] = (byte)(argb >> 16);
             pixels[i + 3] = (byte)(argb >> 24);
         }
-        return new PixelBuffer(pixels, Region.Width, Region.Height, Region.Width * 4);
+        return new PixelBuffer(pixels, _region.Width, _region.Height, _region.Width * 4);
     }
 
     private static uint PixelAt(byte[] pixels, int stride, int x, int y) =>

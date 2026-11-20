@@ -8,7 +8,7 @@ namespace Screen.Core;
 
 public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslationProvider
 {
-    private static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(80);
+    private static readonly TimeSpan _progressInterval = TimeSpan.FromMilliseconds(80);
 
     public async Task<TranslationResult> TranslateAsync(
         string text,
@@ -99,7 +99,7 @@ public sealed class OpenAiTranslationProvider(HttpClient httpClient) : ITranslat
         {
             result.Append(fragment);
             if (streamingText is not null
-                && (lastProgressTimestamp is null || Stopwatch.GetElapsedTime(lastProgressTimestamp.Value) >= ProgressInterval))
+                && (lastProgressTimestamp is null || Stopwatch.GetElapsedTime(lastProgressTimestamp.Value) >= _progressInterval))
             {
                 var snapshot = protectedText.Restore(result.ToString());
                 if (!string.IsNullOrWhiteSpace(snapshot))

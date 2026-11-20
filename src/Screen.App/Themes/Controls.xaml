@@ -4,6 +4,8 @@
   <ResourceDictionary.MergedDictionaries>
     <ResourceDictionary Source="SettingsControls.xaml" />
   </ResourceDictionary.MergedDictionaries>
+  <local:GlassInsetRadiusConverter x:Key="Glass.InnerRadius" Inset="1" />
+  <SolidColorBrush x:Key="Glass.ShadowCaster" Color="#01000000" />
   <Style TargetType="local:GlassPanel">
     <Setter Property="Focusable" Value="False" />
     <Setter Property="CornerRadius" Value="{DynamicResource Radius.Bar}" />
@@ -15,18 +17,18 @@
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="local:GlassPanel">
       <Grid>
         <Border CornerRadius="{TemplateBinding CornerRadius}" IsHitTestVisible="False"
-                Background="{DynamicResource Brush.EdgeDark}" Effect="{DynamicResource Shadow.Glass}" />
+                Background="{StaticResource Glass.ShadowCaster}" Effect="{DynamicResource Shadow.Glass}" />
         <Border CornerRadius="{TemplateBinding CornerRadius}" BorderThickness="1" BorderBrush="{DynamicResource Brush.EdgeDark}">
           <Grid>
-            <Border x:Name="Backdrop" CornerRadius="{TemplateBinding CornerRadius}">
+            <Border x:Name="Backdrop" CornerRadius="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Glass.InnerRadius}}">
               <Border.Background><ImageBrush ViewboxUnits="Absolute" Stretch="Fill"
                  ImageSource="{Binding BackdropSource, RelativeSource={RelativeSource TemplatedParent}}"
                  Viewbox="{Binding BackdropViewbox, RelativeSource={RelativeSource TemplatedParent}}" /></Border.Background>
             </Border>
-            <Border x:Name="Dim" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource Brush.Dim}" Opacity="0" />
-            <Border x:Name="Tint" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource Brush.GlassTint}" />
-            <Border CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource Brush.GlassWhite}" />
-            <Border CornerRadius="{TemplateBinding CornerRadius}" BorderThickness="1" BorderBrush="{DynamicResource Brush.GlassRim}" />
+            <Border x:Name="Dim" CornerRadius="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Glass.InnerRadius}}" Background="{DynamicResource Brush.Dim}" Opacity="0" />
+            <Border x:Name="Tint" CornerRadius="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Glass.InnerRadius}}" Background="{DynamicResource Brush.GlassTint}" />
+            <Border CornerRadius="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Glass.InnerRadius}}" Background="{DynamicResource Brush.GlassWhite}" />
+            <Border CornerRadius="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource Glass.InnerRadius}}" BorderThickness="1" BorderBrush="{DynamicResource Brush.GlassRim}" />
             <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
           </Grid>
         </Border>

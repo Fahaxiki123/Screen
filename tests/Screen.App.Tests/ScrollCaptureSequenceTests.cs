@@ -8,7 +8,7 @@ namespace Screen.App.Tests;
 public sealed class ScrollCaptureSequenceTests
 {
     [TestMethod]
-    public async Task ContinuousManualMovementKeepsEveryIntermediateViewport()
+    public async Task ContinuousManualMovementKeepsEveryIntermediateViewportAsync()
     {
         var source = Document();
         int[] offsets = [0, 61, 140, 203, 290];
@@ -25,7 +25,7 @@ public sealed class ScrollCaptureSequenceTests
     }
 
     [TestMethod]
-    public async Task IncrementalPreviewKeepsOneHeaderAndFooterAndDoesNotChangePublishedBitmaps()
+    public async Task IncrementalPreviewKeepsOneHeaderAndFooterAndDoesNotChangePublishedBitmapsAsync()
     {
         const int viewportHeight = 240;
         const int header = 21;
@@ -62,7 +62,7 @@ public sealed class ScrollCaptureSequenceTests
     }
 
     [TestMethod]
-    public async Task CoalescedPreviewRescalesAndPreservesOddSeamsAndLastPixelBlock()
+    public async Task CoalescedPreviewRescalesAndPreservesOddSeamsAndLastPixelBlockAsync()
     {
         const int width = 33;
         const int viewportHeight = 600;
@@ -113,7 +113,7 @@ public sealed class ScrollCaptureSequenceTests
     }
 
     [TestMethod]
-    public async Task IncrementalPreviewPreservesEarlierRowsWhenAHeaderBecomesFixed()
+    public async Task IncrementalPreviewPreservesEarlierRowsWhenAHeaderBecomesFixedAsync()
     {
         const int height = 300;
         var source = Document(height: 570);
@@ -134,7 +134,7 @@ public sealed class ScrollCaptureSequenceTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public async Task FinishWaitsForPendingFirstOrLastFrame(bool seedFirst)
+    public async Task FinishWaitsForPendingFirstOrLastFrameAsync(bool seedFirst)
     {
         var source = Document();
         var first = source.Crop(new PixelRect(0, 0, source.Width, 240));
@@ -164,7 +164,7 @@ public sealed class ScrollCaptureSequenceTests
     }
 
     [TestMethod]
-    public async Task CancelDuringAcquisitionCannotAppendTheLateFrame()
+    public async Task CancelDuringAcquisitionCannotAppendTheLateFrameAsync()
     {
         var gate = new TaskCompletionSource<PixelBuffer>(TaskCreationOptions.RunContinuationsAsynchronously);
         var sequence = new ScrollCaptureSequence(_ => gate.Task);

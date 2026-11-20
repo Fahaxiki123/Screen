@@ -229,7 +229,7 @@ public static class OcrQualityEvaluator
         foreach (System.Text.RegularExpressions.Match word in words)
         {
             var token = word.Value;
-            if (!EnglishEvidenceWords.Contains(token))
+            if (!_englishEvidenceWords.Contains(token))
                 continue;
             matchedTokens++;
             firstMatch ??= token;
@@ -239,7 +239,7 @@ public static class OcrQualityEvaluator
         return hasDistinctMatches && matchedTokens >= words.Count * 0.35 ? "en-US" : "und";
     }
 
-    private static readonly HashSet<string> EnglishEvidenceWords = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _englishEvidenceWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "the", "and", "this", "that", "these", "those", "your", "with", "from", "which",
         "when", "where", "would", "should", "could", "does", "have", "there", "please",

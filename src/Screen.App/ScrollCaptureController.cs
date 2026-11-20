@@ -119,7 +119,7 @@ internal sealed class ScrollCaptureController : IDisposable
             WindowActivation.Activate(keyboardTarget);
 
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
-            _timer.Tick += OnTimerTick;
+            _timer.Tick += OnTimerTickAsync;
             _captureOperation = CaptureChangedFrameAsync(sequence);
             await _captureOperation;
             if (_ended || _finishing || _sequence is null)
@@ -149,10 +149,7 @@ internal sealed class ScrollCaptureController : IDisposable
         }
         _mode = enabled ? ScrollCaptureMode.Automatic : ScrollCaptureMode.Manual;
         _bottomDetector.Reset();
-        if (_timer is not null)
-        {
-            _timer.Interval = TimeSpan.FromMilliseconds(enabled ? 420 : 80);
-        }
+        _timer?.Interval = TimeSpan.FromMilliseconds(enabled ? 420 : 80);
         _control?.SetAutomatic(enabled);
         if (enabled && _selection.TargetWindow is { Handle: not 0 } target)
         {
@@ -163,7 +160,7 @@ internal sealed class ScrollCaptureController : IDisposable
             : "手动滚动选区 · Enter 完成 · Esc 取消");
     }
 
-    private async void OnTimerTick(object? sender, EventArgs e)
+    private async void OnTimerTickAsync(object? sender, EventArgs e)
     {
         if (_busy || _ended || _finishing || _sequence is not { } sequence)
         {
@@ -396,10 +393,7 @@ internal sealed class ScrollCaptureController : IDisposable
                 _mode = ScrollCaptureMode.Manual;
                 _bottomDetector.Reset();
                 _control?.SetAutomatic(false);
-                if (_timer is not null)
-                {
-                    _timer.Interval = TimeSpan.FromMilliseconds(80);
-                }
+                _timer?.Interval = TimeSpan.FromMilliseconds(80);
                 _timer?.Start();
             }
         }

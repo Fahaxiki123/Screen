@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 
 namespace Screen.App;
@@ -20,6 +22,22 @@ public sealed class GlassPanel : ContentControl
     public ImageSource? BackdropSource { get => (ImageSource?)GetValue(BackdropSourceProperty); set => SetValue(BackdropSourceProperty, value); }
     public Rect BackdropViewbox { get => (Rect)GetValue(BackdropViewboxProperty); set => SetValue(BackdropViewboxProperty, value); }
     public bool IsDimmed { get => (bool)GetValue(IsDimmedProperty); set => SetValue(IsDimmedProperty, value); }
+}
+
+// Keep the inner and outer arcs concentric; the inset itself belongs to the XAML material.
+public sealed class GlassInsetRadiusConverter : IValueConverter
+{
+    public double Inset { get; set; }
+
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is not CornerRadius radius)
+            return DependencyProperty.UnsetValue;
+        return new CornerRadius(Math.Max(0, radius.TopLeft - Inset), Math.Max(0, radius.TopRight - Inset),
+            Math.Max(0, radius.BottomRight - Inset), Math.Max(0, radius.BottomLeft - Inset));
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
 }
 
 public static class HudActiveButton

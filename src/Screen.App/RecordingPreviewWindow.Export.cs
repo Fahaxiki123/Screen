@@ -11,7 +11,7 @@ internal sealed partial class RecordingPreviewWindow
 {
     private bool IsGifExport => _exportProfile.Format == RecordingFormat.Gif;
 
-    private async void SaveAs(object sender, RoutedEventArgs e)
+    private async void SaveAsAsync(object sender, RoutedEventArgs e)
     {
         if (!_loaded || _closed || _exportOperation is not null)
             return;
@@ -28,7 +28,7 @@ internal sealed partial class RecordingPreviewWindow
             await DeliverExportAsync(dialog.FileName, clipboard: false);
     }
 
-    private async void CopyToClipboard(object sender, RoutedEventArgs e)
+    private async void CopyToClipboardAsync(object sender, RoutedEventArgs e)
     {
         if (!_loaded || _closed || _exportOperation is not null)
             return;

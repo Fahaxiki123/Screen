@@ -4,8 +4,8 @@ namespace Screen.App;
 
 internal sealed partial class SettingsViewModel
 {
-    private static readonly int[] GifFrameRates = [10, 15, 20, 30];
-    private static readonly int[] GifWidths = [0, 1920, 1280, 960];
+    private static readonly int[] _gifFrameRates = [10, 15, 20, 30];
+    private static readonly int[] _gifWidths = [0, 1920, 1280, 960];
 
     public string SaveDirectory
     {
@@ -77,12 +77,12 @@ internal sealed partial class SettingsViewModel
 
     public int RecordingGifFrameRateIndex
     {
-        get => Array.IndexOf(GifFrameRates, _settings.Recording.GifFrameRate);
+        get => Array.IndexOf(_gifFrameRates, _settings.Recording.GifFrameRate);
         set
         {
-            if ((uint)value >= GifFrameRates.Length || value == RecordingGifFrameRateIndex)
+            if ((uint)value >= _gifFrameRates.Length || value == RecordingGifFrameRateIndex)
                 return;
-            _settings.Recording = _settings.Recording with { GifFrameRate = GifFrameRates[value] };
+            _settings.Recording = _settings.Recording with { GifFrameRate = _gifFrameRates[value] };
             OnPropertyChanged();
             QueueSave();
         }
@@ -90,12 +90,12 @@ internal sealed partial class SettingsViewModel
 
     public int RecordingGifMaxWidthIndex
     {
-        get => Array.IndexOf(GifWidths, _settings.Recording.GifMaxWidth);
+        get => Array.IndexOf(_gifWidths, _settings.Recording.GifMaxWidth);
         set
         {
-            if ((uint)value >= GifWidths.Length || value == RecordingGifMaxWidthIndex)
+            if ((uint)value >= _gifWidths.Length || value == RecordingGifMaxWidthIndex)
                 return;
-            _settings.Recording = _settings.Recording with { GifMaxWidth = GifWidths[value] };
+            _settings.Recording = _settings.Recording with { GifMaxWidth = _gifWidths[value] };
             OnPropertyChanged();
             QueueSave();
         }

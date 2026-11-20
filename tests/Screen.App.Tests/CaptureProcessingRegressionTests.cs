@@ -15,21 +15,21 @@ public sealed class CaptureProcessingRegressionTests
 {
     private const int Width = 160;
     private const int Height = 120;
-    private static readonly PixelRect Region = new(30, 24, 80, 60);
+    private static readonly PixelRect _region = new(30, 24, 80, 60);
 
     [TestMethod]
     [DataRow(1)]
     [DataRow(2)]
     public void ScanGlowStaysInsideSelectionAndNeverChangesExport(int scale) => OnSta(() =>
     {
-        var surface = CreateSurface(Region, scale);
+        var surface = CreateSurface(_region, scale);
         var before = Render(surface, scale);
         var exportBefore = surface.RenderSelection().Pixels;
         surface.SetProcessing(true);
         surface.SetProcessing(true);
         Assert.IsTrue(surface.IsProcessing);
         Assert.IsTrue(ScanTransform(surface).HasAnimatedProperties);
-        AssertOnlySelectionChanged(before, Render(surface, scale), Region, scale);
+        AssertOnlySelectionChanged(before, Render(surface, scale), _region, scale);
         CollectionAssert.AreEqual(exportBefore, surface.RenderSelection().Pixels,
             "Processing feedback must never become part of the OCR or saved image.");
         surface.SetProcessing(false);
@@ -42,7 +42,7 @@ public sealed class CaptureProcessingRegressionTests
     [TestMethod]
     public void UnloadingStopsAnimationAndClearsGlow() => OnSta(() =>
     {
-        var surface = CreateSurface(Region);
+        var surface = CreateSurface(_region);
         var before = Render(surface);
         surface.SetProcessing(true);
         surface.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
@@ -50,14 +50,14 @@ public sealed class CaptureProcessingRegressionTests
         Assert.IsFalse(ScanTransform(surface).HasAnimatedProperties);
         CollectionAssert.AreEqual(before, Render(surface));
         surface.SetProcessing(true);
-        AssertOnlySelectionChanged(before, Render(surface), Region, 1);
+        AssertOnlySelectionChanged(before, Render(surface), _region, 1);
         surface.SetProcessing(false);
     });
 
     [TestMethod]
     public void ScanReclipsWhenSelectionChangesAndSupportsOnePixelRegions() => OnSta(() =>
     {
-        var surface = CreateSurface(Region);
+        var surface = CreateSurface(_region);
         var before = Render(surface);
         surface.SetProcessing(true);
         var tinyRegion = new PixelRect(95, 75, 1, 1);
@@ -65,9 +65,9 @@ public sealed class CaptureProcessingRegressionTests
         AssertOnlySelectionChanged(before, Render(surface), tinyRegion, 1);
         surface.InitializeCommittedSelection(new PixelRect(0, 0, 0, 0), showSelectionChrome: false);
         Assert.IsFalse(ScanTransform(surface).HasAnimatedProperties, "No animation should keep running for an empty selection.");
-        surface.InitializeCommittedSelection(Region, showSelectionChrome: false);
+        surface.InitializeCommittedSelection(_region, showSelectionChrome: false);
         Assert.IsTrue(ScanTransform(surface).HasAnimatedProperties);
-        AssertOnlySelectionChanged(before, Render(surface), Region, 1);
+        AssertOnlySelectionChanged(before, Render(surface), _region, 1);
         surface.SetProcessing(false);
     });
 
@@ -76,11 +76,11 @@ public sealed class CaptureProcessingRegressionTests
     [DataRow(2)]
     public void RecognizedLinesMapFromTheCropClipAtItsEdgesAndNeverEnterExport(int scale) => OnSta(() =>
     {
-        var surface = CreateSurface(Region, scale);
+        var surface = CreateSurface(_region, scale);
         var before = Render(surface, scale);
         var export = surface.RenderSelection().Pixels;
         var document = new OcrDocument("en", "A", [new OcrLine("A", new PixelRect(-4, 12, 30, 14), []),
-            new OcrLine("outside", new PixelRect(Region.Width + 8, 0, 4, 4), [])]);
+            new OcrLine("outside", new PixelRect(_region.Width + 8, 0, 4, 4), [])]);
         surface.ShowOcrLines(document);
         var layer = (System.Windows.Controls.Canvas)VisualTreeHelper.GetChild(surface, 1);
         var line = layer.Children.OfType<System.Windows.Controls.Border>().Single();
@@ -88,11 +88,11 @@ public sealed class CaptureProcessingRegressionTests
         Assert.AreEqual(14 * scale, line.ActualHeight);
         Assert.AreEqual(0d, System.Windows.Controls.Canvas.GetLeft(line));
         Assert.AreEqual(12 * scale, System.Windows.Controls.Canvas.GetTop(line));
-        Assert.AreEqual(new Vector(Region.X * scale, Region.Y * scale), VisualTreeHelper.GetOffset(layer));
+        Assert.AreEqual(new Vector(_region.X * scale, _region.Y * scale), VisualTreeHelper.GetOffset(layer));
         Assert.IsFalse(layer.IsHitTestVisible);
 
         // Check the settled state without sleeping for animation clocks.
-        var changes = new PixelRect(Region.X, Region.Y + 4, 34, 30);
+        var changes = new PixelRect(_region.X, _region.Y + 4, 34, 30);
         surface.Arrange(new Rect(0, 0, Width * scale + 1, Height * scale));
         surface.Arrange(new Rect(0, 0, Width * scale, Height * scale));
         AssertOnlySelectionChanged(before, Render(surface, scale), changes, scale);
@@ -107,7 +107,7 @@ public sealed class CaptureProcessingRegressionTests
     [TestMethod]
     public void UndoRedoNotifyTextOperationsOnlyWhenImageContentChanges() => OnSta(() =>
     {
-        var surface = CreateSurface(Region);
+        var surface = CreateSurface(_region);
         var before = surface.RenderSelection().Pixels;
         var notifications = new List<byte[]>();
         var newEdits = 0;

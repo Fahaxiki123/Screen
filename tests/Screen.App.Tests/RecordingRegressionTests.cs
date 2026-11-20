@@ -132,7 +132,7 @@ public sealed class RecordingRegressionTests
     [STATestMethod(UseSTASynchronizationContext = true)]
     [DataRow(true)]
     [DataRow(false)]
-    public async Task ImmediateStopKeepsItsResultForTheHost(bool hasVideo)
+    public async Task ImmediateStopKeepsItsResultForTheHostAsync(bool hasVideo)
     {
         var scratch = Directory.CreateDirectory(Path.Combine(_root, "session")).FullName;
         var source = Path.Combine(scratch, "video.mp4");
@@ -169,7 +169,7 @@ public sealed class RecordingRegressionTests
     [STATestMethod(UseSTASynchronizationContext = true)]
     [DataRow(false)]
     [DataRow(true)]
-    public async Task RepeatedStopWaitsForSameSaveResultAndReleasesCaptureOnce(bool commitFails)
+    public async Task RepeatedStopWaitsForSameSaveResultAndReleasesCaptureOnceAsync(bool commitFails)
     {
         var scratch = Directory.CreateDirectory(Path.Combine(_root, "session")).FullName;
         var video = Path.Combine(scratch, "video.mp4");
@@ -232,7 +232,7 @@ public sealed class RecordingRegressionTests
     [STATestMethod(UseSTASynchronizationContext = true)]
     [DataRow(false)]
     [DataRow(true)]
-    public async Task StopPublishesVideoAndKeepsOriginalAudioIfMuxFails(bool muxFails)
+    public async Task StopPublishesVideoAndKeepsOriginalAudioIfMuxFailsAsync(bool muxFails)
     {
         const int width = 64;
         const int height = 64;
@@ -282,7 +282,7 @@ public sealed class RecordingRegressionTests
     }
 
     [TestMethod]
-    public async Task ClipboardExportSurvivesPreviewCacheDisposal()
+    public async Task ClipboardExportSurvivesPreviewCacheDisposalAsync()
     {
         var cache = new RecordingExportCache();
         var source = Path.Combine(_root, "trim-cache.mp4");
@@ -297,7 +297,7 @@ public sealed class RecordingRegressionTests
     }
 
     [TestMethod]
-    public async Task OutOfOrderExportsStayAssociatedWithTheirOriginalRanges()
+    public async Task OutOfOrderExportsStayAssociatedWithTheirOriginalRangesAsync()
     {
         using var cache = new RecordingExportCache();
         var rangeA = new RecordingTrimRange(0, 2);
@@ -328,7 +328,7 @@ public sealed class RecordingRegressionTests
     }
 
     [TestMethod]
-    public async Task FailedExportCanBeRetriedForTheSameRange()
+    public async Task FailedExportCanBeRetriedForTheSameRangeAsync()
     {
         using var cache = new RecordingExportCache();
         var range = new RecordingTrimRange(1, 2);
@@ -341,7 +341,7 @@ public sealed class RecordingRegressionTests
     }
 
     [TestMethod]
-    public async Task ClosingPreviewCancelsExportAndDeletesALateResult()
+    public async Task ClosingPreviewCancelsExportAndDeletesALateResultAsync()
     {
         var cache = new RecordingExportCache();
         var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -624,7 +624,7 @@ public sealed class RecordingRegressionTests
     }
 
     [STATestMethod(UseSTASynchronizationContext = true)]
-    public async Task MidRecordingCaptureFaultPreservesSavedSegmentAndSurfacesInterruptionWarning()
+    public async Task MidRecordingCaptureFaultPreservesSavedSegmentAndSurfacesInterruptionWarningAsync()
     {
         var scratch = Directory.CreateDirectory(Path.Combine(_root, "session")).FullName;
         var source = Path.Combine(scratch, "video.mp4");

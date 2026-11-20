@@ -7,7 +7,7 @@ namespace Screen.App;
 
 internal static class DirectTextExtractor
 {
-    private static readonly TimeSpan DefaultExtractionBudget = TimeSpan.FromMilliseconds(550);
+    private static readonly TimeSpan _defaultExtractionBudget = TimeSpan.FromMilliseconds(550);
 
     public static Task<OcrDocument?> TryExtractAsync(
         WindowTarget? window,
@@ -20,7 +20,7 @@ internal static class DirectTextExtractor
         }
         return RunWithBudgetAsync(
             token => ExtractCore(window, screenSelection, token),
-            DefaultExtractionBudget,
+            _defaultExtractionBudget,
             cancellationToken);
     }
 

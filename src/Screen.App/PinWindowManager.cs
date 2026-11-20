@@ -337,17 +337,11 @@ internal sealed class PinWindow : Window
     {
         if (_clickThrough == enabled)
         {
-            if (_clickThroughMenuItem is not null)
-            {
-                _clickThroughMenuItem.IsChecked = enabled;
-            }
+            _clickThroughMenuItem?.IsChecked = enabled;
             return;
         }
         _clickThrough = enabled;
-        if (_clickThroughMenuItem is not null)
-        {
-            _clickThroughMenuItem.IsChecked = enabled;
-        }
+        _clickThroughMenuItem?.IsChecked = enabled;
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == 0)
         {

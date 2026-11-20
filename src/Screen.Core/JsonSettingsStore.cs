@@ -4,7 +4,7 @@ namespace Screen.Core;
 
 public sealed class JsonSettingsStore
 {
-    private static readonly JsonSerializerOptions Options = new()
+    private static readonly JsonSerializerOptions _options = new()
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true
@@ -49,7 +49,7 @@ public sealed class JsonSettingsStore
                 return new AppSettings();
             }
 
-            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), Options)
+            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), _options)
                            ?? new AppSettings();
             var defaults = new AppSettings();
             settings.HotKey ??= defaults.HotKey;
@@ -141,7 +141,7 @@ public sealed class JsonSettingsStore
             var temporary = Path + ".tmp";
             try
             {
-                File.WriteAllText(temporary, JsonSerializer.Serialize(settings, Options));
+                File.WriteAllText(temporary, JsonSerializer.Serialize(settings, _options));
                 File.Move(temporary, Path, true);
             }
             catch

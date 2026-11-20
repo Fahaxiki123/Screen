@@ -13,7 +13,7 @@ internal sealed partial class CaptureOverlayWindow
     // WPF optimizes Loaded delivery for template children. An inherited scope
     // tracks both existing panels and ones inserted later (OCR, style panels),
     // without relying on a global class handler or walking the tree per frame.
-    private static readonly DependencyProperty BackdropHostProperty = DependencyProperty.RegisterAttached(
+    private static readonly DependencyProperty _backdropHostProperty = DependencyProperty.RegisterAttached(
         "BackdropHost", typeof(CaptureOverlayWindow), typeof(CaptureOverlayWindow),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.Inherits, OnBackdropHostChanged));
 
@@ -30,9 +30,9 @@ internal sealed partial class CaptureOverlayWindow
             current._glassPanels.Add(panel);
     }
 
-    private async void PrepareGlassBackdrop(object sender, RoutedEventArgs e)
+    private async void PrepareGlassBackdropAsync(object sender, RoutedEventArgs e)
     {
-        Loaded -= PrepareGlassBackdrop;
+        Loaded -= PrepareGlassBackdropAsync;
         var token = _glassLifetime.Token;
         try
         {
@@ -89,7 +89,7 @@ internal sealed partial class CaptureOverlayWindow
         _glassLifetime.Dispose();
         foreach (var panel in _glassPanels)
             panel.BackdropSource = null;
-        _root.ClearValue(BackdropHostProperty);
+        _root.ClearValue(_backdropHostProperty);
         _glassPanels.Clear();
         _blurredFrame = null;
     }

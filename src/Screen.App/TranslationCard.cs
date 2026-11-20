@@ -9,7 +9,7 @@ namespace Screen.App;
 
 internal sealed partial class TranslationCard : Grid
 {
-    private static readonly string[] TargetLanguages = ["简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch"];
+    private static readonly string[] _targetLanguages = ["简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch"];
     private readonly RotateTransform _rotation = new(0, 0.5, 0.5);
     private string _source = string.Empty;
     private string _translation = string.Empty;
@@ -233,7 +233,7 @@ internal sealed partial class TranslationCard : Grid
     {
         var menu = new ContextMenu { PlacementTarget = _languageButton, Placement = PlacementMode.Bottom };
         menu.SetResourceReference(StyleProperty, "GlassMenuStyle");
-        foreach (var language in TargetLanguages)
+        foreach (var language in _targetLanguages)
         {
             var item = new MenuItem { Header = language, IsCheckable = true, IsChecked = language == TargetLanguage };
             item.Click += (_, _) =>

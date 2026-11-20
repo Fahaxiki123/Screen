@@ -8,18 +8,18 @@ namespace Screen.App;
 /// </summary>
 internal static class SimpleLogger
 {
-    private static readonly string LogDirectory = Path.Combine(
+    private static readonly string _logDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Screen",
         "logs");
 
-    private static readonly object Lock = new();
+    private static readonly object _lock = new();
 
     static SimpleLogger()
     {
         try
         {
-            Directory.CreateDirectory(LogDirectory);
+            Directory.CreateDirectory(_logDirectory);
             CleanOldLogs();
         }
         catch
@@ -48,12 +48,12 @@ internal static class SimpleLogger
         try
         {
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-            var logFile = Path.Combine(LogDirectory, $"screen-{DateTime.Now:yyyyMMdd}.log");
+            var logFile = Path.Combine(_logDirectory, $"screen-{DateTime.Now:yyyyMMdd}.log");
             var entry = exception is null
                 ? $"[{timestamp}] [{level}] {message}\n"
                 : $"[{timestamp}] [{level}] {message}\n{exception}\n";
 
-            lock (Lock)
+            lock (_lock)
             {
                 File.AppendAllText(logFile, entry);
             }
@@ -69,7 +69,7 @@ internal static class SimpleLogger
         try
         {
             var cutoff = DateTime.Now.AddDays(-7);
-            foreach (var file in Directory.GetFiles(LogDirectory, "screen-*.log"))
+            foreach (var file in Directory.GetFiles(_logDirectory, "screen-*.log"))
             {
                 if (File.GetLastWriteTime(file) < cutoff)
                 {

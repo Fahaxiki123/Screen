@@ -10,7 +10,7 @@ namespace Screen.App;
 
 internal static class InPlaceTranslationRenderer
 {
-    private static readonly Typeface TranslationTypeface = new(new FontFamily("Segoe UI, Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    private static readonly Typeface _translationTypeface = new(new FontFamily("Segoe UI, Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
 
     public static PixelBuffer Render(PixelBuffer source, IReadOnlyList<TranslatedRegion> regions)
     {
@@ -92,7 +92,7 @@ internal static class InPlaceTranslationRenderer
 
     private static FormattedText CreateText(string text, double width, double fontSize, Brush foreground) => new(
         text, CultureInfo.CurrentUICulture, IsRightToLeft(text) ? FlowDirection.RightToLeft : FlowDirection.LeftToRight,
-        TranslationTypeface, fontSize, foreground, 1.0)
+        _translationTypeface, fontSize, foreground, 1.0)
     {
         MaxTextWidth = width,
         Trimming = TextTrimming.None

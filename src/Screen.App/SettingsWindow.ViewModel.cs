@@ -559,14 +559,14 @@ internal sealed partial class SettingsViewModel : INotifyPropertyChanged, IDispo
     public static string[] SourceLanguageNames() =>
         ["自动识别", "简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch"];
 
-    private static readonly string[] SourceLanguageCodes = ["auto", "zh-CN", "zh-TW", "en", "ja", "ko", "fr", "es", "pt", "de"];
+    private static readonly string[] _sourceLanguageCodes = ["auto", "zh-CN", "zh-TW", "en", "ja", "ko", "fr", "es", "pt", "de"];
 
     public int SourceLanguageIndex
     {
-        get => Math.Max(0, Array.IndexOf(SourceLanguageCodes, _settings.Translation.SourceLanguage));
+        get => Math.Max(0, Array.IndexOf(_sourceLanguageCodes, _settings.Translation.SourceLanguage));
         set
         {
-            var code = SourceLanguageCodes[Math.Clamp(value, 0, SourceLanguageCodes.Length - 1)];
+            var code = _sourceLanguageCodes[Math.Clamp(value, 0, _sourceLanguageCodes.Length - 1)];
             if (_settings.Translation.SourceLanguage == code)
                 return;
             _settings.Translation = _settings.Translation with { SourceLanguage = code };

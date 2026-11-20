@@ -20,7 +20,7 @@ internal sealed partial class CaptureSurface
         _magnifierSampleIndex = Math.Clamp(
             _magnifierSampleIndex + (e.Delta > 0 ? -1 : 1),
             0,
-            MagnifierSamples.Length - 1);
+            _magnifierSamples.Length - 1);
         InvalidateVisual();
         e.Handled = true;
     }

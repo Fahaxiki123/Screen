@@ -55,8 +55,8 @@ internal static class FfmpegEncoderProbe
     internal const int MinHardwareHeight = 128;
     internal const int MaxHardwareDimension = 4096;
 
-    private static readonly string[] HardwareCandidates = ["h264_nvenc", "h264_qsv", "h264_amf"];
-    private static readonly ConcurrentDictionary<string, string> CachedEncoders = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly string[] _hardwareCandidates = ["h264_nvenc", "h264_qsv", "h264_amf"];
+    private static readonly ConcurrentDictionary<string, string> _cachedEncoders = new(StringComparer.OrdinalIgnoreCase);
 
     public static bool SupportsHardwareDimensions(int width, int height) =>
         width >= MinHardwareWidth
@@ -73,7 +73,7 @@ internal static class FfmpegEncoderProbe
         var fullPath = Path.GetFullPath(ffmpegPath);
         var stamp = File.Exists(fullPath) ? File.GetLastWriteTimeUtc(fullPath).Ticks : 0;
         var cacheKey = $"{fullPath}|{stamp}";
-        return CachedEncoders.GetOrAdd(cacheKey, _ => ProbePreferredEncoder(fullPath));
+        return _cachedEncoders.GetOrAdd(cacheKey, _ => ProbePreferredEncoder(fullPath));
     }
 
     internal static IReadOnlyList<string> BuildEncoderArguments(string encoderName, int bitrate)
@@ -92,7 +92,7 @@ internal static class FfmpegEncoderProbe
     internal static string ProbePreferredEncoder(string ffmpegPath, Func<string, bool>? tryProbe = null)
     {
         var probe = tryProbe ?? (candidate => TryEncodeSingleFrame(ffmpegPath, candidate));
-        foreach (var candidate in HardwareCandidates)
+        foreach (var candidate in _hardwareCandidates)
         {
             try
             {

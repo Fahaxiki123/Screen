@@ -1,8 +1,8 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -36,7 +36,7 @@ internal sealed partial class RecordingPreviewWindow : Window
     private bool _tickerUpdating;
     private bool _loaded;
 
-    private static readonly double[] PlaybackSpeeds = [0.5, 1.0, 1.5, 2.0];
+    private static readonly double[] _playbackSpeeds = [0.5, 1.0, 1.5, 2.0];
     private double _volume = 1.0;
     private bool _muted;
     private double _speed = 1.0;
@@ -55,12 +55,12 @@ internal sealed partial class RecordingPreviewWindow : Window
         InitializeComponent();
         Width = Math.Min(1040, SystemParameters.WorkArea.Width * 0.8);
         Height = Math.Min(700, SystemParameters.WorkArea.Height * 0.85);
-        _speedChoices.ItemsSource = PlaybackSpeeds.Select(speed => speed.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "×").ToArray();
+        _speedChoices.ItemsSource = _playbackSpeeds.Select(speed => speed.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "×").ToArray();
         _speedChoices.SelectedIndex = 1;
         _speedChoices.SelectionChanged += (_, _) =>
         {
             if (_speedChoices.SelectedIndex >= 0)
-                SetSpeed(PlaybackSpeeds[_speedChoices.SelectedIndex]);
+                SetSpeed(_playbackSpeeds[_speedChoices.SelectedIndex]);
         };
         _volumeSlider.ValueChanged += (_, _) =>
         {
@@ -233,10 +233,7 @@ internal sealed partial class RecordingPreviewWindow : Window
     {
         try
         {
-            if (_waveOut is not null)
-            {
-                _waveOut.Volume = (float)(_muted ? 0 : _volume);
-            }
+            _waveOut?.Volume = (float)(_muted ? 0 : _volume);
         }
         catch
         {
@@ -289,15 +286,15 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             return;
         }
-        var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        var monitorInfo = new MONITORINFO { CbSize = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref monitorInfo))
         {
             return;
         }
-        info.ptMaxPosition.X = monitorInfo.rcWork.Left - monitorInfo.rcMonitor.Left;
-        info.ptMaxPosition.Y = monitorInfo.rcWork.Top - monitorInfo.rcMonitor.Top;
-        info.ptMaxSize.X = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
-        info.ptMaxSize.Y = monitorInfo.rcWork.Bottom - monitorInfo.rcWork.Top;
+        info.PtMaxPosition.X = monitorInfo.RcWork.Left - monitorInfo.RcMonitor.Left;
+        info.PtMaxPosition.Y = monitorInfo.RcWork.Top - monitorInfo.RcMonitor.Top;
+        info.PtMaxSize.X = monitorInfo.RcWork.Right - monitorInfo.RcWork.Left;
+        info.PtMaxSize.Y = monitorInfo.RcWork.Bottom - monitorInfo.RcWork.Top;
         Marshal.StructureToPtr(info, lParam, true);
     }
 
@@ -311,11 +308,11 @@ internal sealed partial class RecordingPreviewWindow : Window
     [StructLayout(LayoutKind.Sequential)]
     private struct MINMAXINFO
     {
-        public POINT ptReserved;
-        public POINT ptMaxSize;
-        public POINT ptMaxPosition;
-        public POINT ptMinTrackSize;
-        public POINT ptMaxTrackSize;
+        public POINT PtReserved;
+        public POINT PtMaxSize;
+        public POINT PtMaxPosition;
+        public POINT PtMinTrackSize;
+        public POINT PtMaxTrackSize;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -330,10 +327,10 @@ internal sealed partial class RecordingPreviewWindow : Window
     [StructLayout(LayoutKind.Sequential)]
     private struct MONITORINFO
     {
-        public int cbSize;
-        public RECT rcMonitor;
-        public RECT rcWork;
-        public int dwFlags;
+        public int CbSize;
+        public RECT RcMonitor;
+        public RECT RcWork;
+        public int DwFlags;
     }
 
     [DllImport("user32.dll")]

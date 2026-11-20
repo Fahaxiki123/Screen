@@ -13,7 +13,7 @@ namespace Screen.App;
 /// </summary>
 internal sealed class LucideIconElement : FrameworkElement
 {
-    private static readonly ConcurrentDictionary<LucideIconKind, IReadOnlyList<IconPrimitive>> Cache = new();
+    private static readonly ConcurrentDictionary<LucideIconKind, IReadOnlyList<IconPrimitive>> _cache = new();
 
     public static readonly DependencyProperty KindProperty = DependencyProperty.Register(
         nameof(Kind),
@@ -84,7 +84,7 @@ internal sealed class LucideIconElement : FrameworkElement
         };
         drawingContext.PushTransform(new TranslateTransform(offsetX, offsetY));
         drawingContext.PushTransform(new ScaleTransform(scale, scale));
-        foreach (var primitive in Cache.GetOrAdd(Kind, ParseIcon))
+        foreach (var primitive in _cache.GetOrAdd(Kind, ParseIcon))
         {
             primitive.Draw(drawingContext, pen, Fill);
         }

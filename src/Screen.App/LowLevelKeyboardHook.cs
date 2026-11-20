@@ -6,7 +6,7 @@ namespace Screen.App;
 
 internal sealed class LowLevelKeyboardHook : IDisposable
 {
-    private static readonly Func<int, bool> IsKeyDown = key => NativeMethods.GetAsyncKeyState(key) < 0;
+    private static readonly Func<int, bool> _isKeyDown = key => NativeMethods.GetAsyncKeyState(key) < 0;
     private readonly NativeMethods.KeyboardHookProc _callback;
     private readonly nint _targetWindow;
     private readonly bool _requireForegroundWindow;
@@ -63,7 +63,7 @@ internal sealed class LowLevelKeyboardHook : IDisposable
         }
 
         var flags = Marshal.ReadInt32(lParam, 8);
-        if (!IsPlainKeyPress(flags, IsKeyDown)
+        if (!IsPlainKeyPress(flags, _isKeyDown)
             || (_requireForegroundWindow
                 && (_targetWindow == 0 || NativeMethods.GetForegroundWindow() != _targetWindow)))
         {

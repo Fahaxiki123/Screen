@@ -11,7 +11,7 @@ namespace Screen.Core;
 /// </summary>
 internal static partial class TranslationTextProtector
 {
-    private static readonly Regex ProtectedValuePattern = new(
+    private static readonly Regex _protectedValuePattern = new(
         string.Join('|',
             @"(?i:https?)://[^\s<>\[\]{}]+",
             @"(?i:www\.)[^\s<>\[\]{}]+",
@@ -27,11 +27,11 @@ internal static partial class TranslationTextProtector
             @"\b[A-Z][A-Z0-9]*[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*\b"),
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex SuspectedDollarPattern = new(
+    private static readonly Regex _suspectedDollarPattern = new(
         @"(?<![\p{L}\p{N}_])S(?=\s*\d+(?:\.\d+))",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex PriceContextPattern = new(
+    private static readonly Regex _priceContextPattern = new(
         @"\b(price|pricing|cost|input|output|peak|token|million|billion|usd|dollar)s?\b",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
@@ -42,20 +42,20 @@ internal static partial class TranslationTextProtector
             return text;
         }
 
-        var suspectedDollars = SuspectedDollarPattern.Matches(text);
+        var suspectedDollars = _suspectedDollarPattern.Matches(text);
         var hasPriceEvidence = text.Contains('$')
                                || text.Contains('＄')
                                || suspectedDollars.Count >= 2
-                               || PriceContextPattern.IsMatch(text);
+                               || _priceContextPattern.IsMatch(text);
         return hasPriceEvidence
-            ? SuspectedDollarPattern.Replace(text, "$").Replace('＄', '$')
+            ? _suspectedDollarPattern.Replace(text, "$").Replace('＄', '$')
             : text.Replace('＄', '$');
     }
 
     internal static ProtectedTranslationText Protect(string text)
     {
         var values = new List<ProtectedTranslationValue>();
-        var protectedText = ProtectedValuePattern.Replace(text, match =>
+        var protectedText = _protectedValuePattern.Replace(text, match =>
         {
             var marker = $"QZXKEEP{ToLetters(values.Count)}WZXQ";
             values.Add(new ProtectedTranslationValue(marker, match.Value));
@@ -83,7 +83,7 @@ internal sealed class ProtectedTranslationText(
     string text,
     IReadOnlyList<ProtectedTranslationValue> values)
 {
-    private static readonly Regex AlteredMarkerPattern = new(
+    private static readonly Regex _alteredMarkerPattern = new(
         @"Q\s*Z\s*X\s*K\s*E\s*E\s*P+[A-Z\s]{0,16}?W\s*Z\s*X\s*Q",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
@@ -128,7 +128,7 @@ internal sealed class ProtectedTranslationText(
             // next marker-shaped token that is not reserved for another value;
             // markers whose original was dropped by the engine stay dropped —
             // misplacing them onto another value's slot is worse.
-            foreach (Match candidate in AlteredMarkerPattern.Matches(restored))
+            foreach (Match candidate in _alteredMarkerPattern.Matches(restored))
             {
                 if (reserved.Any(pattern => pattern.IsMatch(candidate.Value)))
                 {
@@ -138,6 +138,6 @@ internal sealed class ProtectedTranslationText(
                 break;
             }
         }
-        return AlteredMarkerPattern.Replace(restored, string.Empty);
+        return _alteredMarkerPattern.Replace(restored, string.Empty);
     }
 }

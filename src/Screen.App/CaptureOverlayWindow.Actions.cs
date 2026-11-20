@@ -136,7 +136,7 @@ internal sealed partial class CaptureOverlayWindow
         _surface.InvalidateVisual();
     }
 
-    private async void ShowOcr(object sender, RoutedEventArgs e)
+    private async void ShowOcrAsync(object sender, RoutedEventArgs e)
     {
         if (!_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
         {
@@ -170,7 +170,7 @@ internal sealed partial class CaptureOverlayWindow
         _translationPopup.IsOpen = !_translationPopup.IsOpen;
     }
 
-    private async void TranslateWithCurrentLanguage(object sender, RoutedEventArgs e)
+    private async void TranslateWithCurrentLanguageAsync(object sender, RoutedEventArgs e)
     {
         if (!_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
         {
@@ -499,14 +499,14 @@ internal sealed partial class CaptureOverlayWindow
         _recordingMode = true;
         _recordingPanel = BuildRecordingPanel();
         _root.Children.Add(_recordingPanel);
-        RecordingRegionConfirmed += StartConfirmedRegion;
+        RecordingRegionConfirmed += StartConfirmedRegionAsync;
         PositionFloatingPanels();
         Motion.PopIn(_recordingPanel);
     }
 
-    private async void StartConfirmedRegion(object? sender, RecordingSelection selected)
+    private async void StartConfirmedRegionAsync(object? sender, RecordingSelection selected)
     {
-        RecordingRegionConfirmed -= StartConfirmedRegion;
+        RecordingRegionConfirmed -= StartConfirmedRegionAsync;
         if (Application.Current is not App { Host: { } host })
         {
             Close();

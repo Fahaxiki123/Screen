@@ -1,6 +1,8 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+    <!-- Preserve the original ARGB of a newly constructed annotation surface. -->
+    <sys:UInt32 x:Key="Capture.DefaultAnnotationArgb">0xFFFF3B30</sys:UInt32>
     <SolidColorBrush x:Key="Capture.Dim.Before" Color="#24000000"/>
     <SolidColorBrush x:Key="Capture.Dim.After" Color="#6B000000"/>
     <Pen x:Key="Capture.Selection" Brush="#F2FFFFFF" Thickness="1"/>

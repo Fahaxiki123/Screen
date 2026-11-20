@@ -251,7 +251,7 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task TranslationStreamParserCombinesIncrementalContent()
+    public async Task TranslationStreamParserCombinesIncrementalContentAsync()
     {
         const string stream = "event: ping\ndata: heartbeat\n\n"
                               + "data: {\"choices\":[{\"delta\":{\"content\":\"你\"}}]}\n\n"
@@ -290,7 +290,7 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task NaturalTranslationUsesContextAwarePromptAndStreamsResult()
+    public async Task NaturalTranslationUsesContextAwarePromptAndStreamsResultAsync()
     {
         string? requestBody = null;
         using var client = new HttpClient(new StubHttpHandler(async (request, cancellationToken) =>
@@ -331,7 +331,7 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task NaturalTranslationFallsBackToTencentWhenAiServiceFails()
+    public async Task NaturalTranslationFallsBackToTencentWhenAiServiceFailsAsync()
     {
         var requests = 0;
         using var client = new HttpClient(new StubHttpHandler((request, _) =>
@@ -373,7 +373,7 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task NaturalTranslationRetriesTransientOverloadThenSucceeds()
+    public async Task NaturalTranslationRetriesTransientOverloadThenSucceedsAsync()
     {
         var requests = 0;
         using var client = new HttpClient(new StubHttpHandler((request, _) =>
@@ -415,7 +415,7 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task NaturalTranslationSwitchesToFastTencentWhenAiIsSlow()
+    public async Task NaturalTranslationSwitchesToFastTencentWhenAiIsSlowAsync()
     {
         using var client = new HttpClient(new StubHttpHandler(async (request, cancellationToken) =>
         {
@@ -461,7 +461,7 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task NaturalTranslationRacingReturnsTheFastestPlausibleResult()
+    public async Task NaturalTranslationRacingReturnsTheFastestPlausibleResultAsync()
     {
         var fastText = string.Concat(Enumerable.Repeat("快速译文", 8));
         var slowText = string.Concat(Enumerable.Repeat("慢速译文", 20));
@@ -878,7 +878,7 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task MissingTencentCredentialsFallsBackToMyMemory()
+    public async Task MissingTencentCredentialsFallsBackToMyMemoryAsync()
     {
         using var client = new HttpClient(new StubHttpHandler((request, _) =>
         {

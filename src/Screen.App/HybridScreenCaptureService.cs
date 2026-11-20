@@ -5,7 +5,7 @@ namespace Screen.App;
 
 internal sealed class HybridScreenCaptureService : IScreenCaptureService
 {
-    private static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _defaultIdleTimeout = TimeSpan.FromSeconds(60);
 
     private readonly IDisposable _dxgi;
     private readonly Func<PixelPoint, CancellationToken, Task<CaptureFrame?>> _capturePrimary;
@@ -18,7 +18,7 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
     private int _disposed;
 
     public HybridScreenCaptureService()
-        : this(DefaultIdleTimeout)
+        : this(_defaultIdleTimeout)
     {
     }
 

@@ -104,9 +104,9 @@ internal sealed partial class CaptureSurface : FrameworkElement
     }
 
     // Preserve the original wheel stops (1x–38x); the new lens is a 128-DIP circle.
-    private static readonly int[] MagnifierSamples =
+    private static readonly int[] _magnifierSamples =
         [6, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 29, 33, 39, 45, 53, 61, 71, 83, 97, 115, 135, 159, 187, 230];
-    internal double Magnification => 230d / MagnifierSamples[_magnifierSampleIndex];
+    internal double Magnification => 230d / _magnifierSamples[_magnifierSampleIndex];
 
     public CaptureSurface(
         CaptureFrame frame,
@@ -122,8 +122,10 @@ internal sealed partial class CaptureSurface : FrameworkElement
         var resources = themeResources ?? Application.Current.Resources;
         _accentBrush = (Brush)resources["Brush.Accent"];
         // Isolated render workers deliberately supply only the shared compatibility keys.
-        _chrome = new CaptureChrome(resources.Contains("Capture.Dim.Before") ? resources :
-            new ResourceDictionary { Source = new Uri("/Screen;component/Themes/CaptureSurface.xaml", UriKind.Relative) });
+        var chromeResources = resources.Contains("Capture.Dim.Before") ? resources :
+            new ResourceDictionary { Source = new Uri("/Screen;component/Themes/CaptureSurface.xaml", UriKind.Relative) };
+        _chrome = new CaptureChrome(chromeResources);
+        CurrentStyle = new AnnotationStyle((uint)chromeResources["Capture.DefaultAnnotationArgb"], 3, 24);
         Focusable = true;
         Cursor = Cursors.Cross;
         SnapsToDevicePixels = true;
@@ -159,7 +161,7 @@ internal sealed partial class CaptureSurface : FrameworkElement
         }
     }
 
-    public AnnotationStyle CurrentStyle { get; set; } = new(0xFFFF3B30, 3, 24);
+    public AnnotationStyle CurrentStyle { get; set; }
     public MosaicDrawMode MosaicMode
     {
         get => _mosaicMode;

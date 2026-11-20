@@ -8,7 +8,7 @@ namespace Screen.App;
 internal static class TranslationCredentialStore
 {
     private const string UnboundScope = "Screen.Endpoint.Unbound";
-    private static readonly object Gate = new();
+    private static readonly object _gate = new();
 
     public static string? EndpointScope(string? address)
     {
@@ -29,7 +29,7 @@ internal static class TranslationCredentialStore
 
     public static void BindLegacyKeys(ICredentialStore store, TranslationProfile savedProfile)
     {
-        lock (Gate)
+        lock (_gate)
         {
             BindLegacyKey(store, TranslationProfile.ApiKeyCredentialName, savedProfile.BaseAddress, savedProfile.CredentialName);
             BindLegacyKey(store, TranslationProfile.RacingApiKeyCredentialName, savedProfile.RacingBaseAddress, savedProfile.RacingCredentialName);
@@ -38,7 +38,7 @@ internal static class TranslationCredentialStore
 
     public static string? ReadKey(ICredentialStore store, string slot, string? address)
     {
-        lock (Gate)
+        lock (_gate)
         {
             try
             {
@@ -56,7 +56,7 @@ internal static class TranslationCredentialStore
 
     private static string? ReadSavedKey(ICredentialStore store, string slot, string? address, string? savedLegacyName)
     {
-        lock (Gate)
+        lock (_gate)
         {
             try
             {
@@ -99,7 +99,7 @@ internal static class TranslationCredentialStore
 
     public static void SaveKey(ICredentialStore store, string slot, string secret, string scope)
     {
-        lock (Gate)
+        lock (_gate)
         {
             if (!string.IsNullOrWhiteSpace(secret))
             {

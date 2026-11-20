@@ -6,9 +6,9 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Interop;
-using System.Windows.Shell;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Shell;
 using Lucide.NET;
 using Screen.Core;
 
@@ -90,7 +90,7 @@ public partial class SettingsWindow : Window
 
     private sealed record PageInfo(string Id, string Title, string Summary, LucideIconKind Icon, string Tile);
 
-    private static readonly PageInfo[] PageDefinitions =
+    private static readonly PageInfo[] _pageDefinitions =
     [
         new("general", "通用", "启动方式、快捷键和存储位置。", LucideIconKind.Settings2, "Tile.Gray"),
         new("recording", "录屏", "录下屏幕的一块区域，保存成视频或 GIF。", LucideIconKind.Video, "Tile.Red"),
@@ -123,7 +123,7 @@ public partial class SettingsWindow : Window
 
     private void BuildNavigation()
     {
-        foreach (var page in PageDefinitions)
+        foreach (var page in _pageDefinitions)
         {
             var icon = new LucideIconElement { Kind = page.Icon, Width = 15, Height = 15, StrokeThickness = 1.7 };
             icon.SetResourceReference(LucideIconElement.StrokeProperty, "Brush.White");
@@ -142,7 +142,7 @@ public partial class SettingsWindow : Window
 
     private void ShowPage(string id)
     {
-        var info = PageDefinitions.First(page => page.Id == id);
+        var info = _pageDefinitions.First(page => page.Id == id);
         foreach (var (key, button) in _navigation)
         {
             var selected = key == id;

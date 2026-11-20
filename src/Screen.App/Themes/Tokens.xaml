@@ -29,7 +29,6 @@
     <Color x:Key="Color.EdgeDark">#80000000</Color>
     <Color x:Key="Color.AccentText">#6CB4FF</Color>
     <Color x:Key="Color.AccentSubtleDark">#6B0A84FF</Color>
-    <Color x:Key="Color.AccentSubtleDarkHover">#800A84FF</Color>
     <Color x:Key="Color.AccentSubtle">#260A84FF</Color>
     <Color x:Key="Color.AccentSubtleHover">#380A84FF</Color>
     <Color x:Key="Color.White">#FFFFFF</Color>
@@ -52,13 +51,6 @@
     <Color x:Key="Color.Neutral700">#D1D1D6</Color>
     <Color x:Key="Color.Neutral800">#E5E5EA</Color>
     <Color x:Key="Color.Neutral900">#F5F5F7</Color>
-    <Color x:Key="Color.NightBlue">#1E1E20</Color>
-    <Color x:Key="Color.MoonBlue">#F5F5F7</Color>
-    <Color x:Key="Color.AccentHover">#6CB4FF</Color>
-    <Color x:Key="Color.AccentOnDark">#FFFFFF</Color>
-    <Color x:Key="Color.SuccessOnDark">#32D74B</Color>
-    <Color x:Key="Color.Danger">#FF453A</Color>
-    <Color x:Key="Color.DangerOnDark">#FF6259</Color>
 
     <SolidColorBrush x:Key="Brush.Accent" Color="{StaticResource Color.Accent}" />
     <SolidColorBrush x:Key="Brush.AccentTop" Color="{StaticResource Color.AccentTop}" />
@@ -87,7 +79,6 @@
     <SolidColorBrush x:Key="Brush.EdgeDark" Color="{StaticResource Color.EdgeDark}" />
     <SolidColorBrush x:Key="Brush.AccentText" Color="{StaticResource Color.AccentText}" />
     <SolidColorBrush x:Key="Brush.AccentSubtleDark" Color="{StaticResource Color.AccentSubtleDark}" />
-    <SolidColorBrush x:Key="Brush.AccentSubtleDarkHover" Color="{StaticResource Color.AccentSubtleDarkHover}" />
     <SolidColorBrush x:Key="Brush.AccentSubtle" Color="{StaticResource Color.AccentSubtle}" />
     <SolidColorBrush x:Key="Brush.AccentSubtleHover" Color="{StaticResource Color.AccentSubtleHover}" />
     <SolidColorBrush x:Key="Brush.White" Color="{StaticResource Color.White}" />
@@ -99,15 +90,10 @@
     <SolidColorBrush x:Key="Brush.RecordGlassBottom" Color="{StaticResource Color.RecordGlassBottom}" />
     <SolidColorBrush x:Key="Brush.Dim" Color="{StaticResource Color.Dim}" />
     <SolidColorBrush x:Key="Brush.RimBlue" Color="{StaticResource Color.RimBlue}" />
-    <SolidColorBrush x:Key="Brush.Neutral50" Color="{StaticResource Color.Neutral50}" />
     <SolidColorBrush x:Key="Brush.Neutral100" Color="{StaticResource Color.Neutral100}" />
-    <SolidColorBrush x:Key="Brush.Neutral150" Color="{StaticResource Color.Neutral150}" />
-    <SolidColorBrush x:Key="Brush.Neutral200" Color="{StaticResource Color.Neutral200}" />
     <SolidColorBrush x:Key="Brush.Neutral300" Color="{StaticResource Color.Neutral300}" />
     <SolidColorBrush x:Key="Brush.Neutral400" Color="{StaticResource Color.Neutral400}" />
     <SolidColorBrush x:Key="Brush.Neutral500" Color="{StaticResource Color.Neutral500}" />
-    <SolidColorBrush x:Key="Brush.Neutral600" Color="{StaticResource Color.Neutral600}" />
-    <SolidColorBrush x:Key="Brush.Neutral700" Color="{StaticResource Color.Neutral700}" />
     <SolidColorBrush x:Key="Brush.Neutral800" Color="{StaticResource Color.Neutral800}" />
     <SolidColorBrush x:Key="Brush.Neutral900" Color="{StaticResource Color.Neutral900}" />
     <LinearGradientBrush x:Key="Brush.GlassTint" StartPoint="0,0" EndPoint="0,1">
@@ -126,50 +112,25 @@
         <GradientStop Color="{StaticResource Color.AccentTop}" Offset="0" />
         <GradientStop Color="{StaticResource Color.AccentBottom}" Offset="1" />
     </LinearGradientBrush>
-    <LinearGradientBrush x:Key="Brush.PrimaryActionHover" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="{StaticResource Color.AccentText}" Offset="0" />
-        <GradientStop Color="{StaticResource Color.Accent}" Offset="1" />
-    </LinearGradientBrush>
     <LinearGradientBrush x:Key="Brush.RubySolid" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="{StaticResource Color.RecordTop}" Offset="0" />
         <GradientStop Color="{StaticResource Color.RecordBottom}" Offset="1" />
     </LinearGradientBrush>
-    <LinearGradientBrush x:Key="Brush.RubyGlass" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="{StaticResource Color.RecordGlassTop}" Offset="0" />
-        <GradientStop Color="{StaticResource Color.RecordGlassBottom}" Offset="1" />
-    </LinearGradientBrush>
 
     <!-- Compatibility keys: keep callers on the same semantic palette. -->
-    <SolidColorBrush x:Key="Brush.WindowBackground" Color="{StaticResource Color.Window}" />
     <SolidColorBrush x:Key="Brush.Surface" Color="{StaticResource Color.Neutral50}" />
-    <SolidColorBrush x:Key="Brush.SurfaceSunken" Color="{StaticResource Color.Sunken}" />
     <SolidColorBrush x:Key="Brush.SurfaceRaised" Color="{StaticResource Color.Neutral100}" />
     <SolidColorBrush x:Key="Brush.SurfaceHover" Color="{StaticResource Color.Hover}" />
     <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.EdgeHighlight}" />
-    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="{StaticResource Color.Separator}" />
-    <SolidColorBrush x:Key="Brush.OnAccent" Color="{StaticResource Color.White}" />
     <SolidColorBrush x:Key="Brush.WindowBackdrop" Color="{StaticResource Color.Window}" />
-    <SolidColorBrush x:Key="Brush.BrandGradient" Color="{StaticResource Color.Window}" />
-    <SolidColorBrush x:Key="Brush.ChromeGradient" Color="{StaticResource Color.GlassSolid}" />
-    <SolidColorBrush x:Key="Brush.AuroraCard" Color="{StaticResource Color.DarkGlassSolid}" />
-    <SolidColorBrush x:Key="Brush.AccentSubtleDarkBorder" Color="{StaticResource Color.RimBlue}" />
-    <SolidColorBrush x:Key="Brush.RubyBorder" Color="{StaticResource Color.RecordBorder}" />
-    <SolidColorBrush x:Key="Brush.RubyText" Color="{StaticResource Color.Label}" />
     <SolidColorBrush x:Key="Brush.TextPrimary" Color="{StaticResource Color.Label}" />
     <SolidColorBrush x:Key="Brush.TextSecondary" Color="{StaticResource Color.LabelSecondary}" />
-    <SolidColorBrush x:Key="Brush.TextTertiary" Color="{StaticResource Color.LabelTertiary}" />
     <SolidColorBrush x:Key="Brush.OverlayBase" Color="{StaticResource Color.GlassSolid}" />
-    <SolidColorBrush x:Key="Brush.OverlayElevated" Color="{StaticResource Color.DarkGlassSolid}" />
-    <SolidColorBrush x:Key="Brush.OverlayHover" Color="{StaticResource Color.Hover}" />
-    <SolidColorBrush x:Key="Brush.OverlayPressed" Color="{StaticResource Color.Pressed}" />
     <SolidColorBrush x:Key="Brush.OverlayBorder" Color="{StaticResource Color.EdgeHighlight}" />
     <SolidColorBrush x:Key="Brush.OverlayText" Color="{StaticResource Color.Label}" />
     <SolidColorBrush x:Key="Brush.OverlayTextDim" Color="{StaticResource Color.LabelSecondary}" />
     <SolidColorBrush x:Key="Brush.OverlayIcon" Color="{StaticResource Color.Label}" />
     <SolidColorBrush x:Key="Brush.AccentHover" Color="{StaticResource Color.AccentText}" />
-    <SolidColorBrush x:Key="Brush.AccentOnDark" Color="{StaticResource Color.White}" />
-    <SolidColorBrush x:Key="Brush.SuccessOnDark" Color="{StaticResource Color.Success}" />
-    <SolidColorBrush x:Key="Brush.Danger" Color="{StaticResource Color.Record}" />
     <SolidColorBrush x:Key="Brush.DangerOnDark" Color="{StaticResource Color.RecordTop}" />
 
     <FontFamily x:Key="FontFamily.Body">Segoe UI Variable Text, Microsoft YaHei UI</FontFamily>
@@ -179,7 +140,6 @@
     <sys:Double x:Key="Font.Body">13</sys:Double>
     <sys:Double x:Key="Font.Title">15</sys:Double>
     <sys:Double x:Key="Font.Display">20</sys:Double>
-    <sys:Double x:Key="Font.Subtitle">13</sys:Double>
 
     <CornerRadius x:Key="Radius.Key">5</CornerRadius>
     <CornerRadius x:Key="Radius.Control">6</CornerRadius>
@@ -187,15 +147,6 @@
     <CornerRadius x:Key="Radius.Menu">10</CornerRadius>
     <CornerRadius x:Key="Radius.Bar">12</CornerRadius>
     <CornerRadius x:Key="Radius.Card">14</CornerRadius>
-    <CornerRadius x:Key="Radius.Small">5</CornerRadius>
-    <CornerRadius x:Key="Radius.Medium">8</CornerRadius>
-    <CornerRadius x:Key="Radius.Large">12</CornerRadius>
-    <CornerRadius x:Key="Radius.SubCard">12</CornerRadius>
-    <CornerRadius x:Key="Radius.XLarge">14</CornerRadius>
-    <CornerRadius x:Key="Radius.Pill">8</CornerRadius>
 
     <DropShadowEffect x:Key="Shadow.Glass" BlurRadius="28" ShadowDepth="8" Direction="270" Opacity="0.4" Color="{StaticResource Color.Black}" />
-    <DropShadowEffect x:Key="Shadow.Hover" BlurRadius="12" ShadowDepth="2" Opacity="0.28" Color="{StaticResource Color.Black}" />
-    <DropShadowEffect x:Key="Shadow.Floating" BlurRadius="28" ShadowDepth="8" Direction="270" Opacity="0.4" Color="{StaticResource Color.Black}" />
-    <DropShadowEffect x:Key="Shadow.Modal" BlurRadius="28" ShadowDepth="8" Direction="270" Opacity="0.4" Color="{StaticResource Color.Black}" />
 </ResourceDictionary>

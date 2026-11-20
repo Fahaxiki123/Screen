@@ -10,7 +10,7 @@ namespace Screen.App.Tests;
 public sealed class ScrollCaptureCompletionRegressionTests
 {
     [TestMethod]
-    public async Task RejectedViewportSettlesWithoutRepeatedAlignmentRetries()
+    public async Task RejectedViewportSettlesWithoutRepeatedAlignmentRetriesAsync()
     {
         var first = Document(128, 180);
         var replacement = new PixelBuffer((byte[])first.Pixels.Clone(), first.Width, first.Height, first.Stride);
@@ -46,7 +46,7 @@ public sealed class ScrollCaptureCompletionRegressionTests
     }
 
     [TestMethod]
-    public async Task PersistentAnimationStopsWaitingAndPreservesTheVerifiedPrefix()
+    public async Task PersistentAnimationStopsWaitingAndPreservesTheVerifiedPrefixAsync()
     {
         var first = Document(128, 180);
         var captures = 0;
@@ -74,7 +74,7 @@ public sealed class ScrollCaptureCompletionRegressionTests
     }
 
     [TestMethod]
-    public async Task FinishingAdmitsTheLastRealScrollBeforeSettling()
+    public async Task FinishingAdmitsTheLastRealScrollBeforeSettlingAsync()
     {
         const int viewportHeight = 240;
         var document = Document(192, 600);
@@ -143,7 +143,7 @@ public sealed class ScrollCaptureCompletionRegressionTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public async Task OutputFailureRetainsTheSameStitchedImageForRetry(bool firstAttemptSaves)
+    public async Task OutputFailureRetainsTheSameStitchedImageForRetryAsync(bool firstAttemptSaves)
     {
         var firstAction = firstAttemptSaves ? ScrollCaptureFinishAction.Save : ScrollCaptureFinishAction.Copy;
         var document = Document(128, 180);
@@ -195,7 +195,7 @@ public sealed class ScrollCaptureCompletionRegressionTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public async Task EnterRetryUsesTheLastFailedActionAndTheSameImage(bool saves)
+    public async Task EnterRetryUsesTheLastFailedActionAndTheSameImageAsync(bool saves)
     {
         var action = saves ? ScrollCaptureFinishAction.Save : ScrollCaptureFinishAction.Edit;
         var document = Document(128, 180);

@@ -18,8 +18,7 @@ internal static class Motion
 
     public static void SlideTo(FrameworkElement indicator, double x, double width, bool animate = true, int durationMs = 450)
     {
-        var translation = indicator.RenderTransform as TranslateTransform;
-        if (translation is null || translation.IsFrozen)
+        if (indicator.RenderTransform is not TranslateTransform translation || translation.IsFrozen)
             indicator.RenderTransform = translation = new TranslateTransform();
         var previousX = translation.X;
         var previousWidth = indicator.Width;

@@ -6,8 +6,8 @@ namespace Screen.App;
 /// </summary>
 internal static class RecordingTempCleaner
 {
-    private static readonly TimeSpan EmptyDirectoryRetention = TimeSpan.FromDays(14);
-    private static readonly TimeSpan ScratchRetention = TimeSpan.FromHours(1);
+    private static readonly TimeSpan _emptyDirectoryRetention = TimeSpan.FromDays(14);
+    private static readonly TimeSpan _scratchRetention = TimeSpan.FromHours(1);
 
     public static string DefaultRoot => Path.Combine(Path.GetTempPath(), "Screen.Recording");
 
@@ -45,7 +45,7 @@ internal static class RecordingTempCleaner
                        && name.StartsWith("gif-preview-", StringComparison.OrdinalIgnoreCase)
                        && name.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)
                        && Guid.TryParseExact(name.AsSpan("gif-preview-".Length, 32), "N", out _);
-            if (scratch && utcNow - File.GetLastWriteTimeUtc(file) > ScratchRetention && TryDelete(() => File.Delete(file)))
+            if (scratch && utcNow - File.GetLastWriteTimeUtc(file) > _scratchRetention && TryDelete(() => File.Delete(file)))
             {
                 removed++;
             }
@@ -65,7 +65,7 @@ internal static class RecordingTempCleaner
             }
             // Do not interpret an inaccessible or partially enumerated directory
             // as empty, and never traverse/delete nested links or media folders.
-            if (utcNow - info.LastWriteTimeUtc > EmptyDirectoryRetention
+            if (utcNow - info.LastWriteTimeUtc > _emptyDirectoryRetention
                 && TryDelete(() => Directory.Delete(directory, recursive: false)))
             {
                 removed++;

@@ -9,7 +9,7 @@ namespace Screen.App;
 
 internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
 {
-    private static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan _defaultIdleTimeout = TimeSpan.FromMinutes(5);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly TimeSpan _idleTimeout;
@@ -20,7 +20,7 @@ internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
     private int _disposed;
 
     public PaddleOcrEngine()
-        : this(DefaultIdleTimeout)
+        : this(_defaultIdleTimeout)
     {
     }
 

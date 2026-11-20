@@ -8,7 +8,7 @@ namespace Screen.App.Tests;
 public sealed class GlassBackdropProviderTests
 {
     [TestMethod]
-    public async Task PartialEdgeBlocksUseActualPixelCountsAndIgnoreRowPadding()
+    public async Task PartialEdgeBlocksUseActualPixelCountsAndIgnoreRowPaddingAsync()
     {
         const int stride = 24;
         var pixels = Enumerable.Repeat((byte)230, stride * 5).ToArray();
@@ -35,7 +35,7 @@ public sealed class GlassBackdropProviderTests
     [TestMethod]
     [DataRow(100, 120, 140, 84, 118, 152)]
     [DataRow(0, 100, 255, 0, 82, 255)]
-    public async Task SaturationUsesLuminanceWeightsAndClampsBgra(int b, int g, int r, int expectedB, int expectedG, int expectedR)
+    public async Task SaturationUsesLuminanceWeightsAndClampsBgraAsync(int b, int g, int r, int expectedB, int expectedG, int expectedR)
     {
         var pixels = new byte[] { (byte)b, (byte)g, (byte)r, 245 };
         var result = await GlassBackdropProvider.CreateAsync(Frame(pixels, 1, 1, 4), 2, CancellationToken.None);
@@ -43,7 +43,7 @@ public sealed class GlassBackdropProviderTests
     }
 
     [TestMethod]
-    public async Task ThreeSeparablePassesSpreadAnImpulseInBothDirectionsAtTheScaledRadius()
+    public async Task ThreeSeparablePassesSpreadAnImpulseInBothDirectionsAtTheScaledRadiusAsync()
     {
         const int size = 36;
         var pixels = new byte[size * size * 4];
@@ -73,7 +73,7 @@ public sealed class GlassBackdropProviderTests
     }
 
     [TestMethod]
-    public async Task CanceledRequestDoesNotProduceABitmap()
+    public async Task CanceledRequestDoesNotProduceABitmapAsync()
     {
         var frame = Frame(new byte[4], 1, 1, 4);
         using var cancel = new CancellationTokenSource();

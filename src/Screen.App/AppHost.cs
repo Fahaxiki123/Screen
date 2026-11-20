@@ -25,7 +25,7 @@ internal sealed class AppHost : IDisposable
     private SettingsWindow? _settingsWindow;
     private RecordingController? _recordingController;
     private bool _recordingFlowActive;
-    private bool _settingsLoadFailed;
+    private readonly bool _settingsLoadFailed;
     private bool _exiting;
 
     public AppHost()

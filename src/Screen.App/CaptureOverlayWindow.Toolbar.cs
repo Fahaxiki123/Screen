@@ -40,14 +40,14 @@ internal sealed partial class CaptureOverlayWindow
         var smart = HorizontalRow();
         toolbar.Children.Add(ToolbarGroup(smart));
         smart.Children.Add(HudAction(LucideIconKind.Pin, "贴到桌面", Pin));
-        translationButton = HudAction(LucideIconKind.Languages, "翻译", TranslateWithCurrentLanguage);
+        translationButton = HudAction(LucideIconKind.Languages, "翻译", TranslateWithCurrentLanguageAsync);
         smart.Children.Add(translationButton);
         translationDropDownButton = HudAction(LucideIconKind.ChevronDown, "翻译成…", ToggleTranslationMenu);
         translationDropDownButton.Width = 16;
         translationDropDownButton.Margin = new Thickness(-5, 0, 0, 0);
         ((LucideIconElement)translationDropDownButton.Content).Width = 12;
         smart.Children.Add(translationDropDownButton);
-        smart.Children.Add(_ocrButton = HudAction(LucideIconKind.ScanText, "提取文字", ShowOcr));
+        smart.Children.Add(_ocrButton = HudAction(LucideIconKind.ScanText, "提取文字", ShowOcrAsync));
         smart.Children.Add(HudAction(LucideIconKind.ScissorsLineDashed, "长截图", StartLongCapture, 90));
         smart.Children.Add(HudAction(LucideIconKind.Video, "录制此区域", StartRegionRecording));
 
@@ -168,8 +168,7 @@ internal sealed partial class CaptureOverlayWindow
         _redoButton.IsEnabled = _surface.CanRedo;
         HudActiveButton.SetIsActive(_ocrButton, _ocrCard.Visibility == Visibility.Visible);
         HudActiveButton.SetIsActive(_translationButton, _translationCard.Visibility == Visibility.Visible || _inPlaceStatusBar.Visibility == Visibility.Visible);
-        if (_nextNumberText is not null)
-            _nextNumberText.Text = _surface.NextNumber.ToString();
+        _nextNumberText?.Text = _surface.NextNumber.ToString();
     }
 
     private ContextMenu BuildTranslationPopup()

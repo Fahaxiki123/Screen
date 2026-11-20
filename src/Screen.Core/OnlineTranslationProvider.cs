@@ -528,7 +528,7 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
 /// </summary>
 internal static class TranslationHttp
 {
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _requestTimeout = TimeSpan.FromSeconds(30);
 
     internal static async Task<(int Status, string Reason, string Body)> SendAsync(
         HttpClient httpClient,
@@ -537,7 +537,7 @@ internal static class TranslationHttp
         CancellationToken cancellationToken)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(RequestTimeout);
+        deadline.CancelAfter(_requestTimeout);
         try
         {
             using var response = await httpClient.SendAsync(request, deadline.Token).ConfigureAwait(false);

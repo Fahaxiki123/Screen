@@ -12,7 +12,7 @@ namespace Screen.App;
 /// </summary>
 internal sealed class RecordingAudioTrack : IDisposable
 {
-    private static readonly byte[] ZeroChunk = new byte[16384];
+    private static readonly byte[] _zeroChunk = new byte[16384];
 
     private readonly IWaveIn _capture;
     private readonly Stream _stream;
@@ -108,8 +108,8 @@ internal sealed class RecordingAudioTrack : IDisposable
         var remainingBytes = frames * _blockAlign;
         while (remainingBytes > 0)
         {
-            var chunk = (int)Math.Min(remainingBytes, ZeroChunk.Length);
-            _stream.Write(ZeroChunk, 0, chunk);
+            var chunk = (int)Math.Min(remainingBytes, _zeroChunk.Length);
+            _stream.Write(_zeroChunk, 0, chunk);
             remainingBytes -= chunk;
         }
         _bytesWritten += frames * _blockAlign;
@@ -214,19 +214,19 @@ internal sealed class RecordingAudioTrack : IDisposable
         }
     }
 
-    private static readonly Guid SubtypeIeeeFloat = new("00000003-0000-0010-8000-00aa00389b71");
-    private static readonly Guid SubtypePcm = new("00000001-0000-0010-8000-00aa00389b71");
+    private static readonly Guid _subtypeIeeeFloat = new("00000003-0000-0010-8000-00aa00389b71");
+    private static readonly Guid _subtypePcm = new("00000001-0000-0010-8000-00aa00389b71");
 
     private static string? RawFormatFor(WaveFormat format)
     {
         var isFloat = format.Encoding == WaveFormatEncoding.IeeeFloat
-                      || (format is WaveFormatExtensible extensible && extensible.SubFormat == SubtypeIeeeFloat);
+                      || (format is WaveFormatExtensible extensible && extensible.SubFormat == _subtypeIeeeFloat);
         if (isFloat && format.BitsPerSample == 32)
         {
             return "f32le";
         }
         var isPcm = format.Encoding == WaveFormatEncoding.Pcm
-                    || (format is WaveFormatExtensible extensible2 && extensible2.SubFormat == SubtypePcm);
+                    || (format is WaveFormatExtensible extensible2 && extensible2.SubFormat == _subtypePcm);
         if (isPcm && format.BitsPerSample == 16)
         {
             return "s16le";

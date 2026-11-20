@@ -88,7 +88,7 @@ internal sealed partial class CaptureOverlayWindow : Window
         Cursor = Cursors.Cross;
 
         _root = new Canvas { ClipToBounds = true };
-        _root.SetValue(BackdropHostProperty, this);
+        _root.SetValue(_backdropHostProperty, this);
         Content = _root;
         _surface = new CaptureSurface(
             frame,
@@ -124,7 +124,7 @@ internal sealed partial class CaptureOverlayWindow : Window
         _root.Children.Add(_ocrCard);
         _ocrCard.DocumentRecognized += document => _surface.ShowOcrLines(document);
         _translationCard = new TranslationCard { Visibility = Visibility.Collapsed };
-        _translationCard.RetranslateRequested += (_, _) => TranslateWithCurrentLanguage(this, new RoutedEventArgs());
+        _translationCard.RetranslateRequested += (_, _) => TranslateWithCurrentLanguageAsync(this, new RoutedEventArgs());
         _translationCard.TargetLanguageChanged += async (_, language) =>
         {
             try
@@ -186,7 +186,7 @@ internal sealed partial class CaptureOverlayWindow : Window
             // windows would linger for the rest of the process lifetime.
             _scrollCapture?.Dispose();
         };
-        Loaded += PrepareGlassBackdrop;
+        Loaded += PrepareGlassBackdropAsync;
         LayoutUpdated += OnGlassLayoutUpdated;
     }
 

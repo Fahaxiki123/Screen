@@ -81,8 +81,8 @@
                                 FontSize="20" Style="{DynamicResource HudIconButtonStyle}" Margin="0,0,6,0" Click="PlaybackOptionsClick" />
                         <Button x:Name="_cancelExportButton" Visibility="Collapsed" Margin="0,0,6,0" Width="76" Content="取消导出"
                                 Style="{StaticResource PreviewAction}" Click="CancelExportClick"/>
-                        <Button x:Name="_copyButton" Style="{StaticResource PreviewAction}" Content="拷贝" ToolTip="拷贝文件到剪贴板" Click="CopyToClipboard"/>
-                        <Button x:Name="_downloadButton" Style="{StaticResource PreviewAction}" Content="存储" ToolTip="另存为文件" Margin="6,0,0,0" Click="SaveAs"/>
+                        <Button x:Name="_copyButton" Style="{StaticResource PreviewAction}" Content="拷贝" ToolTip="拷贝文件到剪贴板" Click="CopyToClipboardAsync"/>
+                        <Button x:Name="_downloadButton" Style="{StaticResource PreviewAction}" Content="存储" ToolTip="另存为文件" Margin="6,0,0,0" Click="SaveAsAsync"/>
                     </StackPanel>
                 </Grid>
                 <Popup x:Name="_options" PlacementTarget="{Binding ElementName=_moreButton}" Placement="Top" VerticalOffset="-4"

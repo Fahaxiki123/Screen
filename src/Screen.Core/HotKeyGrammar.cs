@@ -24,7 +24,7 @@ public static class HotKeyGrammar
 
     // Key enum names that are themselves modifiers (or the null key) can never
     // form a usable hotkey combination.
-    private static readonly HashSet<string> InvalidKeyNames = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _invalidKeyNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "None",
         "LeftCtrl", "RightCtrl",
@@ -75,7 +75,7 @@ public static class HotKeyGrammar
                 keyName = part;
             }
         }
-        if (keyName is null || InvalidKeyNames.Contains(keyName))
+        if (keyName is null || _invalidKeyNames.Contains(keyName))
         {
             return false;
         }

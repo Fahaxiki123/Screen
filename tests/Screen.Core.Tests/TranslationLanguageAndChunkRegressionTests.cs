@@ -65,7 +65,7 @@ public sealed class TranslationLanguageAndChunkRegressionTests
         Assert.AreEqual(expected, OcrQualityEvaluator.DetectLanguage(text));
 
     [TestMethod]
-    public async Task LongEnglishParagraphUsesAutomaticMyMemorySourceAcrossChunks()
+    public async Task LongEnglishParagraphUsesAutomaticMyMemorySourceAcrossChunksAsync()
     {
         var text = string.Join(" ", Enumerable.Repeat(
             "Please save your changes before you close the window and open the file again.", 8));
