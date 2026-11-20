@@ -8,15 +8,6 @@ using Screen.Core;
 
 namespace Screen.App;
 
-internal enum CaptureEntryMode
-{
-    Screenshot,
-    ScrollCapture,
-    Ocr,
-    Translation,
-    Recording
-}
-
 /// <summary>Region + options confirmed on the recording setup panel.</summary>
 internal sealed record RecordingSelection(
     PixelRect Region,
@@ -37,18 +28,17 @@ internal sealed partial class CaptureOverlayWindow : Window
     private readonly CredentialService _credentialService;
     private readonly CaptureSurface _surface;
     private readonly Canvas _root;
-    private readonly Border _modeBar;
-    private readonly Border _toolbar;
-    private readonly Border _stylePanel;
+    private readonly GlassPanel _selectionHint;
+    private readonly WrapPanel _toolbar;
+    private readonly GlassPanel _stylePanel;
     private readonly PinWindowManager _pinManager;
     private readonly JsonSettingsStore _settingsStore;
     private readonly OcrCard _ocrCard;
     private readonly TranslationCard _translationCard;
-    private readonly Popup _translationPopup;
+    private readonly ContextMenu _translationPopup;
     private readonly Button _translationButton;
     private readonly Button _translationDropDownButton;
-    private readonly Dictionary<CaptureTool, Button> _toolButtons = [];
-    private readonly Dictionary<CaptureEntryMode, Button> _modeButtons = [];
+    private readonly Dictionary<CaptureTool, RadioButton> _toolButtons = [];
     private readonly bool _recordingMode;
     private Border? _recordingPanel;
     private LucideIconElement? _cursorToggleIcon;
@@ -57,10 +47,9 @@ internal sealed partial class CaptureOverlayWindow : Window
     private bool _showCursorChoice = true;
     private bool _recordSystemAudioChoice;
     private bool _recordMicrophoneChoice;
-    private CaptureEntryMode _entryMode = CaptureEntryMode.Screenshot;
     private CancellationTokenSource? _translationOperation;
     private ScrollCaptureController? _scrollCapture;
-    private uint _color = 0xFFFF4D4F;
+    private uint _color = AnnotationArgb("Red");
     private double _thickness = 4;
     private double _fontSize = 16;
     private double _numberSize = 24;
@@ -92,19 +81,16 @@ internal sealed partial class CaptureOverlayWindow : Window
         _credentialService = credentialService;
         _settingsStore = settingsStore;
         _recordingMode = recordingMode;
-        if (recordingMode)
-        {
-            _entryMode = CaptureEntryMode.Recording;
-        }
         Title = recordingMode ? "Screen 录屏" : "Screen 截图";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
         ShowInTaskbar = false;
-        Background = Brushes.Black;
+        SetResourceReference(BackgroundProperty, "Brush.Black");
         Cursor = Cursors.Cross;
 
         _root = new Canvas { ClipToBounds = true };
+        _root.SetValue(BackdropHostProperty, this);
         Content = _root;
         _surface = new CaptureSurface(
             frame,
@@ -115,13 +101,13 @@ internal sealed partial class CaptureOverlayWindow : Window
         _surface.SelectionCommitted += (_, _) => OnSelectionCommitted();
         _root.Children.Add(_surface);
 
-        _modeBar = BuildModeBar();
-        _root.Children.Add(_modeBar);
+        InitializeSurfaceAdornments();
+        _selectionHint = BuildSelectionHint();
+        _root.Children.Add(_selectionHint);
         if (recordingMode)
         {
             // Single-purpose selection: no mode switching, and the setup
             // panel replaces the annotation toolbar after commit.
-            _modeBar.Visibility = Visibility.Collapsed;
             _recordingPanel = BuildRecordingPanel();
             _recordingPanel.Visibility = Visibility.Collapsed;
             _root.Children.Add(_recordingPanel);
@@ -181,6 +167,7 @@ internal sealed partial class CaptureOverlayWindow : Window
         Closed += (_, _) =>
         {
             _captureClosed = true;
+            ReleaseGlassBackdrop();
             CancelTextOperations();
             _translationPopup.IsOpen = false;
             // Cancel without disposing: an in-flight translation may still be
@@ -194,7 +181,8 @@ internal sealed partial class CaptureOverlayWindow : Window
             // windows would linger for the rest of the process lifetime.
             _scrollCapture?.Dispose();
         };
-        UpdateModeButtons();
+        Loaded += PrepareGlassBackdrop;
+        LayoutUpdated += OnGlassLayoutUpdated;
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -217,27 +205,8 @@ internal sealed partial class CaptureOverlayWindow : Window
 
     private void OnSelectionCommitted()
     {
-        _modeBar.Visibility = Visibility.Collapsed;
         PositionFloatingPanels();
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            switch (_entryMode)
-            {
-                case CaptureEntryMode.ScrollCapture:
-                    StartLongCapture(this, new RoutedEventArgs());
-                    break;
-                case CaptureEntryMode.Ocr:
-                    ShowOcr(this, new RoutedEventArgs());
-                    break;
-                case CaptureEntryMode.Translation:
-                    TranslateWithCurrentLanguage(this, new RoutedEventArgs());
-                    break;
-                case CaptureEntryMode.Recording:
-                    // The setup panel is already shown by
-                    // PositionFloatingPanels; recording begins only when the
-                    // user clicks 开始录制 (or presses Enter).
-                    break;
-            }
-        }));
+        // Keep focus on the capture surface for Enter, Esc and annotation shortcuts.
+        _surface.Focus();
     }
 }

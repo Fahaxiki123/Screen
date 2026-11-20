@@ -55,19 +55,19 @@ internal sealed partial class CaptureSurface
         }
         dc.Pop();
 
-        var full = new RectangleGeometry(new Rect(0, 0, _frame.Width, _frame.Height));
+        dc.Pop();
+        var full = new Rect(RenderSize);
         if (!Selection.IsEmpty && ShowSelectionChrome)
         {
-            var selected = new RectangleGeometry(ToRect(Selection));
-            var dim = new CombinedGeometry(GeometryCombineMode.Exclude, full, selected);
-            dc.DrawGeometry(new SolidColorBrush(Color.FromArgb(148, 0, 0, 0)), null, dim);
-            dc.DrawRectangle(null, new Pen(new SolidColorBrush(Color.FromRgb(0x38, 0xBD, 0xF8)), 1.5), ToRect(Selection));
-            DrawSelectionHandles(dc);
-            DrawSizeLabel(dc);
+            var bounds = SelectionInDips;
+            var dim = new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(full), new RectangleGeometry(bounds));
+            dc.DrawGeometry(_selectionCommitted ? _chrome.After : _chrome.Before, null, dim);
+            dc.DrawRectangle(null, _chrome.Selection, bounds);
+            DrawSelectionHandles(dc, bounds);
         }
         else if (Selection.IsEmpty)
         {
-            dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(112, 0, 0, 0)), null, full.Rect);
+            dc.DrawRectangle(_chrome.Before, null, full);
         }
 
         if (!_selectionCommitted)
@@ -76,21 +76,23 @@ internal sealed partial class CaptureSurface
         }
         else if (CanShowMosaicBrushCursor && Cursor == System.Windows.Input.Cursors.None)
         {
+            dc.PushTransform(new ScaleTransform(ActualWidth / _frame.Width, ActualHeight / _frame.Height));
             var radius = CurrentStyle.Thickness / 2;
             dc.DrawEllipse(
-                new SolidColorBrush(Color.FromArgb(24, 255, 255, 255)),
-                new Pen(new SolidColorBrush(Color.FromArgb(220, 255, 255, 255)), 1.5),
+                _chrome.BrushFill,
+                _chrome.BrushRim,
                 new Point(_cursor.X, _cursor.Y),
                 radius,
                 radius);
             dc.DrawEllipse(
                 null,
-                new Pen(new SolidColorBrush(Color.FromArgb(180, 35, 40, 48)), 1),
+                _chrome.BrushOutline,
                 new Point(_cursor.X, _cursor.Y),
                 Math.Max(1, radius - 1.5),
                 Math.Max(1, radius - 1.5));
+            dc.Pop();
         }
-        dc.Pop();
+        AdornmentsRendered?.Invoke();
     }
 
     private void DrawSelectedAnnotation(DrawingContext dc)
@@ -125,7 +127,7 @@ internal sealed partial class CaptureSurface
                      new Point(rect.Left, rect.Top + rect.Height / 2)
                  })
         {
-            dc.DrawRectangle(Brushes.White, new Pen(_accentBrush, 1), new Rect(point.X - 2.5, point.Y - 2.5, 5, 5));
+            dc.DrawRectangle(_chrome.HandleFill, new Pen(_accentBrush, 1), new Rect(point.X - 2.5, point.Y - 2.5, 5, 5));
         }
     }
 
@@ -668,318 +670,78 @@ internal sealed partial class CaptureSurface
             }
     }
 
-    private void DrawSelectionHandles(DrawingContext dc)
+    private void DrawSelectionHandles(DrawingContext dc, Rect bounds)
     {
-        var points = new[]
-        {
-            new Point(Selection.X, Selection.Y), new Point(Selection.X + Selection.Width / 2.0, Selection.Y),
-            new Point(Selection.Right, Selection.Y), new Point(Selection.X, Selection.Y + Selection.Height / 2.0),
-            new Point(Selection.Right, Selection.Y + Selection.Height / 2.0), new Point(Selection.X, Selection.Bottom),
-            new Point(Selection.X + Selection.Width / 2.0, Selection.Bottom), new Point(Selection.Right, Selection.Bottom)
-        };
-        var handleShadow = new SolidColorBrush(Color.FromArgb(140, 0, 0, 0));
-        var handleBorder = new Pen(new SolidColorBrush(Color.FromRgb(0x0E, 0xA5, 0xE9)), 1.5);
-        foreach (var point in points)
-        {
-            dc.DrawEllipse(handleShadow, null, new Point(point.X, point.Y + 1), 4.5, 4.5);
-            dc.DrawEllipse(Brushes.White, handleBorder, point, 3.5, 3.5);
-        }
+        var cx = bounds.X + bounds.Width / 2;
+        var cy = bounds.Y + bounds.Height / 2;
+        void Draw(double x, double y) => dc.DrawImage(_chrome.Handle, new Rect(x - 8, y - 8, 16, 16));
+        Draw(bounds.Left, bounds.Top);
+        Draw(cx, bounds.Top);
+        Draw(bounds.Right, bounds.Top);
+        Draw(bounds.Left, cy);
+        Draw(bounds.Right, cy);
+        Draw(bounds.Left, bounds.Bottom);
+        Draw(cx, bounds.Bottom);
+        Draw(bounds.Right, bounds.Bottom);
     }
 
-    private void DrawSizeLabel(DrawingContext dc)
+    internal Rect LoupeInDips
     {
-        var text = new FormattedText(
-            $"{Selection.Width} × {Selection.Height}",
-            System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            new Typeface(new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
-            12,
-            Brushes.White,
-            1.0);
-        var x = Selection.X;
-        var y = Selection.Y > 34 ? Selection.Y - 32 : Selection.Y + 8;
-        var labelRect = new Rect(x, y, text.Width + 20, 24);
-        var glassLabelBrush = new SolidColorBrush(Color.FromArgb(0xDC, 0x10, 0x18, 0x26));
-        var glassLabelPen = new Pen(new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF)), 1);
-        dc.DrawRoundedRectangle(glassLabelBrush, glassLabelPen, labelRect, 7, 7);
-        dc.DrawText(text, new Point(x + 10, y + 4));
+        get
+        {
+            const double margin = 6, gap = 24;
+            var diameter = Math.Min(128, Math.Max(1, Math.Min(ActualWidth, ActualHeight) - 2 * margin));
+            var px = _cursor.X * ActualWidth / _frame.Width;
+            var py = _cursor.Y * ActualHeight / _frame.Height;
+            var x = px + gap + diameter + margin <= ActualWidth ? px + gap : px - diameter - gap;
+            var y = py + gap + diameter + 54 <= ActualHeight ? py + gap : py - diameter - 54;
+            return new Rect(Math.Clamp(x, margin, Math.Max(margin, ActualWidth - diameter - margin)),
+                Math.Clamp(y, margin, Math.Max(margin, ActualHeight - diameter - margin)), diameter, diameter);
+        }
     }
 
     private void DrawMagnifier(DrawingContext dc)
     {
-        // Professional HUD-style magnifier + color card. Layout follows a
-        // strict vertical center axis: magnifier → color value → coordinates
-        // → shortcut hint. Only the swatch sits left of the axis.
-        const int imageWidth = MagnifierWidth;
-        const int pad = 10;
-        const int gap = 20;
-        const int outerPadding = 12;
+        var point = SampledPixel;
+        var pixel = new Point((point.X + 0.5) * ActualWidth / _frame.Width, (point.Y + 0.5) * ActualHeight / _frame.Height);
+        dc.DrawLine(_chrome.Crosshair, new Point(0, pixel.Y), new Point(ActualWidth, pixel.Y));
+        dc.DrawLine(_chrome.Crosshair, new Point(pixel.X, 0), new Point(pixel.X, ActualHeight));
 
-        // The sample keeps the display aspect (230:160), so pixel blocks stay
-        // square at every zoom level. The panel size is FIXED: zooming only
-        // changes the sampled area (i.e. the magnified content).
-        var sampleWidth = MagnifierSamples[_magnifierSampleIndex];
-        var srcH = Math.Max(1, (int)Math.Round(sampleWidth * MagnifierHeight / (double)MagnifierWidth));
-        const int imageHeight = MagnifierHeight;
-        var cellSize = imageWidth / (double)sampleWidth;
-
-        const double valueAreaHeight = 30;
-        const double coordsHeight = 16;
-        var panelWidth = imageWidth + pad * 2;
-        var panelHeight = imageHeight + 125;
-
-        var sourceRect = new Int32Rect(
-            Math.Clamp((int)_cursor.X - sampleWidth / 2, 0, Math.Max(0, _frame.Width - sampleWidth)),
-            Math.Clamp((int)_cursor.Y - srcH / 2, 0, Math.Max(0, _frame.Height - srcH)),
-            Math.Min(sampleWidth, _frame.Width),
-            Math.Min(srcH, _frame.Height));
-        var srcW = sourceRect.Width;
-
-        // Positioning: right-below of the cursor by default; flips near edges.
-        var candidates = new[]
+        var lens = LoupeInDips;
+        var radius = lens.Width / 2;
+        var center = new Point(lens.X + radius, lens.Y + radius);
+        var cellX = Magnification * ActualWidth / _frame.Width;
+        var cellY = Magnification * ActualHeight / _frame.Height;
+        var samplesX = lens.Width / cellX;
+        var samplesY = lens.Height / cellY;
+        var pixels = new ImageBrush(_source)
         {
-            new Point(_cursor.X + gap, _cursor.Y + gap),
-            new Point(_cursor.X - panelWidth - gap, _cursor.Y + gap),
-            new Point(_cursor.X + gap, _cursor.Y - panelHeight - gap),
-            new Point(_cursor.X - panelWidth - gap, _cursor.Y - panelHeight - gap)
+            ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
+            Viewbox = new Rect((point.X + 0.5 - samplesX / 2) / _frame.Width, (point.Y + 0.5 - samplesY / 2) / _frame.Height,
+                samplesX / _frame.Width, samplesY / _frame.Height),
+            Stretch = Stretch.Fill
         };
-        double x = outerPadding;
-        double y = outerPadding;
-        foreach (var candidate in candidates)
+        dc.DrawEllipse(_chrome.Before, _chrome.Outline, center, radius + 4, radius + 4);
+        dc.DrawEllipse(null, _chrome.LoupeRing, center, radius + 2, radius + 2);
+        dc.PushClip(new EllipseGeometry(center, radius, radius));
+        dc.DrawRectangle(pixels, null, lens);
+        if (cellX >= 5 && cellY >= 5)
         {
-            var boundedX = Math.Clamp(candidate.X, outerPadding, Math.Max(outerPadding, _frame.Width - panelWidth - outerPadding));
-            var boundedY = Math.Clamp(candidate.Y, outerPadding, Math.Max(outerPadding, _frame.Height - panelHeight - outerPadding));
-            var panel = new PixelRect((int)boundedX - pad, (int)boundedY - pad, panelWidth, panelHeight);
-            if (MagnifierAvoidanceArea.IsEmpty || panel.Intersect(MagnifierAvoidanceArea).IsEmpty)
+            for (var dx = 0.5 * cellX; dx < radius; dx += cellX)
             {
-                x = boundedX;
-                y = boundedY;
-                break;
+                dc.DrawLine(_chrome.PixelGrid, new Point(center.X - dx, lens.Top), new Point(center.X - dx, lens.Bottom));
+                dc.DrawLine(_chrome.PixelGrid, new Point(center.X + dx, lens.Top), new Point(center.X + dx, lens.Bottom));
+            }
+            for (var dy = 0.5 * cellY; dy < radius; dy += cellY)
+            {
+                dc.DrawLine(_chrome.PixelGrid, new Point(lens.Left, center.Y - dy), new Point(lens.Right, center.Y - dy));
+                dc.DrawLine(_chrome.PixelGrid, new Point(lens.Left, center.Y + dy), new Point(lens.Right, center.Y + dy));
             }
         }
-
-        // Card chrome: graphite glass, hairline border, very soft shadow.
-        var panelRect = new Rect(x - pad, y - pad, panelWidth, panelHeight);
-        for (var shadowLayer = 4; shadowLayer >= 1; shadowLayer--)
-        {
-            var inset = 4 - shadowLayer;
-            dc.DrawRoundedRectangle(
-                new SolidColorBrush(Color.FromArgb((byte)(6 + shadowLayer * 4), 0, 0, 0)),
-                null,
-                new Rect(
-                    panelRect.X - inset,
-                    panelRect.Y + 2 + inset * 2,
-                    panelRect.Width + inset * 2,
-                    panelRect.Height + inset * 2),
-                12 + inset,
-                12 + inset);
-        }
-        dc.DrawRoundedRectangle(
-            _overlayBaseBrush,
-            new Pen(_overlayBorderBrush, 1),
-            panelRect,
-            12,
-            12);
-
-        var cardInnerLeft = panelRect.X + pad;
-        var cardInnerWidth = panelWidth - pad * 2;
-        var cardCenterX = cardInnerLeft + cardInnerWidth / 2.0;
-
-        // Magnified pixels: one frozen bitmap per frame, exact integer blocks.
-        var magnifierStride = imageWidth * 4;
-        for (var row = 0; row < srcH; row++)
-        {
-            var fillTop = row * imageHeight / srcH;
-            var fillBottom = (row + 1) * imageHeight / srcH;
-            var sourceRow = (sourceRect.Y + row) * _sourceBuffer.Stride + sourceRect.X * 4;
-            for (var col = 0; col < srcW; col++)
-            {
-                var source = sourceRow + col * 4;
-                var b = _sourceBuffer.Pixels[source];
-                var g = _sourceBuffer.Pixels[source + 1];
-                var r = _sourceBuffer.Pixels[source + 2];
-                var fillLeft = col * imageWidth / srcW;
-                var fillRight = (col + 1) * imageWidth / srcW;
-                for (var dy = fillTop; dy < fillBottom; dy++)
-                {
-                    var target = dy * magnifierStride + fillLeft * 4;
-                    for (var dx = fillLeft; dx < fillRight; dx++)
-                    {
-                        _magnifierBuffer[target] = b;
-                        _magnifierBuffer[target + 1] = g;
-                        _magnifierBuffer[target + 2] = r;
-                        _magnifierBuffer[target + 3] = 255;
-                        target += 4;
-                    }
-                }
-            }
-        }
-        var magnifierSource = BitmapSource.Create(
-            imageWidth,
-            imageHeight,
-            96,
-            96,
-            PixelFormats.Pbgra32,
-            null,
-            _magnifierBuffer,
-            magnifierStride);
-        magnifierSource.Freeze();
-
-        dc.PushClip(new RectangleGeometry(new Rect(x, y, imageWidth, imageHeight), 9, 9));
-        dc.DrawImage(magnifierSource, new Rect(x, y, imageWidth, imageHeight));
-
-        // Faint pixel grid for positioning (hidden at wide zooms).
-        if (cellSize >= 5)
-        {
-            var gridPen = new Pen(new SolidColorBrush(Color.FromArgb(26, 255, 255, 255)), 1);
-            for (var col = 1; col < srcW; col++)
-            {
-                var gridX = x + col * imageWidth / (double)srcW;
-                dc.DrawLine(gridPen, new Point(gridX, y), new Point(gridX, y + imageHeight));
-            }
-            for (var row = 1; row < srcH; row++)
-            {
-                var gridY = y + row * imageHeight / (double)srcH;
-                dc.DrawLine(gridPen, new Point(x, gridY), new Point(x + imageWidth, gridY));
-            }
-        }
-
-        // Crosshair: full-span hairlines + small sampling box, visible on any
-        // background via a dark under-stroke.
-        var cursorCol = (int)_cursor.X - sourceRect.X;
-        var cursorRow = (int)_cursor.Y - sourceRect.Y;
-        var blockLeft = x + cursorCol * imageWidth / (double)srcW;
-        var blockTop = y + cursorRow * imageHeight / (double)srcH;
-        var blockWidth = x + (cursorCol + 1) * imageWidth / (double)srcW - blockLeft;
-        var blockHeight = y + (cursorRow + 1) * imageHeight / (double)srcH - blockTop;
-        var focusX = blockLeft + blockWidth / 2.0;
-        var focusY = blockTop + blockHeight / 2.0;
-        var darkLine = new Pen(new SolidColorBrush(Color.FromArgb(70, 0, 0, 0)), 3);
-        var lightLine = new Pen(new SolidColorBrush(Color.FromArgb(225, 255, 255, 255)), 1);
-        dc.DrawLine(darkLine, new Point(x, focusY), new Point(x + imageWidth, focusY));
-        dc.DrawLine(darkLine, new Point(focusX, y), new Point(focusX, y + imageHeight));
-        dc.DrawLine(lightLine, new Point(x, focusY), new Point(x + imageWidth, focusY));
-        dc.DrawLine(lightLine, new Point(focusX, y), new Point(focusX, y + imageHeight));
-        var boxSize = Math.Clamp((blockWidth + blockHeight) / 2.0, 12, 20);
-        var box = new Rect(focusX - boxSize / 2.0, focusY - boxSize / 2.0, boxSize, boxSize);
-        dc.DrawRectangle(null, darkLine, box);
-        dc.DrawRectangle(null, lightLine, box);
+        var box = new Rect(center.X - cellX / 2, center.Y - cellY / 2, cellX, cellY);
+        dc.DrawRectangle(null, _chrome.PixelBorder, box);
+        box.Inflate(1, 1);
+        dc.DrawRectangle(null, _chrome.Outline, box);
         dc.Pop();
-
-        // Zoom badge (top-right, quiet).
-        var zoom = imageWidth / (double)sampleWidth;
-        var zoomLabel = Math.Abs(zoom - Math.Round(zoom)) < 0.05
-            ? $"{zoom:0}×"
-            : $"{zoom:0.0}×";
-        var zoomText = new FormattedText(
-            zoomLabel,
-            System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            PanelUi, 11.5, _overlayTextBrush, 1.0);
-        var badge = new Rect(x + imageWidth - 8 - zoomText.Width - 16, y + 8, zoomText.Width + 16, 22);
-        dc.DrawRoundedRectangle(
-            _overlayBaseBrush,
-            null,
-            badge,
-            6,
-            6);
-        dc.DrawText(
-            zoomText,
-            new Point(
-                badge.X + (badge.Width - zoomText.Width) / 2.0,
-                badge.Y + (badge.Height - zoomText.Height) / 2.0));
-
-        // Divider → color value row. Strictly symmetric: swatch left, value
-        // centered on the card axis, empty right column.
-        var divider1Y = y + imageHeight + 10;
-        dc.DrawLine(
-            new Pen(_overlayBorderBrush, 1),
-            new Point(cardInnerLeft, divider1Y),
-            new Point(cardInnerLeft + cardInnerWidth, divider1Y));
-
-        var valueTop = divider1Y + 10;
-        var argb = GetPixelColor(_cursor);
-        var color = Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb);
-        var swatch = new Rect(cardInnerLeft, valueTop + 2, 26, 26);
-        dc.DrawRoundedRectangle(
-            new SolidColorBrush(color),
-            new Pen(new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)), 1),
-            swatch,
-            6,
-            6);
-
-        var valueText = ColorRgbMode ? ColorText.ToRgb(argb) : ColorText.ToHex(argb);
-        var valueBrush = _overlayTextBrush;
-        var value = new FormattedText(
-            valueText,
-            System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            PanelMonoBold, 19, valueBrush, 1.0);
-        if (value.Width > cardInnerWidth - 60)
-        {
-            var scaledSize = Math.Max(14.0, 19.0 * (cardInnerWidth - 60) / value.Width);
-            value = new FormattedText(
-                valueText,
-                System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
-                PanelMonoBold, scaledSize, valueBrush, 1.0);
-        }
-        dc.DrawText(
-            value,
-            new Point(cardCenterX - value.Width / 2.0, valueTop + (valueAreaHeight - value.Height) / 2.0));
-
-        // Divider → coordinates, centered as one group.
-        var divider2Y = valueTop + valueAreaHeight + 8;
-        dc.DrawLine(
-            new Pen(_overlayBorderBrush, 1),
-            new Point(cardInnerLeft, divider2Y),
-            new Point(cardInnerLeft + cardInnerWidth, divider2Y));
-
-        var coordsTop = divider2Y + 9;
-        var labelBrush = _overlayTextDimBrush;
-        var numberBrush = _overlayIconBrush;
-        var dotBrush = _neutral500Brush;
-        var screenX = (int)_cursor.X + _frame.ScreenBounds.X;
-        var screenY = (int)_cursor.Y + _frame.ScreenBounds.Y;
-        var coordParts = new (string Text, Brush Brush, Typeface Font)[]
-        {
-            ("X", labelBrush, PanelUi),
-            (screenX.ToString(System.Globalization.CultureInfo.InvariantCulture), numberBrush, PanelMono),
-            ("·", dotBrush, PanelUi),
-            ("Y", labelBrush, PanelUi),
-            (screenY.ToString(System.Globalization.CultureInfo.InvariantCulture), numberBrush, PanelMono)
-        };
-        var coordTexts = coordParts
-            .Select(part => new FormattedText(
-                part.Text,
-                System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
-                part.Font, 13, part.Brush, 1.0))
-            .ToArray();
-        var totalCoordWidth = coordTexts.Sum(text => text.Width + 6) - 6;
-        var coordX = cardCenterX - totalCoordWidth / 2.0;
-        foreach (var text in coordTexts)
-        {
-            dc.DrawText(text, new Point(coordX, coordsTop + (coordsHeight - text.Height) / 2.0));
-            coordX += text.Width + 6;
-        }
-
-        // Divider → shortcut hint.
-        var divider3Y = coordsTop + coordsHeight + 8;
-        dc.DrawLine(
-            new Pen(_overlayBorderBrush, 1),
-            new Point(cardInnerLeft, divider3Y),
-            new Point(cardInnerLeft + cardInnerWidth, divider3Y));
-
-        var footerTop = divider3Y + 8;
-        if (!string.IsNullOrEmpty(ColorStatus))
-        {
-            var hint = new FormattedText(
-                ColorStatus,
-                System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
-                PanelUi, 11, _overlayTextDimBrush, 1.0);
-            dc.DrawText(hint, new Point(cardCenterX - hint.Width / 2.0, footerTop));
-        }
     }
 }

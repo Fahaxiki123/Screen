@@ -27,6 +27,16 @@ internal sealed class LucideIconElement : FrameworkElement
         typeof(LucideIconElement),
         new FrameworkPropertyMetadata(Brushes.Black, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty FillProperty = DependencyProperty.Register(
+        nameof(Fill), typeof(Brush), typeof(LucideIconElement),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public Brush? Fill
+    {
+        get => (Brush?)GetValue(FillProperty);
+        set => SetValue(FillProperty, value);
+    }
+
     public static readonly DependencyProperty StrokeThicknessProperty = DependencyProperty.Register(
         nameof(StrokeThickness),
         typeof(double),
@@ -76,7 +86,7 @@ internal sealed class LucideIconElement : FrameworkElement
         drawingContext.PushTransform(new ScaleTransform(scale, scale));
         foreach (var primitive in Cache.GetOrAdd(Kind, ParseIcon))
         {
-            primitive.Draw(drawingContext, pen);
+            primitive.Draw(drawingContext, pen, Fill);
         }
         drawingContext.Pop();
         drawingContext.Pop();
@@ -151,23 +161,23 @@ internal sealed class LucideIconElement : FrameworkElement
 
     private abstract record IconPrimitive
     {
-        public abstract void Draw(DrawingContext context, Pen pen);
+        public abstract void Draw(DrawingContext context, Pen pen, Brush? fill);
     }
 
     private sealed record GeometryPrimitive(Geometry Geometry) : IconPrimitive
     {
-        public override void Draw(DrawingContext context, Pen pen) => context.DrawGeometry(null, pen, Geometry);
+        public override void Draw(DrawingContext context, Pen pen, Brush? fill) => context.DrawGeometry(fill, pen, Geometry);
     }
 
     private sealed record LinePrimitive(Point Start, Point End) : IconPrimitive
     {
-        public override void Draw(DrawingContext context, Pen pen) => context.DrawLine(pen, Start, End);
+        public override void Draw(DrawingContext context, Pen pen, Brush? fill) => context.DrawLine(pen, Start, End);
     }
 
     private sealed record EllipsePrimitive(double X, double Y, double RadiusX, double RadiusY) : IconPrimitive
     {
-        public override void Draw(DrawingContext context, Pen pen) =>
-            context.DrawEllipse(null, pen, new Point(X, Y), RadiusX, RadiusY);
+        public override void Draw(DrawingContext context, Pen pen, Brush? fill) =>
+            context.DrawEllipse(fill, pen, new Point(X, Y), RadiusX, RadiusY);
     }
 
     private sealed record RectanglePrimitive(
@@ -178,7 +188,7 @@ internal sealed class LucideIconElement : FrameworkElement
         double RadiusX,
         double RadiusY) : IconPrimitive
     {
-        public override void Draw(DrawingContext context, Pen pen) =>
-            context.DrawRoundedRectangle(null, pen, new Rect(X, Y, Width, Height), RadiusX, RadiusY);
+        public override void Draw(DrawingContext context, Pen pen, Brush? fill) =>
+            context.DrawRoundedRectangle(fill, pen, new Rect(X, Y, Width, Height), RadiusX, RadiusY);
     }
 }

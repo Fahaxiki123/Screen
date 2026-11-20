@@ -1,0 +1,78 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Screen.App">
+    <!-- These seven brushes are user-selectable annotation colors, not UI accents. -->
+    <SolidColorBrush x:Key="Annotation.Red" Color="#FFFF4D4F"/>
+    <SolidColorBrush x:Key="Annotation.Yellow" Color="#FFFFB51B"/>
+    <SolidColorBrush x:Key="Annotation.Green" Color="#FF31C56A"/>
+    <SolidColorBrush x:Key="Annotation.Blue" Color="#FF2563EB"/>
+    <SolidColorBrush x:Key="Annotation.Black" Color="#FF101216"/>
+    <SolidColorBrush x:Key="Annotation.Gray" Color="#FF9299A6"/>
+    <SolidColorBrush x:Key="Annotation.White" Color="#FFFFFFFF"/>
+
+    <Style x:Key="CaptureToolIndicatorStyle" TargetType="Border">
+        <Setter Property="Width" Value="0"/><Setter Property="Height" Value="34"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource Radius.Button}"/>
+        <Setter Property="Background" Value="{DynamicResource Brush.SelectedGradient}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush">
+            <Setter.Value><LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#57FFFFFF" Offset="0"/><GradientStop Color="#40000000" Offset="1"/>
+            </LinearGradientBrush></Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="CaptureClosedIconStyle" TargetType="local:LucideIconElement">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType={x:Type RadioButton}}}" Value="True">
+                <Setter Property="Fill" Value="#38FFFFFF"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="CaptureLanguageItemStyle" TargetType="MenuItem">
+        <Setter Property="Height" Value="30"/>
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Label}"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+            <Border x:Name="Chrome" CornerRadius="{DynamicResource Radius.Control}" Background="Transparent" Padding="9,0">
+                <Grid>
+                    <ContentPresenter ContentSource="Header" VerticalAlignment="Center"/>
+                    <local:LucideIconElement x:Name="Check" Visibility="Collapsed" Kind="Check" Width="15" Height="15"
+                                             StrokeThickness="2" Stroke="{DynamicResource Brush.AccentText}" HorizontalAlignment="Right"/>
+                </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.PrimaryAction}"/></Trigger>
+                <Trigger Property="IsChecked" Value="True"><Setter TargetName="Check" Property="Visibility" Value="Visible"/></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <DrawingBrush x:Key="Capture.PixelSample" ViewboxUnits="Absolute" Viewbox="0,0,20,14" Stretch="Fill">
+        <DrawingBrush.Drawing><DrawingGroup>
+            <GeometryDrawing Brush="#D0AC8C" Geometry="M0,0 H20 V14 H0Z"/>
+            <GeometryDrawing Brush="#728EB8" Geometry="M0,0 H7 V8 H0Z M13,7 H20 V14 H13Z"/>
+            <GeometryDrawing Brush="#AEC1D3" Geometry="M7,0 H13 V7 H7Z M0,8 H7 V14 H0Z"/>
+            <GeometryDrawing Brush="#819497" Geometry="M7,7 H13 V14 H7Z"/>
+        </DrawingGroup></DrawingBrush.Drawing>
+    </DrawingBrush>
+    <LinearGradientBrush x:Key="Capture.BlurSample" StartPoint="0,0" EndPoint="1,0.75">
+        <GradientStop Color="#728EB8" Offset="0"/><GradientStop Color="#AEC1D3" Offset="0.45"/><GradientStop Color="#D0AC8C" Offset="1"/>
+    </LinearGradientBrush>
+    <Style x:Key="CaptureIntensitySlider" TargetType="Slider">
+        <Setter Property="Height" Value="26"/><Setter Property="Width" Value="88"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider">
+            <Grid>
+                <Border Height="3" Background="{DynamicResource Brush.EdgeHighlight}" VerticalAlignment="Center"/>
+                <Track x:Name="PART_Track">
+                    <Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"><Border Height="3" Background="{DynamicResource Brush.Accent}" VerticalAlignment="Center"/></Border></ControlTemplate></RepeatButton.Template>
+                    </RepeatButton></Track.DecreaseRepeatButton>
+                    <Track.Thumb><Thumb Width="12" Height="12">
+                        <Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse Fill="{DynamicResource Brush.White}"/></ControlTemplate></Thumb.Template>
+                    </Thumb></Track.Thumb>
+                    <Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Focusable="False">
+                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template>
+                    </RepeatButton></Track.IncreaseRepeatButton>
+                </Track>
+            </Grid>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+</ResourceDictionary>

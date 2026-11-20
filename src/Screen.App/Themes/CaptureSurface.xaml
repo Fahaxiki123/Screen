@@ -1,0 +1,36 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+    <SolidColorBrush x:Key="Capture.Dim.Before" Color="#24000000"/>
+    <SolidColorBrush x:Key="Capture.Dim.After" Color="#6B000000"/>
+    <Pen x:Key="Capture.Selection" Brush="#F2FFFFFF" Thickness="1"/>
+    <Pen x:Key="Capture.Crosshair" Brush="#8CFFFFFF" Thickness="1"/>
+    <Pen x:Key="Capture.LoupeRing" Brush="#D9FFFFFF" Thickness="4"/>
+    <Pen x:Key="Capture.LoupeOutline" Brush="#99000000" Thickness="1"/>
+    <Pen x:Key="Capture.PixelGrid" Brush="#12000000" Thickness="1"/>
+    <Pen x:Key="Capture.PixelBorder" Brush="White" Thickness="1"/>
+    <Pen x:Key="Capture.BrushCursorOutline" Brush="#B4232830" Thickness="1"/>
+    <Pen x:Key="Capture.BrushCursorRim" Brush="#DCFFFFFF" Thickness="1.5"/>
+    <SolidColorBrush x:Key="Capture.BrushCursorFill" Color="#18FFFFFF"/>
+    <SolidColorBrush x:Key="Capture.HandleFill" Color="White"/>
+    <DrawingImage x:Key="Capture.Handle">
+        <DrawingImage.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Geometry="M0,0 L16,0 16,16 0,16 Z" Brush="Transparent"/>
+                <GeometryDrawing>
+                    <GeometryDrawing.Geometry><EllipseGeometry Center="8,9" RadiusX="7.5" RadiusY="7.5"/></GeometryDrawing.Geometry>
+                    <GeometryDrawing.Brush>
+                        <RadialGradientBrush>
+                            <GradientStop Color="#73000000" Offset="0.4"/>
+                            <GradientStop Color="#00000000" Offset="1"/>
+                        </RadialGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+                <GeometryDrawing Brush="White">
+                    <GeometryDrawing.Pen><Pen Brush="#80000000" Thickness="0.5"/></GeometryDrawing.Pen>
+                    <GeometryDrawing.Geometry><EllipseGeometry Center="8,8" RadiusX="4.5" RadiusY="4.5"/></GeometryDrawing.Geometry>
+                </GeometryDrawing>
+            </DrawingGroup>
+        </DrawingImage.Drawing>
+    </DrawingImage>
+</ResourceDictionary>

@@ -31,7 +31,7 @@ internal static class ToolbarIcons
             Shape.FillProperty,
             new Binding(nameof(Button.Foreground))
             {
-                RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1)
+                RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(System.Windows.Controls.Primitives.ButtonBase), 1)
             });
         var strokePath = new System.Windows.Shapes.Path
         {
@@ -46,7 +46,7 @@ internal static class ToolbarIcons
             Shape.StrokeProperty,
             new Binding(nameof(Button.Foreground))
             {
-                RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1)
+                RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(System.Windows.Controls.Primitives.ButtonBase), 1)
             });
         var canvas = new Canvas { Width = 24, Height = 24 };
         canvas.Children.Add(fillPath);

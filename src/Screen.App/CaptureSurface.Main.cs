@@ -81,29 +81,29 @@ internal sealed partial class CaptureSurface : FrameworkElement
     // Theme tokens used by the per-frame render path. Looked up once in the
     // constructor: fetching resources on every OnRender is measurable.
     private readonly Brush _accentBrush;
-    private readonly Brush _overlayBaseBrush;
-    private readonly Brush _overlayBorderBrush;
-    private readonly Brush _overlayTextBrush;
-    private readonly Brush _overlayTextDimBrush;
-    private readonly Brush _overlayIconBrush;
-    private readonly Brush _neutral500Brush;
+    private readonly CaptureChrome _chrome;
 
-    // Sample widths → zoom = MagnifierWidth / sample, from 1× to 38×.
-    // Default = sample 23 ≈ 10×.
+    private sealed class CaptureChrome(ResourceDictionary resources)
+    {
+        public Brush Before { get; } = (Brush)resources["Capture.Dim.Before"];
+        public Brush After { get; } = (Brush)resources["Capture.Dim.After"];
+        public Pen Selection { get; } = (Pen)resources["Capture.Selection"];
+        public Pen Crosshair { get; } = (Pen)resources["Capture.Crosshair"];
+        public Pen LoupeRing { get; } = (Pen)resources["Capture.LoupeRing"];
+        public Pen Outline { get; } = (Pen)resources["Capture.LoupeOutline"];
+        public Pen PixelGrid { get; } = (Pen)resources["Capture.PixelGrid"];
+        public Pen PixelBorder { get; } = (Pen)resources["Capture.PixelBorder"];
+        public Pen BrushOutline { get; } = (Pen)resources["Capture.BrushCursorOutline"];
+        public Pen BrushRim { get; } = (Pen)resources["Capture.BrushCursorRim"];
+        public Brush BrushFill { get; } = (Brush)resources["Capture.BrushCursorFill"];
+        public Brush HandleFill { get; } = (Brush)resources["Capture.HandleFill"];
+        public ImageSource Handle { get; } = (ImageSource)resources["Capture.Handle"];
+    }
+
+    // Preserve the original wheel stops (1x–38x); the new lens is a 128-DIP circle.
     private static readonly int[] MagnifierSamples =
         [6, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 29, 33, 39, 45, 53, 61, 71, 83, 97, 115, 135, 159, 187, 230];
-    private const int MagnifierWidth = 230;
-    private const int MagnifierHeight = 160;
-
-    // The displayed height varies slightly per zoom (≈160, up to 167); keep a
-    // few spare rows so the shared buffer can never be overrun.
-    private readonly byte[] _magnifierBuffer = new byte[MagnifierWidth * (MagnifierHeight + 8) * 4];
-
-    private static readonly Typeface PanelMono = new(
-        new FontFamily("Cascadia Mono, Consolas"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
-    private static readonly Typeface PanelMonoBold = new(
-        new FontFamily("Cascadia Mono, Consolas"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
-    private static readonly Typeface PanelUi = new("Segoe UI");
+    internal double Magnification => 230d / MagnifierSamples[_magnifierSampleIndex];
 
     public CaptureSurface(
         CaptureFrame frame,
@@ -118,12 +118,9 @@ internal sealed partial class CaptureSurface : FrameworkElement
         _snapService = snapService;
         var resources = themeResources ?? Application.Current.Resources;
         _accentBrush = (Brush)resources["Brush.Accent"];
-        _overlayBaseBrush = (Brush)resources["Brush.OverlayBase"];
-        _overlayBorderBrush = (Brush)resources["Brush.OverlayBorder"];
-        _overlayTextBrush = (Brush)resources["Brush.OverlayText"];
-        _overlayTextDimBrush = (Brush)resources["Brush.OverlayTextDim"];
-        _overlayIconBrush = (Brush)resources["Brush.OverlayIcon"];
-        _neutral500Brush = (Brush)resources["Brush.Neutral500"];
+        // Isolated render workers deliberately supply only the shared compatibility keys.
+        _chrome = new CaptureChrome(resources.Contains("Capture.Dim.Before") ? resources :
+            new ResourceDictionary { Source = new Uri("/Screen;component/Themes/CaptureSurface.xaml", UriKind.Relative) });
         Focusable = true;
         Cursor = Cursors.Cross;
         SnapsToDevicePixels = true;
@@ -139,7 +136,11 @@ internal sealed partial class CaptureSurface : FrameworkElement
     public PixelRect Selection { get; private set; }
     public WindowTarget? SelectedWindow { get; private set; }
     public bool IsSelectionCommitted => _selectionCommitted;
-    public PixelRect MagnifierAvoidanceArea { get; set; }
+    internal event Action? AdornmentsRendered;
+    internal PixelPoint SampledPixel => new(Math.Clamp(Math.Round(_cursor.X), 0, _frame.Width - 1), Math.Clamp(Math.Round(_cursor.Y), 0, _frame.Height - 1));
+    internal PixelPoint SampledScreenPoint => ToScreenPoint(SampledPixel);
+    internal Rect SelectionInDips => new(Selection.X * ActualWidth / _frame.Width, Selection.Y * ActualHeight / _frame.Height,
+        Selection.Width * ActualWidth / _frame.Width, Selection.Height * ActualHeight / _frame.Height);
     public bool ShowSelectionChrome { get; set; } = true;
     public bool AllowAnnotationEditing { get; set; } = true;
     public Func<PixelPoint, PixelPoint>? ScreenPointMapper { get; set; }
@@ -175,6 +176,7 @@ internal sealed partial class CaptureSurface : FrameworkElement
         && Contains(Selection, _cursor);
     public bool ColorRgbMode { get; set; }
     public string ColorStatus { get; set; } = "Ctrl+C 复制色值 · Shift 切换格式";
+    internal int NextNumber => _nextNumber;
     public bool CanUndo => _history.CanUndo;
     public bool CanRedo => _history.CanRedo;
 

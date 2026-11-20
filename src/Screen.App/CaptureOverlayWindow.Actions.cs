@@ -27,22 +27,9 @@ internal sealed partial class CaptureOverlayWindow
         _surface.Tool = preserveSelectionTool ? CaptureTool.Select : tool;
         _stylePanel.Visibility = Visibility.Visible;
         ConfigureStylePanel(tool);
-        foreach (var pair in _toolButtons)
-        {
-            var isSelected = pair.Key == _surface.Tool;
-            pair.Value.Background = isSelected
-                ? (Brush)Application.Current.FindResource("Brush.AccentSubtleDark")
-                : Brushes.Transparent;
-            pair.Value.Foreground = isSelected
-                ? (Brush)Application.Current.FindResource("Brush.AccentOnDark")
-                : (Brush)Application.Current.FindResource("Brush.OverlayIcon");
-            pair.Value.BorderBrush = isSelected
-                ? (Brush)Application.Current.FindResource("Brush.AccentSubtleDarkBorder")
-                : Brushes.Transparent;
-            pair.Value.BorderThickness = isSelected
-                ? new Thickness(1)
-                : new Thickness(0);
-        }
+        UpdateToolIndicator(true);
+        if (_stylePanel.Visibility == Visibility.Visible)
+            Motion.PopIn(_stylePanel, delayMs: 60);
         PositionFloatingPanels();
     }
 
@@ -209,11 +196,7 @@ internal sealed partial class CaptureOverlayWindow
         _ocrCard.Visibility = Visibility.Collapsed;
         _surface.ClearAnnotationSelection();
         _surface.Tool = CaptureTool.Select;
-        foreach (var button in _toolButtons.Values)
-        {
-            button.Background = Brushes.Transparent;
-            button.Foreground = FindResourceBrush("Brush.OverlayIcon");
-        }
+        UpdateToolIndicator(true);
         var settings = _settingsStore.Load();
         _inPlaceMode = settings.TranslationDisplayMode == TranslationDisplayMode.InPlace;
         // Cancel but do NOT dispose the previous source: the in-flight task may

@@ -18,39 +18,34 @@ internal sealed partial class CaptureOverlayWindow
 
         _ocrCard.SetAvailableSize(ActualWidth, ActualHeight);
         _translationCard.SetAvailableSize(ActualWidth, ActualHeight);
+        _selectionHint.Visibility = _surface.IsSelectionCommitted ? Visibility.Collapsed : Visibility.Visible;
+        if (_selectionHint.Visibility == Visibility.Visible)
+        {
+            _selectionHint.Measure(new Size(ActualWidth, ActualHeight));
+            Canvas.SetLeft(_selectionHint, Math.Max(0, (ActualWidth - _selectionHint.DesiredSize.Width) / 2));
+            Canvas.SetTop(_selectionHint, Math.Max(0, ActualHeight - _selectionHint.DesiredSize.Height - 22));
+        }
         if (_recordingMode)
         {
             PositionRecordingPanel();
             return;
         }
-        _modeBar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var modeLeft = Math.Max(8, (ActualWidth - _modeBar.DesiredSize.Width) / 2);
-        const double modeTop = 8;
-        Canvas.SetLeft(_modeBar, modeLeft);
-        Canvas.SetTop(_modeBar, modeTop);
-        var physicalScaleX = _frame.Width / ActualWidth;
-        var physicalScaleY = _frame.Height / ActualHeight;
-        _surface.MagnifierAvoidanceArea = new PixelRect(
-            (int)(modeLeft * physicalScaleX) - 10,
-            (int)(modeTop * physicalScaleY) - 6,
-            (int)(_modeBar.DesiredSize.Width * physicalScaleX) + 20,
-            (int)(_modeBar.DesiredSize.Height * physicalScaleY) + 12);
 
         if (!_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
         {
-            _modeBar.Visibility = Visibility.Visible;
             _toolbar.Visibility = Visibility.Collapsed;
             _stylePanel.Visibility = Visibility.Collapsed;
             return;
         }
 
-        _modeBar.Visibility = Visibility.Collapsed;
+        var entering = _toolbar.Visibility != Visibility.Visible;
         _toolbar.Visibility = Visibility.Visible;
-        var translationVisible = _translationCard.Visibility == Visibility.Visible || _inPlaceStatusBar.Visibility == Visibility.Visible;
-        _translationButton.Background = translationVisible
-            ? FindResourceBrush("Brush.AccentSubtleDark") : System.Windows.Media.Brushes.Transparent;
-        _translationButton.Foreground = translationVisible
-            ? FindResourceBrush("Brush.AccentText") : FindResourceBrush("Brush.OverlayIcon");
+        UpdateToolbarState();
+        if (entering)
+        {
+            Motion.PopIn(_toolbar);
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => UpdateToolIndicator(false));
+        }
         // Keep every action visible. Only exceptionally narrow screens wrap
         // the strip; actions are never collapsed behind an overflow menu.
         _toolbar.MaxWidth = Math.Max(1, ActualWidth - 16);
@@ -130,6 +125,7 @@ internal sealed partial class CaptureOverlayWindow
             }
         }
         PositionInPlaceTranslation();
+        RefreshGlassPanels();
     }
 
     private static Rect FloatingBounds(FrameworkElement element) => new(
@@ -156,7 +152,6 @@ internal sealed partial class CaptureOverlayWindow
         {
             return;
         }
-        _modeBar.Visibility = Visibility.Collapsed;
         _toolbar.Visibility = Visibility.Collapsed;
         _stylePanel.Visibility = Visibility.Collapsed;
         if (!_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
