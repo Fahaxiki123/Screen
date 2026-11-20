@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Screen · 设计预览 v4 · 克制的玻璃</title>
+<script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+<style>
+  @property --a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+  :root {
+    --ui: "Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",system-ui,sans-serif;
+    --disp: "Segoe UI Variable Display","Segoe UI","Microsoft YaHei UI",system-ui,sans-serif;
+    --spring: cubic-bezier(.3,1.45,.55,1);
+    --soft: cubic-bezier(.22,1,.36,1);
+    /* ===== 液态玻璃五步配方 ===== */
+    --g-blur: blur(26px);                                   /* ① 模糊 */
+    --g-sat: saturate(170%);                                /* ② 增色 */
+    --g-white: rgb(255 255 255 / 5%);                       /* ③ 叠白（克制：5%，叠在中性深色底上） */
+    --g-edge: inset 1px 1px 0 rgba(255,255,255,.26), inset -1px -1px 0 rgba(255,255,255,.04), inset 0 0 0 .5px rgba(255,255,255,.08); /* ④ 亮边（减弱） */
+    /* ⑤ 折射：边缘一圈用 SVG 位移滤镜，见 #lg */
+  }
+  body.no-blur { --g-blur: blur(0px); }
+  body.no-sat { --g-sat: saturate(100%); }
+  body.no-white { --g-white: rgb(255 255 255 / 0%); }
+  body.no-edge { --g-edge: inset 0 0 0 transparent; }
+  body { font-family: var(--ui); }
+  button { font-family: inherit; cursor: pointer; border: 0; background: none; color: inherit; padding: 0; }
+  body.mode-a .v-b, body.mode-b .v-a { display: none !important; }
+  .ph-pre, .ph-post { display: none; }
+  .phase-pre .ph-pre, .phase-post .ph-post { display: block; }
+  [hidden] { display: none !important; }
+  .abs { position: absolute !important; }
+
+  /* ---------- glass ---------- */
+  .glass { position: relative; color: #fff; box-shadow: 0 0 0 .5px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.16), 0 18px 44px -10px rgba(0,0,0,.5); --rim: 5px; --g-base: linear-gradient(180deg, rgba(60,60,66,.52), rgba(38,38,44,.6)); }
+  .glass::before { content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: 0; pointer-events: none;
+    background: linear-gradient(var(--g-white), var(--g-white)), var(--g-base); backdrop-filter: var(--g-blur) var(--g-sat); -webkit-backdrop-filter: var(--g-blur) var(--g-sat); }
+  .glass::after { content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: 0; pointer-events: none; padding: var(--rim);
+    backdrop-filter: url(#lg) blur(1px) brightness(1.08);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+    box-shadow: var(--g-edge); }
+  body.no-ref .glass::after { backdrop-filter: none; }
+  .glass > * { position: relative; z-index: 1; }
+  .glass > .ind, .glass > .ring { position: absolute; }
+  .glass.dark { --g-base: linear-gradient(180deg, rgba(34,34,38,.7), rgba(24,24,28,.76)); }
+  .gtext { text-shadow: 0 1px 2px rgba(0,0,0,.28); }
+
+  /* ---------- stage ---------- */
+  .stage-wrap { position: relative; width: 100%; }
+  .stage { position: absolute; left: 0; top: 0; width: 960px; transform-origin: 0 0; overflow: hidden; border-radius: 14px; user-select: none; background: #0b1622; }
+  .badge { position: absolute; left: 14px; top: 12px; z-index: 80; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; }
+  .badge.v-b { background: rgba(244,63,94,.92); color: #fff; }
+  .badge.v-a { background: rgba(10,132,255,.95); color: #fff; }
+  .sea, .sea svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .desk { position: absolute; inset: 0; overflow: hidden; }
+  .desk::after { content: ""; position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 0%, rgba(80,140,200,.18), transparent 60%), radial-gradient(140% 100% at 50% 120%, rgba(0,0,0,.5), transparent 60%); }
+  .win { position: absolute; left: 40px; top: 28px; width: 880px; height: 470px; background: #fff; border-radius: 12px; box-shadow: 0 0 0 .5px rgba(0,0,0,.3), 0 24px 70px rgba(0,0,0,.5); overflow: hidden; }
+  .win-bar { height: 36px; background: #f6f6f8; border-bottom: 1px solid #ececf0; display: flex; align-items: center; padding: 0 14px; font-size: 12px; color: #555; gap: 8px; }
+  .win-bar .fav { width: 14px; height: 14px; border-radius: 4px; background: linear-gradient(135deg,#3aa0ff,#1b5fd6); }
+  .win-bar .cap { margin-left: auto; display: flex; gap: 22px; color: #999; }
+  .fx { position: absolute; color: #1d1d1f; }
+  .kicker { font-size: 11px; letter-spacing: .14em; color: #8a8a8e; font-weight: 600; }
+  .h1 { font-family: var(--disp); font-size: 28px; line-height: 1.2; font-weight: 700; letter-spacing: -.015em; }
+  .para { font-size: 14px; line-height: 1.65; color: #3a3a3c; }
+  .photo { position: absolute; overflow: hidden; }
+  .photo .cap2 { position: absolute; left: 16px; bottom: 12px; font-size: 11px; color: rgba(255,255,255,.75); letter-spacing: .04em; }
+
+  .dim { position: absolute; inset: 0; background: rgba(0,0,0,.42); }
+  .sel { position: absolute; box-shadow: 0 0 0 2000px rgba(0,0,0,.42); }
+  .sel-b { outline: 1px solid #38BDF8; }
+  .sel-a { outline: 1px solid rgba(255,255,255,.95); transition: outline-color .3s; }
+  .h { position: absolute; width: 7px; height: 7px; transform: translate(-50%,-50%); }
+  .sel-b .h { background: #38BDF8; }
+  .sel-a .h { width: 9px; height: 9px; background: #fff; border-radius: 50%; box-shadow: 0 0 0 .5px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.45); }
+  .size-b { position: absolute; top: -30px; left: 0; font-size: 12px; color: #7DD3FC; background: rgba(10,18,34,.92); border: 1px solid rgba(148,197,255,.25); padding: 3px 9px; border-radius: 8px; font-weight: 600; }
+  .size-a { position: absolute !important; top: -28px; left: 0; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; font-variant-numeric: tabular-nums; --rim: 3px; }
+
+  /* ================= BEFORE ================= */
+  .glass-b { background: linear-gradient(170deg, rgba(21,38,68,.93), rgba(14,26,48,.95) 50%, rgba(10,18,34,.97)); border: 1px solid rgba(148,197,255,.2); box-shadow: inset 0 1px 0 rgba(210,234,255,.28), 0 10px 32px rgba(2,6,16,.58); color: #F4F8FF; }
+  .aurora-b { background: linear-gradient(180deg, rgba(22,41,74,.96), rgba(15,28,52,.97) 36%, rgba(11,20,38,.98)); border: 1px solid rgba(148,197,255,.2); box-shadow: inset 0 1px 0 rgba(210,234,255,.3), 0 10px 32px rgba(2,6,16,.58); color: #F4F8FF; }
+  .tb { position: absolute; display: flex; align-items: center; z-index: 20; }
+  .tb-b { border-radius: 14px; padding: 5px 7px; }
+  .tb-b .btn { position: relative; width: 34px; height: 34px; margin: 1px; border-radius: 8px; display: grid; place-items: center; color: #E2EEFC; }
+  .tb-b .btn.narrow { width: 20px; margin-left: -4px; }
+  .tb-b .btn:hover { background: rgba(125,211,252,.14); }
+  .tb-b .btn.on { background: rgba(56,189,248,.2); color: #7DD3FC; }
+  .tb-b .btn.danger { color: #FB7185; }
+  .tb-b .sep { width: 1px; height: 22px; background: rgba(148,197,255,.2); margin: 0 6px; }
+  .grad-btn { background: linear-gradient(135deg,#38BDF8,#0EA5E9 55%,#0284C7); color: #fff; box-shadow: 0 4px 14px rgba(14,165,233,.45); font-weight: 600; }
+  .tb-b .finish { position: relative; height: 34px; padding: 0 12px 0 10px; margin: 1px 2px 1px 4px; border-radius: 8px; display: flex; align-items: center; gap: 5px; font-size: 13px; }
+  .sp { position: absolute; display: flex; align-items: center; z-index: 19; }
+  .sp-b { border-radius: 10px; padding: 5px 8px; }
+  .sp-b .ib { position: relative; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 7px; color: #E2EEFC; margin: 0 1px; }
+  .sp-b .ib.on { background: rgba(56,189,248,.2); color: #7DD3FC; }
+  .sp-b .sep { width: 1px; height: 20px; background: rgba(148,197,255,.2); margin: 0 7px; }
+  .sw-b { width: 22px; height: 22px; border-radius: 6px; margin: 0 3px; border: 1px solid rgba(148,197,255,.3); }
+  .sw-b.on { border: 2px solid #fff; }
+  .dot { border-radius: 50%; background: currentColor; }
+  .tb-b [data-tip]:hover::after, .sp-b [data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none; z-index: 99; font-size: 12px; padding: 6px 10px; border-radius: 8px; background: #13223D; color: #F4F8FF; border: 1px solid rgba(148,197,255,.25); box-shadow: 0 8px 24px rgba(2,6,16,.6); }
+
+  /* ================= AFTER ================= */
+  .enter { animation: enter .55s var(--spring) both; }
+  @keyframes enter { from { opacity: 0; transform: translateY(-8px) scale(.94); } }
+  .enter-r { animation: enterR .6s var(--spring) both; transform-origin: 0 24px; }
+  @keyframes enterR { from { opacity: 0; transform: translateX(-12px) scale(.92); } }
+
+  .tb-row { position: absolute; display: flex; align-items: center; gap: 8px; z-index: 20; }
+  .cap { display: flex; align-items: center; gap: 1px; padding: 4px; border-radius: 12px; --rim: 4px; }
+  .cap .btn { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; color: rgba(255,255,255,.82); transition: color .2s, background .2s, transform .25s var(--spring), opacity .25s; filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+  .cap .btn:hover { color: #fff; }
+  .cap .btn:not(.on):hover { background: rgba(255,255,255,.1); }
+  .cap .btn:active { transform: scale(.86); }
+  .cap .btn.on { color: #fff; }
+  .cap .btn.on2 { color: #fff; background: rgba(10,132,255,.42); box-shadow: inset 1px 1px 0 rgba(255,255,255,.25), inset 0 0 0 .5px rgba(100,170,255,.5); }
+  .cap .btn.dis { opacity: .3; pointer-events: none; }
+  .cap .btn.chev { width: 16px; margin-left: -5px; border-radius: 6px; }
+  .btn.on svg [data-f], .ib.on svg [data-f] { fill: currentColor; fill-opacity: .25; }
+  .ind { top: 4px; left: 0; height: 34px; border-radius: 8px; z-index: 1;
+    background: linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.12));
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,.34), inset 0 0 0 .5px rgba(255,255,255,.06), 0 0 0 .5px rgba(0,0,0,.25), 0 1px 3px rgba(0,0,0,.25);
+    transition: transform .55s var(--spring), width .3s var(--soft); }
+  .noanim .ind { transition: none; }
+  .cap .vsep { width: 1px; height: 18px; background: linear-gradient(transparent, rgba(255,255,255,.25), transparent); margin: 0 4px; }
+  .finish { height: 34px; padding: 0 14px 0 16px; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px;
+    background: linear-gradient(180deg, #3d9bff, #0a7aee);
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,.38), 0 0 0 .5px rgba(0,40,120,.5), 0 2px 10px rgba(10,132,255,.42);
+    transition: transform .25s var(--spring), filter .2s; text-shadow: 0 1px 1px rgba(0,40,120,.35); }
+  .finish:hover { filter: brightness(1.08); } .finish:active { transform: scale(.94); }
+  .finish .k { font-size: 11px; opacity: .7; font-weight: 500; }
+
+  .tipz [data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 12px); left: 50%; translate: -50% 0; white-space: nowrap; pointer-events: none; z-index: 99; filter: none;
+    font-size: 11.5px; font-weight: 500; padding: 4px 8px; border-radius: 6px; color: #fff; background: rgba(40,40,44,.82);
+    backdrop-filter: blur(16px) saturate(170%); box-shadow: inset 1px 1px 0 rgba(255,255,255,.18), 0 0 0 .5px rgba(0,0,0,.5), 0 6px 16px rgba(0,0,0,.35);
+    animation: tip .18s ease .4s both; }
+  @keyframes tip { from { opacity: 0; transform: translateY(3px); } }
+
+  .sp-a { border-radius: 11px; padding: 4px 6px; gap: 2px; --rim: 4px; }
+  .sp-a .ib { height: 28px; min-width: 28px; padding: 0 5px; border-radius: 7px; display: grid; place-items: center; color: rgba(255,255,255,.8); transition: background .2s, transform .25s var(--spring); }
+  .sp-a .ib:hover { background: rgba(255,255,255,.1); }
+  .sp-a .ib:active { transform: scale(.88); }
+  .sp-a .ib.on { background: rgba(255,255,255,.16); color: #fff; box-shadow: inset 1px 1px 0 rgba(255,255,255,.25); }
+  .sp-a .vsep { width: 1px; height: 16px; background: linear-gradient(transparent, rgba(255,255,255,.25), transparent); margin: 0 5px; }
+  .sw { position: relative; width: 20px; height: 20px; border-radius: 50%; margin: 0 4px; background: var(--c); transition: transform .3s var(--spring);
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,.5), inset 0 0 0 .5px rgba(0,0,0,.2), 0 2px 4px rgba(0,0,0,.3); }
+  .sw:hover { transform: scale(1.14); }
+  .sw.on::before { content: ""; position: absolute; inset: -4px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,.95), 0 0 8px rgba(255,255,255,.35); }
+  .sw.wheel { background: conic-gradient(#ff453a, #ff9f0a, #ffd60a, #32d74b, #64d2ff, #0a84ff, #bf5af2, #ff453a); }
+  .sw.pop { animation: pop .5s var(--spring); }
+  @keyframes pop { from { transform: scale(.55); } }
+  .tile { display: block; width: 20px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 .5px rgba(255,255,255,.3); }
+  .tile.px { background: repeating-conic-gradient(#8e8e93 0 25%, #d1d1d6 0 50%) 0 0 / 7px 7px; }
+  .tile.bl { background: linear-gradient(90deg, #77777c, #e5e5ea 50%, #77777c); filter: blur(1.2px); }
+
+  .mseg { position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 2px; border-radius: 8px; background: rgba(0,0,0,.22); box-shadow: inset 1px 1px 2px rgba(0,0,0,.3), inset -1px -1px 0 rgba(255,255,255,.08); }
+  .mseg .th { position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / var(--n)); transform: translateX(calc(var(--i) * 100%)); border-radius: 6px;
+    background: linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.15)); box-shadow: inset 1px 1px 0 rgba(255,255,255,.32), 0 0 0 .5px rgba(0,0,0,.3), 0 1px 3px rgba(0,0,0,.3); transition: transform .5s var(--spring); }
+  .mseg button { position: relative; z-index: 1; height: 24px; padding: 0 13px; font-size: 12px; font-weight: 600; color: rgba(255,255,255,.62); transition: color .2s; display: grid; place-items: center; white-space: nowrap; }
+  .mseg button.on { color: #fff; }
+  .mseg.ic button { padding: 0 8px; height: 26px; }
+  .mseg.ic button.dis { opacity: .35; }
+
+  .menu-a { position: absolute; z-index: 40; min-width: 190px; padding: 5px; border-radius: 10px; --rim: 4px; }
+  .menu-a .mi { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #fff; transition: background .15s; }
+  .menu-a .mi:hover { background: linear-gradient(180deg, #2a8fff, #0a7aee); }
+  .menu-a .mi .k { margin-left: auto; font-size: 11.5px; color: rgba(255,255,255,.55); }
+  .menu-a .mi .ck { margin-left: auto; color: #4aa3ff; }
+
+  .lt-line { position: absolute; border-radius: 6px; background: rgba(10,132,255,.09); box-shadow: 0 0 0 1px rgba(10,132,255,.4), 0 0 14px rgba(10,132,255,.2); animation: ltIn .45s var(--spring) both; }
+  @keyframes ltIn { from { opacity: 0; transform: scale(.97); } }
+  .lt-sweep { position: absolute; left: 0; right: 0; height: 70px; top: -70px; background: linear-gradient(180deg, rgba(10,132,255,0), rgba(10,132,255,.16) 60%, rgba(120,190,255,.5) 98%, rgba(10,132,255,0)); animation: sweep .75s var(--soft) forwards; pointer-events: none; }
+  @keyframes sweep { to { top: 100%; } }
+
+  .card-a { position: absolute; z-index: 30; border-radius: 14px; padding: 10px 12px 9px; --rim: 5px; transition: box-shadow .4s; }
+  .card-a .ring { inset: -1.5px; border-radius: 15.5px; padding: 2px; pointer-events: none; opacity: 0; transition: opacity .35s; z-index: 2;
+    background: conic-gradient(from var(--a), #ff6ac1, #ffb86b, #ffe36b, #5bd2ff, #a77bff, #ff6ac1);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: spin 2.2s linear infinite; }
+  @keyframes spin { to { --a: 360deg; } }
+  .card-a.thinking .ring { opacity: 1; }
+  .card-a.thinking { box-shadow: 0 0 0 .5px rgba(0,0,0,.35), 0 0 30px rgba(167,123,255,.5), 0 0 60px rgba(91,210,255,.28), 0 12px 32px rgba(0,0,0,.34); }
+  .card-a .txt { font-size: 14px; line-height: 1.62; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.3); transition: opacity .3s, filter .3s, transform .4s var(--soft); }
+  .card-a .txt.out { opacity: 0; filter: blur(7px); transform: translateY(3px); }
+  .card-a .xbtn { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; color: rgba(255,255,255,.75); background: rgba(255,255,255,.1); box-shadow: inset 1px 1px 0 rgba(255,255,255,.15); margin-left: auto; }
+  .card-a .ftr { display: flex; align-items: center; gap: 6px; border-top: .5px solid rgba(255,255,255,.18); padding-top: 9px; margin-top: 10px; font-size: 11.5px; color: rgba(255,255,255,.65); }
+  .card-a .copy { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: #6cb4ff; padding: 3px 8px; border-radius: 6px; }
+  .card-a .copy:hover { background: rgba(10,132,255,.18); }
+
+  .bezel { position: absolute; left: 50%; top: 50%; width: 156px; height: 156px; margin: -78px 0 0 -78px; border-radius: 28px; z-index: 70; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-size: 13px; font-weight: 600; --rim: 8px;
+    opacity: 0; transform: scale(.86); transition: opacity .25s, transform .5s var(--spring); pointer-events: none; }
+  .bezel.show { opacity: 1; transform: none; }
+  .draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw .45s .12s var(--soft) forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .thumb { position: absolute; right: 18px; bottom: 18px; width: 188px; padding: 7px; border-radius: 12px; z-index: 65; --rim: 4px; transform: translateX(calc(100% + 40px)); transition: transform .65s var(--spring); }
+  .thumb.show { transform: none; }
+  .thumb .img { position: relative; width: 174px; overflow: hidden; border-radius: 7px; box-shadow: 0 0 0 .5px rgba(0,0,0,.4); background: #fff; }
+  .thumb .cap3 { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: #fff; padding: 7px 4px 2px; }
+  #postShot { transition: opacity .3s; }
+
+  .loupe { position: absolute; width: 128px; height: 128px; border-radius: 50%; overflow: hidden; z-index: 30; pointer-events: none;
+    box-shadow: 0 0 0 .5px rgba(0,0,0,.6), 0 0 0 4px rgba(255,255,255,.85), inset 1px 1px 0 rgba(255,255,255,.6), 0 0 0 4.5px rgba(0,0,0,.3), 0 14px 34px rgba(0,0,0,.5); background: #fff; }
+  .loupe .lp-in { position: absolute; left: 0; top: 0; width: 960px; height: 520px; transform-origin: 0 0; }
+  .loupe .lp-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(0,0,0,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.07) 1px, transparent 1px); background-size: 7px 7px; }
+  .loupe .lp-c { position: absolute; left: 60.5px; top: 60.5px; width: 7px; height: 7px; box-shadow: 0 0 0 1px #fff, 0 0 0 2px rgba(0,0,0,.6); }
+  .lp-info { position: absolute; z-index: 30; pointer-events: none; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 7px; font-variant-numeric: tabular-nums; white-space: nowrap; --rim: 3px; }
+  .lp-info .chip { width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(255,255,255,.5); }
+  .xh { position: absolute; background: rgba(255,255,255,.55); pointer-events: none; z-index: 5; }
+  kbd { font-family: inherit; display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 7px; margin-right: 5px; border-radius: 5px; font-size: 11px; font-weight: 600; color: #fff;
+    background: linear-gradient(180deg, #55555a, #3e3e42); box-shadow: inset 0 .5px 0 rgba(255,255,255,.25), 0 1px 0 rgba(0,0,0,.6), 0 0 0 .5px rgba(0,0,0,.4); }
+
+  .rec-dot { width: 9px; height: 9px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff8a80, #ff3b30); box-shadow: 0 0 0 3px rgba(255,69,58,.25), 0 0 10px rgba(255,69,58,.7); animation: breathe 1.6s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .45; box-shadow: 0 0 0 5px rgba(255,69,58,.1), 0 0 4px rgba(255,69,58,.3); } }
+  .sel-a.recording { outline: 1.5px solid #ff453a; animation: recglow 1.8s ease-in-out infinite; }
+  @keyframes recglow { 0%,100% { box-shadow: 0 0 0 2000px rgba(0,0,0,.42), 0 0 0 4px rgba(255,69,58,.16), 0 0 24px rgba(255,69,58,.4); } 50% { box-shadow: 0 0 0 2000px rgba(0,0,0,.42), 0 0 0 2px rgba(255,69,58,.08), 0 0 10px rgba(255,69,58,.15); } }
+  .meter { display: flex; align-items: center; gap: 2px; height: 18px; }
+  .meter i { width: 2.5px; border-radius: 2px; background: #fff; transition: height .12s; }
+  .mini i { width: 2px; border-radius: 1px; background: #4cff7a; animation: lvl .9s ease-in-out infinite; box-shadow: 0 0 4px rgba(76,255,122,.6); }
+  @keyframes lvl { 0%,100% { height: 3px; } 50% { height: 11px; } }
+  .rec-go { height: 34px; padding: 0 14px 0 12px; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+    background: linear-gradient(180deg, #ff6259, #e8352b); box-shadow: inset 1px 1px 0 rgba(255,255,255,.38), 0 0 0 .5px rgba(120,0,0,.5), 0 2px 10px rgba(255,69,58,.42); transition: transform .25s var(--spring), filter .2s; text-shadow: 0 1px 1px rgba(120,0,0,.35); }
+  .rec-go:hover { filter: brightness(1.08); } .rec-go:active { transform: scale(.94); }
+  .rbtn { position: relative; height: 34px; min-width: 34px; padding: 0 8px; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 4px; color: rgba(255,255,255,.5); transition: background .2s, color .2s, transform .25s var(--spring), opacity .25s; }
+  .rbtn:active { transform: scale(.9); }
+  .rbtn.on { color: #fff; background: rgba(255,255,255,.14); box-shadow: inset 1px 1px 0 rgba(255,255,255,.22); }
+  .rbtn.dis { opacity: .35; }
+  .count { position: absolute; width: 128px; height: 128px; margin: -64px 0 0 -64px; border-radius: 50%; display: grid; place-items: center; z-index: 30; --rim: 9px; }
+  .count .num { font-family: var(--disp); font-size: 56px; font-weight: 600; letter-spacing: -.02em; text-shadow: 0 2px 8px rgba(0,0,0,.35); animation: numIn .6s var(--spring) both; }
+  @keyframes numIn { from { opacity: 0; transform: scale(1.5); filter: blur(6px); } }
+  .count svg { position: absolute !important; inset: 0; transform: rotate(-90deg); }
+  .count .arc { stroke-dasharray: 364; stroke-dashoffset: 364; animation: arc .7s linear forwards; }
+  @keyframes arc { to { stroke-dashoffset: 0; } }
+
+  /* settings before */
+  .setb { position: absolute; inset: 0; display: flex; background: linear-gradient(135deg,#080F1E,#0C162B 55%,#0A1222); color: #F4F8FF; font-size: 14px; }
+  .setb .side { width: 210px; background: #0E192E; border-right: 1px solid rgba(148,197,255,.1); padding: 20px 14px; display: flex; flex-direction: column; }
+  .setb .nav { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 8px; color: #BDD1EA; font-weight: 500; }
+  .setb .nav.on { background: rgba(56,189,248,.15); color: #7DD3FC; }
+  .setb .grp { font-size: 12px; color: #6C8CB8; margin: 16px 12px 6px; font-weight: 600; }
+  .setb .main { flex: 1; overflow-y: auto; padding: 30px 36px; }
+  .setb .main::-webkit-scrollbar { width: 8px; } .setb .main::-webkit-scrollbar-thumb { background: #233C67; border-radius: 4px; }
+  .setb .card { background: #0E192E; border: 1px solid rgba(148,197,255,.11); border-radius: 12px; }
+  .setb .row { display: flex; align-items: center; gap: 20px; padding: 16px 18px; }
+  .setb .row + .row { border-top: 1px solid rgba(148,197,255,.08); }
+  .setb .t { font-weight: 600; font-size: 14px; }
+  .setb .d { font-size: 13px; color: #94AECE; margin-top: 3px; line-height: 1.45; }
+  .setb .ctl { margin-left: auto; flex: none; }
+  .setb .in { width: 260px; height: 36px; border-radius: 8px; background: #080F1D; border: 1px solid rgba(148,197,255,.15); padding: 0 12px; display: flex; align-items: center; font-size: 13px; color: #BDD1EA; }
+  .setb .sec { padding: 18px 18px 6px; font-size: 13px; font-weight: 600; color: #7DD3FC; border-top: 1px solid rgba(148,197,255,.08); }
+  .tg-b { width: 44px; height: 24px; border-radius: 12px; background: #13223D; border: 1px solid rgba(148,197,255,.2); position: relative; }
+  .tg-b::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #6C8CB8; }
+  .tg-b.on { background: #38BDF8; border-color: #38BDF8; } .tg-b.on::after { left: 23px; background: #fff; }
+  .note-b { margin: 6px 18px 16px; padding: 10px 12px; border-radius: 8px; background: rgba(56,189,248,.08); border: 1px solid rgba(125,211,252,.2); font-size: 12.5px; color: #94AECE; line-height: 1.5; }
+
+  /* settings after (glass window) */
+  .swin { position: absolute !important; left: 26px; top: 22px; right: 26px; bottom: 22px; border-radius: 12px; display: flex; font-size: 13px; --rim: 4px; }
+  .swin > .side { width: 216px; padding: 14px 12px; }
+  .swin .search { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 9px; border-radius: 7px; background: rgba(255,255,255,.08); box-shadow: inset 1px 1px 0 rgba(255,255,255,.12), inset 0 0 0 .5px rgba(255,255,255,.05); color: rgba(255,255,255,.55); font-size: 12.5px; }
+  .swin .prof { display: flex; align-items: center; gap: 10px; padding: 12px 8px; margin: 8px 0 6px; }
+  .swin .nav { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 6px; border-radius: 7px; color: rgba(255,255,255,.9); font-size: 13px; font-weight: 500; margin-bottom: 2px; transition: background .15s; }
+  .swin .nav:hover { background: rgba(255,255,255,.07); }
+  .swin .nav.on { background: linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.1)); box-shadow: inset 1px 1px 0 rgba(255,255,255,.25), 0 0 0 .5px rgba(0,0,0,.25); color: #fff; }
+  .sq { display: inline-grid; place-items: center; border-radius: 24%; flex: none; color: #fff; box-shadow: inset 1px 1px 0 rgba(255,255,255,.45), inset -1px -1px 0 rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.35); }
+  .swin > .main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: rgba(0,0,0,.16); border-radius: 0 12px 12px 0; box-shadow: inset 1px 0 0 rgba(255,255,255,.08); }
+  .swin .bar { height: 48px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 16px 0 20px; font-size: 13px; font-weight: 600; }
+  .swin .bar .navs { display: flex; gap: 2px; color: rgba(255,255,255,.3); }
+  .swin .bar .capb { margin-left: auto; display: flex; gap: 20px; color: rgba(255,255,255,.5); font-weight: 400; font-size: 12px; }
+  .swin .scroll { flex: 1; overflow-y: auto; padding: 4px 0 30px; }
+  .swin .scroll::-webkit-scrollbar { width: 8px; } .swin .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 4px; }
+  .swin .inner { width: 576px; margin: 0 auto; }
+  .gh { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.55); margin: 20px 0 7px 14px; }
+  .grp2 { background: rgba(255,255,255,.06); border-radius: 11px; box-shadow: inset 1px 1px 0 rgba(255,255,255,.12), inset 0 0 0 .5px rgba(255,255,255,.05); overflow: hidden; }
+  .grp2 + .grp2 { margin-top: 14px; }
+  .hero2 { display: flex; align-items: center; gap: 14px; padding: 16px; }
+  .row2 { position: relative; display: flex; align-items: center; min-height: 44px; padding: 0 14px; gap: 10px; }
+  .row2 + .row2::before, .advbody .row2:first-child::before { content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: .5px; background: rgba(255,255,255,.1); }
+  .row2.ic + .row2.ic::before { left: 48px; }
+  .row2 .r { margin-left: auto; display: flex; align-items: center; gap: 6px; color: rgba(255,255,255,.62); }
+  .txt2 { background: transparent; text-align: right; color: rgba(255,255,255,.62); outline: none; width: 240px; font-size: 13px; border-radius: 5px; padding: 3px 6px; transition: background .2s, box-shadow .2s; }
+  .txt2:focus { background: rgba(0,0,0,.25); color: #fff; text-align: left; box-shadow: 0 0 0 3px rgba(10,132,255,.45), inset 0 0 0 .5px rgba(10,132,255,.9); }
+  .pop2 { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 5px 0 9px; border-radius: 6px; font-size: 12.5px; font-weight: 500; color: #fff; background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.09)); box-shadow: inset 1px 1px 0 rgba(255,255,255,.16), 0 0 0 .5px rgba(0,0,0,.35); }
+  .pop2 .ud { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: linear-gradient(180deg, #3d9bff, #0a7aee); box-shadow: inset 1px 1px 0 rgba(255,255,255,.3); color: #fff; }
+  .btn2 { height: 24px; padding: 0 12px; border-radius: 6px; font-size: 12.5px; font-weight: 500; color: #fff; background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,.1)); box-shadow: inset 1px 1px 0 rgba(255,255,255,.18), 0 0 0 .5px rgba(0,0,0,.4), 0 1px 1px rgba(0,0,0,.2); }
+  .btn2:active { filter: brightness(1.3); }
+  .tg { position: relative; width: 40px; height: 24px; border-radius: 12px; flex: none; background: rgba(0,0,0,.28); box-shadow: inset 1px 1px 3px rgba(0,0,0,.35), inset -1px -1px 0 rgba(255,255,255,.08); transition: background .25s; }
+  .tg::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 10px; background: linear-gradient(160deg, #fff, #e9eef5); box-shadow: inset 1px 1px 0 #fff, 0 2px 5px rgba(0,0,0,.35); transition: transform .45s var(--spring), width .2s var(--soft); }
+  .tg.on { background: linear-gradient(180deg, #3d9bff, #0a7aee); box-shadow: inset 1px 1px 3px rgba(0,40,120,.35), inset -1px -1px 0 rgba(255,255,255,.2); }
+  .tg.on::after { transform: translateX(16px); }
+  .tg:active::after { width: 25px; } .tg.on:active::after { transform: translateX(11px); }
+  .kc2 { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 5px; font-size: 11.5px; font-weight: 600; color: #fff;
+    background: linear-gradient(180deg, #4d4d52, #3a3a3e); box-shadow: inset 0 .5px 0 rgba(255,255,255,.22), 0 1px 0 rgba(0,0,0,.65), 0 0 0 .5px rgba(0,0,0,.4); }
+  .kc-wait { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 600; color: #fff; background: rgba(10,132,255,.25); box-shadow: 0 0 0 1.5px #4aa3ff, 0 0 14px rgba(10,132,255,.5); animation: breatheB 1.4s ease-in-out infinite; }
+  @keyframes breatheB { 50% { box-shadow: 0 0 0 1.5px rgba(74,163,255,.5), 0 0 4px rgba(10,132,255,.2); } }
+  .foot2 { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: rgba(255,255,255,.5); margin: 8px 14px 0; }
+  .chip2 { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 6px; font-size: 11.5px; font-weight: 600; background: rgba(255,255,255,.08); color: rgba(255,255,255,.65); box-shadow: inset 1px 1px 0 rgba(255,255,255,.12); transition: all .3s; }
+  .chip2.ok { background: rgba(50,215,75,.16); color: #6ee68a; box-shadow: inset 1px 1px 0 rgba(160,255,180,.2); }
+  .chip2 .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+  .advwrap .chev { display: inline-grid; transition: transform .4s var(--spring); }
+  .advwrap.open .chev { transform: rotate(90deg); }
+  .advbody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .4s var(--soft); }
+  .advwrap.open .advbody { grid-template-rows: 1fr; }
+  .advbody > div { overflow: hidden; }
+  .spin { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.25); border-top-color: #fff; animation: rot .7s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* page chrome */
+  .cmp td, .cmp th { padding: 8px 12px; vertical-align: top; text-align: left; }
+  .cmp tr + tr td { border-top: 1px solid var(--border); }
+  .tabbtn { height: 32px; padding: 0 14px; border-radius: 8px; font-size: 13px; color: var(--muted-foreground); }
+  .tabbtn.on { background: var(--card); color: var(--foreground); box-shadow: 0 0 0 1px var(--border); }
+  .modeseg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--card); box-shadow: 0 0 0 1px var(--border); }
+  .modeseg button { height: 30px; padding: 0 16px; border-radius: 7px; font-size: 13px; color: var(--muted-foreground); }
+  body.mode-b .modeseg .mb { background: rgba(244,63,94,.9); color: #fff; }
+  body.mode-a .modeseg .ma { background: #0A84FF; color: #fff; }
+  #phaseSeg button.on { background: var(--foreground); color: var(--background); }
+  .rchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 6px; border-radius: 99px; font-size: 12.5px; font-weight: 600; color: var(--foreground); background: var(--card); box-shadow: 0 0 0 1px var(--border); transition: opacity .2s; }
+  .rchip .ck { width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; background: #34c759; color: #fff; transition: background .2s; }
+  .rchip.off { opacity: .5; } .rchip.off .ck { background: rgba(128,128,128,.4); }
+  .detail { display: flex; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px var(--border); font-size: 12.5px; line-height: 1.5; }
+  .detail .n { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; background: #0A84FF; }
+  .code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12.5px; line-height: 1.75; }
+  .code .k { color: #ffd479; } .code .p { color: #9ad1ff; } .code .v { background: rgba(255,255,255,.14); padding: 0 4px; border-radius: 4px; } .code .c { color: rgba(255,255,255,.5); }
+</style>
+</head>
+<body class="mode-a no-ref bg-[var(--background)] text-[var(--foreground)] antialiased">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <filter id="seaF" x="0" y="0" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency=".005 .022" numOctaves="4" seed="7" result="n"/>
+    <feDiffuseLighting in="n" surfaceScale="7" lighting-color="#fff" result="l"><feDistantLight azimuth="235" elevation="35"/></feDiffuseLighting>
+    <feColorMatrix type="matrix" values=".30 0 0 0 -.17  .40 0 0 0 -.18  .52 0 0 0 -.19  0 0 0 0 1"/>
+  </filter>
+  <filter id="lg" x="0" y="0" width="1" height="1" primitiveUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+    <feImage id="lgMap" x="0" y="0" width="1" height="1" preserveAspectRatio="none" result="m"/>
+    <feDisplacementMap in="SourceGraphic" in2="m" scale=".05" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</defs></svg>
+
+<div class="max-w-[1010px] mx-auto px-5 py-6">
+  <div class="flex items-end justify-between gap-4 flex-wrap">
+    <div>
+      <div class="text-xl font-semibold">Screen · 设计预览 v4 · 克制的玻璃</div>
+      <div class="text-[13px] text-[var(--muted-foreground)] mt-1">借用液态玻璃的思路，但收着用：中性深色底、轻亮边、常规圆角，折射默认关闭。按 <kbd style="background:#0A84FF">空格</kbd> 切换「现在 / 优化后」。</div>
+    </div>
+    <div class="modeseg"><button class="mb" onclick="setMode('b')">现在</button><button class="ma" onclick="setMode('a')">优化后</button></div>
+  </div>
+  <div class="flex items-center gap-2 mt-4 flex-wrap" id="recipe">
+    <span class="text-[12px] text-[var(--muted-foreground)] mr-1">玻璃配方（点击单独开关，看每一步的作用）：</span>
+  </div>
+
+  <div class="flex gap-1 mt-4 mb-3 flex-wrap" id="tabs">
+    <button class="tabbtn on" data-tab="shot">① 截图</button>
+    <button class="tabbtn" data-tab="text">② 识别与翻译</button>
+    <button class="tabbtn" data-tab="rec">③ 录屏</button>
+    <button class="tabbtn" data-tab="set">④ 设置</button>
+    <button class="tabbtn" data-tab="tok">⑤ 设计语言</button>
+  </div>
+
+  <!-- ================= SHOT ================= -->
+  <section data-pane="shot">
+    <div class="flex items-center gap-2 mb-3 text-[13px] flex-wrap">
+      <div class="modeseg" id="phaseSeg"><button data-ph="pre" style="height:26px">框选前</button><button data-ph="post" style="height:26px">框选后</button></div>
+      <span class="text-[var(--muted-foreground)] ml-1" id="shotHint"></span>
+    </div>
+    <div class="stage-wrap" data-w="960" data-h="520">
+      <div class="stage phase-post" id="stShot" style="height:520px">
+        <div class="scene" id="sceneShot" style="position:absolute;inset:0">
+          <div class="desk"></div>
+          <div class="win"><div class="win-bar"><span class="fav"></span>Design Notes<span class="cap"><span>—</span><span>☐</span><span>✕</span></span></div></div>
+          <div class="fx kicker" style="left:124px;top:134px">DESIGN NOTES · 2026</div>
+          <div class="fx h1" style="left:124px;top:156px;width:560px">Simplicity is the ultimate sophistication.</div>
+          <div class="fx para" style="left:124px;top:232px;width:560px">Good design is as little design as possible. Less, but better — because it concentrates on the essential aspects, and the products are not burdened with non-essentials.</div>
+          <div class="photo" style="left:40px;top:340px;width:880px;height:158px;border-radius:0 0 12px 12px"><div class="sea"></div><span class="cap2">PACIFIC · 05:42 AM</span></div>
+        </div>
+
+        <div class="ph-pre">
+          <div class="dim v-b"></div>
+          <div class="v-b tb tb-b glass-b" style="left:50%;top:22px;transform:translateX(-50%);padding:5px">
+            <button class="px-3 h-[38px] rounded-[8px] text-[14px] font-semibold" style="background:rgba(56,189,248,.18);color:#7DD3FC;min-width:70px">截图</button>
+            <button class="px-3 h-[38px] rounded-[8px] text-[14px] font-semibold" style="color:#94AECE;min-width:86px">滚动截图</button>
+            <button class="px-3 h-[38px] rounded-[8px] text-[14px] font-semibold" style="color:#94AECE;min-width:70px">提取文字</button>
+            <button class="px-3 h-[38px] rounded-[8px] text-[14px] font-semibold" style="color:#94AECE;min-width:70px">翻译</button>
+          </div>
+          <div class="v-b xh" style="left:0;right:0;top:300px;height:1px"></div>
+          <div class="v-b xh" style="top:0;bottom:0;left:520px;width:1px"></div>
+          <div class="v-a">
+            <div class="dim" style="background:rgba(0,0,0,.14)"></div>
+            <div class="xh" id="xhH" style="left:0;right:0;height:1px"></div>
+            <div class="xh" id="xhV" style="top:0;bottom:0;width:1px"></div>
+            <div class="loupe" id="loupe"><div class="lp-in"></div><div class="lp-grid"></div><div class="lp-c"></div></div>
+            <div class="lp-info glass gtext" id="lpInfo"></div>
+            <div class="glass gtext abs flex items-center" style="left:50%;bottom:22px;translate:-50% 0;border-radius:12px;padding:7px 14px 7px 10px;font-size:12px;font-weight:600;gap:16px;z-index:20">
+              <span><kbd>拖动</kbd>截取区域</span><span><kbd>单击</kbd>截取窗口</span><span><kbd>Esc</kbd>取消</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ph-post" id="postShot">
+          <div class="sel sel-b v-b" style="left:108px;top:124px;width:600px;height:200px" id="selShotB"></div>
+          <div class="sel sel-a v-a" style="left:108px;top:124px;width:600px;height:200px" id="selShotA"></div>
+          <div class="v-b" id="tbShotB"></div>
+          <div class="v-a tipz" id="tbShotA"></div>
+        </div>
+        <div class="thumb glass v-a" id="thumbShot"></div>
+        <div class="bezel glass gtext v-a" id="bezelShot"></div>
+        <div class="badge v-b">现在</div><div class="badge v-a">优化后</div>
+      </div>
+    </div>
+    <div id="notesShot"></div>
+  </section>
+
+  <!-- ================= TEXT ================= -->
+  <section data-pane="text" hidden>
+    <div class="text-[13px] text-[var(--muted-foreground)] mb-3 flex items-center gap-3 flex-wrap">
+      <span>「提取文字」「翻译」仍是两个按钮。优化后：文字在选区里逐行亮起；翻译时卡片边缘出现流动的彩色光环。</span>
+      <button class="v-a text-[#0A84FF] text-[13px]" onclick="playText('orig')">↻ 提取文字</button>
+      <button class="v-a text-[#0A84FF] text-[13px]" onclick="playText('trans')">↻ 翻译</button>
+    </div>
+    <div class="stage-wrap" data-w="960" data-h="520">
+      <div class="stage" id="stText" style="height:520px">
+        <div class="desk"></div><div class="win"><div class="win-bar"><span class="fav"></span>Design Notes<span class="cap"><span>—</span><span>☐</span><span>✕</span></span></div></div>
+        <div class="fx kicker" style="left:124px;top:134px">DESIGN NOTES · 2026</div>
+        <div class="fx h1" style="left:124px;top:156px;width:340px">Simplicity is the ultimate sophistication.</div>
+        <div class="fx para" style="left:124px;top:268px;width:340px">Good design is as little design as possible. Less, but better — because it concentrates on the essential aspects.</div>
+        <div class="photo" style="left:500px;top:92px;width:396px;height:384px;border-radius:14px"><div class="sea"></div><span class="cap2">PACIFIC · 05:42 AM</span></div>
+        <div class="photo" style="left:124px;top:388px;width:340px;height:88px;border-radius:12px"><div class="sea"></div></div>
+
+        <div class="sel sel-b v-b" style="left:108px;top:124px;width:372px;height:236px" id="selTextB"></div>
+        <div class="sel sel-a v-a" style="left:108px;top:124px;width:372px;height:236px" id="selTextA"></div>
+
+        <div class="v-b aurora-b" style="position:absolute;left:500px;top:80px;width:440px;border-radius:16px;z-index:30">
+          <div style="position:absolute;left:-9px;top:70px;width:0;height:0;border-top:9px solid transparent;border-bottom:9px solid transparent;border-right:9px solid #16294A"></div>
+          <div class="flex items-center gap-2" style="padding:14px 14px 12px 16px">
+            <div class="flex items-center gap-2" style="height:28px;padding:0 10px;border-radius:14px;background:rgba(56,189,248,.18);border:1px solid rgba(125,211,252,.27);font-size:13px">
+              <span style="color:#94AECE">自动识别</span><span data-ic="arrowRight" data-s="13" style="color:#7DD3FC"></span><span>简体中文</span><span data-ic="chevronDown" data-s="14" style="color:#6C8CB8"></span>
+            </div>
+            <span style="font-size:11.5px;color:#7DD3FC;background:rgba(56,189,248,.12);padding:3px 9px;border-radius:11px;font-weight:600">✦ AI 自然翻译</span>
+            <span class="ml-auto" data-ic="x" data-s="16" style="color:#94AECE"></span>
+          </div>
+          <div style="border-top:1px solid rgba(148,197,255,.1);padding:14px 18px;font-size:15.5px;line-height:1.7;min-height:170px">简约是终极的精致。<br>好的设计是尽可能少的设计。少，但更好——因为它专注于本质。</div>
+          <div class="flex items-center gap-2" style="border-top:1px solid rgba(148,197,255,.1);padding:10px 14px;border-radius:0 0 15px 15px;background:rgba(8,15,29,.45)">
+            <span style="width:6px;height:6px;border-radius:50%;background:#34D399"></span>
+            <span style="font-size:12px;color:#6C8CB8">翻译完成 · AI 自然翻译 · 1.3 s</span>
+            <button class="ml-auto flex items-center gap-1.5" style="height:32px;min-width:88px;justify-content:center;border-radius:8px;background:#13223D;border:1px solid rgba(148,197,255,.18);font-size:12.5px;color:#94AECE"><span data-ic="rotate" data-s="14"></span>重新翻译</button>
+            <button class="grad-btn flex items-center gap-1.5" style="height:32px;min-width:98px;justify-content:center;border-radius:8px;font-size:12.5px"><span data-ic="copy" data-s="14"></span>复制译文</button>
+          </div>
+        </div>
+
+        <div class="v-a" id="cardTextHost"></div>
+        <div class="bezel glass gtext v-a" id="bezelText"></div>
+        <div class="badge v-b">现在</div><div class="badge v-a">优化后</div>
+      </div>
+    </div>
+    <div id="notesText"></div>
+  </section>
+
+  <!-- ================= REC ================= -->
+  <section data-pane="rec" hidden>
+    <div class="text-[13px] text-[var(--muted-foreground)] mb-3">优化后：先选「视频 / GIF」（选 GIF 时声音开关会自动变灰，因为 GIF 没有声音）；点「录制」会倒计时，停止后右下角滑出缩略图。</div>
+    <div class="stage-wrap" data-w="960" data-h="520">
+      <div class="stage" id="stRec" style="height:520px">
+        <div class="scene" id="sceneRec" style="position:absolute;inset:0">
+          <div class="desk"></div><div class="win"><div class="win-bar"><span class="fav"></span>Design Notes<span class="cap"><span>—</span><span>☐</span><span>✕</span></span></div></div>
+          <div class="fx kicker" style="left:124px;top:134px">DESIGN NOTES · 2026</div>
+          <div class="fx h1" style="left:124px;top:156px;width:560px">Simplicity is the ultimate sophistication.</div>
+          <div class="fx para" style="left:124px;top:232px;width:560px">Good design is as little design as possible. Less, but better — because it concentrates on the essential aspects.</div>
+          <div class="photo" style="left:40px;top:318px;width:880px;height:180px;border-radius:0 0 12px 12px"><div class="sea"></div><span class="cap2">PACIFIC · 05:42 AM</span></div>
+        </div>
+        <div class="sel sel-b v-b" id="selRecB" style="left:180px;top:84px;width:600px;height:210px"></div>
+        <div class="sel sel-a v-a" id="selRecA" style="left:180px;top:84px;width:600px;height:210px"></div>
+
+        <div class="v-b aurora-b" style="position:absolute;left:322px;top:306px;width:316px;border-radius:14px;padding:18px 20px 12px;z-index:20">
+          <button class="grad-btn w-full" style="height:42px;border-radius:10px;font-size:15px">开始录制</button>
+          <div class="flex justify-center gap-2" style="margin-top:14px">
+            <span style="font-size:12px;font-weight:600;padding:4px 14px;border-radius:99px;background:rgba(56,189,248,.18);color:#7DD3FC;border:1px solid rgba(125,211,252,.35)">MP4</span>
+            <span style="font-size:12px;font-weight:600;padding:4px 14px;border-radius:99px;color:#4A6994;border:1px solid rgba(148,197,255,.12)">GIF</span>
+          </div>
+          <div style="height:1px;background:rgba(148,197,255,.15);margin:14px 0 8px"></div>
+          <div class="flex justify-center gap-3">
+            <div class="flex flex-col items-center gap-1"><div style="width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:rgba(56,189,248,.18);border:1px solid #38BDF8;color:#38BDF8" data-ic="volume" data-s="18"></div><span style="font-size:11px;color:#94AECE">扬声器</span></div>
+            <div class="flex flex-col items-center gap-1"><div style="width:40px;height:40px;border-radius:10px;display:grid;place-items:center;border:1px solid transparent;color:#6C8CB8" data-ic="mic" data-s="18"></div><span style="font-size:11px;color:#94AECE">麦克风</span></div>
+            <div class="flex flex-col items-center gap-1" style="opacity:.4"><div style="width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:#6C8CB8" data-ic="video" data-s="18"></div><span style="font-size:11px;color:#94AECE">摄像头</span></div>
+            <div class="flex flex-col items-center gap-1"><div style="width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:rgba(56,189,248,.18);border:1px solid #38BDF8;color:#38BDF8" data-ic="pointer" data-s="18"></div><span style="font-size:11px;color:#94AECE">鼠标设置</span></div>
+          </div>
+        </div>
+
+        <div class="v-a tipz" id="recA"></div>
+        <div class="thumb glass v-a" id="thumbRec"></div>
+        <div class="badge v-b">现在</div><div class="badge v-a">优化后</div>
+      </div>
+    </div>
+    <div id="notesRec"></div>
+  </section>
+
+  <!-- ================= SETTINGS ================= -->
+  <section data-pane="set" hidden>
+    <div class="text-[13px] text-[var(--muted-foreground)] mb-3">优化后：整个窗口是一块玻璃，背后的画面会透出来。左侧三页都能点；开关、分段控件、「高级」都能操作；点快捷键后直接按新的组合键。</div>
+    <div class="stage-wrap" data-w="960" data-h="560">
+      <div class="stage" id="stSet" style="height:560px">
+        <div class="setb v-b">
+          <div class="side">
+            <div style="padding:0 12px 10px"><div style="font-size:18px;font-weight:700">Screen</div><div style="font-size:12px;color:#6C8CB8">设置</div></div>
+            <div class="grp">基础设置</div>
+            <div class="nav"><span data-ic="sliders" data-s="16"></span>通用</div>
+            <div class="nav"><span data-ic="keyboard" data-s="16"></span>快捷键</div>
+            <div class="nav"><span data-ic="video" data-s="16"></span>录屏</div>
+            <div class="grp">文字与翻译</div>
+            <div class="nav"><span data-ic="scanText" data-s="16"></span>文字识别</div>
+            <div class="nav on"><span data-ic="languages" data-s="16"></span>翻译接口</div>
+            <div style="margin-top:auto;padding:0 12px;font-size:12px;color:#4A6994">v1.0.16 · 本地构建</div>
+          </div>
+          <div class="main" id="setBMain"></div>
+        </div>
+        <div class="v-a" style="position:absolute;inset:0"><div class="desk"></div><div class="swin glass dark gtext" id="setA"></div></div>
+        <div class="badge v-b" style="left:auto;right:16px">现在</div><div class="badge v-a" style="left:auto;right:16px;top:auto;bottom:6px">优化后</div>
+      </div>
+    </div>
+    <div id="notesSet"></div>
+  </section>
+
+  <!-- ================= DESIGN LANGUAGE ================= -->
+  <section data-pane="tok" hidden>
+    <div class="text-[13px] text-[var(--muted-foreground)] mb-3">这一页不受空格切换影响。上面的五个配方开关在这里同样生效。</div>
+    <div class="stage-wrap" data-w="960" data-h="400">
+      <div class="stage" id="stTok" style="height:400px"></div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4" id="details"></div>
+  </section>
+</div>
+
+<script>
+/* ======================= icons ======================= */
+const I = {
+  pointer:'<path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" data-f/>',
+  square:'<rect width="17" height="17" x="3.5" y="3.5" rx="3" data-f/>',
+  circle:'<circle cx="12" cy="12" r="9" data-f/>',
+  minus:'<path d="M5 19 19 5"/>',
+  arrow:'<path d="M13 5h6v6"/><path d="M19 5 5 19"/>',
+  pen:'<path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z" data-f/>',
+  type:'<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/>',
+  listOrdered:'<path d="M10 12h11"/><path d="M10 18h11"/><path d="M10 6h11"/><path d="M4 10h2"/><path d="M4 6h1v4"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>',
+  numberCircle:'<circle cx="12" cy="12" r="9" data-f/><path d="M10.5 9.5 12.5 8v8"/>',
+  mosaic:'<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><rect x="9.2" y="3.5" width="5.6" height="5.7" fill="currentColor" stroke="none"/><rect x="3.5" y="9.2" width="5.7" height="5.6" fill="currentColor" stroke="none"/><rect x="14.8" y="9.2" width="5.7" height="5.6" fill="currentColor" stroke="none"/><rect x="9.2" y="14.8" width="5.6" height="5.7" fill="currentColor" stroke="none"/>',
+  pin:'<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
+  languages:'<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>',
+  chevronDown:'<path d="m6 9 6 6 6-6"/>', chevronRight:'<path d="m9 18 6-6-6-6"/>', chevronLeft:'<path d="m15 18-6-6 6-6"/>',
+  updown:'<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
+  scanText:'<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h8"/><path d="M7 12h10"/><path d="M7 16h6"/>',
+  long:'<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+  video:'<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
+  gif:'<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M9.5 10H8a1.5 1.5 0 0 0-1.5 1.5v1A1.5 1.5 0 0 0 8 14h1.5v-2H8.5"/><path d="M12.5 10v4"/><path d="M15.5 14v-4h2.5M15.5 12h2"/>',
+  undo:'<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
+  redo:'<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
+  download:'<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
+  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  volume:'<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>',
+  volumeX:'<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/>',
+  mic:'<path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/>',
+  micOff:'<line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/>',
+  copy:'<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  rotate:'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+  arrowRight:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  grid:'<rect width="17" height="17" x="3.5" y="3.5" rx="2"/><path d="M3.5 12h17"/><path d="M12 3.5v17"/>',
+  sliders:'<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>',
+  keyboard:'<rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h8M7 16h10"/>',
+  pause:'<rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/>',
+  stop:'<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/>',
+  folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  lock:'<rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  play:'<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
+  cursorClick:'<path d="M9 9l5 12 1.8-5.2L21 14Z"/><path d="M7.2 2.2 8 5.1"/><path d="m5.1 8-2.9-.8"/><path d="M14 4.1 12 6"/><path d="m6 12-1.9 2"/>',
+  hd:'<rect width="20" height="14" x="2" y="5" rx="2"/><path d="M7 9v6M11 9v6M7 12h4M14 9v6h1.5a3 3 0 0 0 0-6Z"/>'
+};
+const ic = (n, s = 18, w = 1.75) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${I[n] || ''}</svg>`;
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+function hydrateIcons(root = document) { $$('[data-ic]', root).forEach(el => { el.innerHTML = ic(el.dataset.ic, +(el.dataset.s || 18)); if (!el.style.display) el.style.display = 'inline-grid'; }); }
+const SEA = `<svg viewBox="0 0 960 520" preserveAspectRatio="xMidYMid slice"><rect width="960" height="520" filter="url(#seaF)"/></svg>`;
+const APP_ICON = s => `<svg width="${s}" height="${s}" viewBox="0 0 512 512"><defs><linearGradient id="ai${s}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#438DFF"/><stop offset=".52" stop-color="#2670EF"/><stop offset="1" stop-color="#1554CA"/></linearGradient></defs><rect x="32" y="32" width="448" height="448" rx="108" fill="url(#ai${s})"/><rect x="33" y="33" width="446" height="446" rx="107" fill="none" stroke="#fff" stroke-opacity=".3" stroke-width="4"/><path d="M210 144H170Q144 144 144 170V210M302 144H342Q368 144 368 170V210M368 302V342Q368 368 342 368H302M210 368H170Q144 368 144 342V302" fill="none" stroke="#fff" stroke-width="32" stroke-linecap="round"/><path d="M144 256H368" stroke="#fff" stroke-width="32" stroke-linecap="round"/></svg>`;
+const sq = (name, grad, s = 20) => `<span class="sq" style="width:${s}px;height:${s}px;background:${grad}">${ic(name, Math.round(s * .6), 2)}</span>`;
+const G = {
+  gray: 'linear-gradient(160deg,#b0b0b6,#6e6e73)', blue: 'linear-gradient(160deg,#5aaeff,#0a6fe0)', red: 'linear-gradient(160deg,#ff7a70,#e0352b)',
+  indigo: 'linear-gradient(160deg,#9d8bff,#5b48e0)', pink: 'linear-gradient(160deg,#ff7fb0,#e0356f)', orange: 'linear-gradient(160deg,#ffc05a,#f07d00)',
+  teal: 'linear-gradient(160deg,#6fe8dc,#14a99a)', purple: 'linear-gradient(160deg,#d98bff,#9b3fe0)'
+};
+// refraction displacement map
+(() => {
+  const s = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" preserveAspectRatio="none"><defs><linearGradient id="r" x1="0" x2="1"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#f00"/></linearGradient><linearGradient id="g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#0f0"/></linearGradient></defs><rect width="200" height="200" fill="url(#r)"/><rect width="200" height="200" fill="url(#g)" style="mix-blend-mode:screen"/></svg>`;
+  $('#lgMap').setAttribute('href', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s));
+})();
+
+/* ======================= recipe chips ======================= */
+const RECIPE = [['blur','模糊','backdrop-filter: blur(26px)'],['sat','增色','saturate(170%)'],['white','叠白','background: rgb(255 255 255 / 10%)'],['edge','亮边','box-shadow: inset 1px 1px #fff8'],['ref','折射','SVG 位移滤镜，只作用于边缘一圈']];
+$('#recipe').insertAdjacentHTML('beforeend', RECIPE.map(([k, l, t]) => `<button class="rchip${k === 'ref' ? ' off' : ''}" data-r="${k}" title="${t}"><span class="ck">${ic('check',11,3)}</span>${l}</button>`).join(''));
+$('#recipe').addEventListener('click', e => { const b = e.target.closest('.rchip'); if (!b) return; b.classList.toggle('off'); document.body.classList.toggle('no-' + b.dataset.r, b.classList.contains('off')); });
+
+/* ======================= global ======================= */
+let mode = 'a', phase = 'post';
+function setMode(m) { mode = m; document.body.classList.toggle('mode-a', m === 'a'); document.body.classList.toggle('mode-b', m === 'b'); requestAnimationFrame(layoutAll); }
+document.addEventListener('keydown', e => {
+  if (SET.recKey) return;
+  if (e.code === 'Space' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); setMode(mode === 'a' ? 'b' : 'a'); }
+});
+$$('#tabs .tabbtn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+function switchTab(t) {
+  $$('#tabs .tabbtn').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  $$('[data-pane]').forEach(p => p.hidden = p.dataset.pane !== t);
+  requestAnimationFrame(() => { fitStages(); layoutAll(); if (t === 'text') playText('trans'); });
+}
+$$('#phaseSeg button').forEach(b => b.onclick = () => setPhase(b.dataset.ph));
+function setPhase(p) {
+  phase = p;
+  const st = $('#stShot'); st.classList.toggle('phase-pre', p === 'pre'); st.classList.toggle('phase-post', p === 'post');
+  $$('#phaseSeg button').forEach(b => b.classList.toggle('on', b.dataset.ph === p));
+  $('#shotHint').textContent = p === 'pre' ? '刚按下快捷键时。在画面上移动鼠标，放大镜会跟着走；单击进入框选后。' : '21 个控件全部保留，按用途分成 4 组。试试切换工具、撤销/重做、翻译▾、点「完成」。';
+  if (p === 'post' && $('#tbA')) replay($('#tbA'), 'enter');
+  requestAnimationFrame(layoutAll);
+}
+function replay(el, cls) { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+function bezel(id, icon, label) {
+  const b = $('#' + id);
+  const svg = icon === 'check'
+    ? `<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))"><path class="draw" pathLength="1" d="M20 6 9 17l-5-5"/></svg>`
+    : `<span style="filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))">${ic(icon, 50, 1.6)}</span>`;
+  b.innerHTML = `${svg}<span>${label}</span>`;
+  b.classList.add('show'); clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('show'), 1300);
+}
+function decorateSel(el, w, h, kind) {
+  const pts = [[0,0],[w/2,0],[w,0],[0,h/2],[w,h/2],[0,h],[w/2,h],[w,h]];
+  el.innerHTML = `<div class="hs">${pts.map(([x,y]) => `<div class="h" style="left:${x}px;top:${y}px"></div>`).join('')}<div class="${kind === 'b' ? 'size-b' : 'size-a glass gtext'}"><span>${w} × ${h}</span></div></div><div class="ann"></div><div class="lt" style="position:absolute;inset:0;overflow:hidden;pointer-events:none"></div>`;
+}
+
+/* ======================= SHOT: BEFORE ======================= */
+const TBB = [
+  ['tool','select','pointer','选择和调整标注 · 绘制时可按住 Ctrl 选择'],['tool','rect','square','矩形 · 按住 Ctrl 选择已有标注'],['tool','ellipse','circle','圆形 · 按住 Ctrl 选择已有标注'],
+  ['tool','line','minus','直线 · 按住 Ctrl 选择已有标注'],['tool','arrow','arrow','箭头 · 按住 Ctrl 选择已有标注'],['tool','pen','pen','画笔 · 按住 Ctrl 选择已有标注'],
+  ['tool','text','type','文字 · 按住 Ctrl 选择已有标注'],['tool','number','listOrdered','序号 · 按住 Ctrl 选择已有标注'],['tool','mosaic','mosaic','马赛克 · 按住 Ctrl 选择已有标注'],['sep'],
+  ['act','pin','pin','贴图到桌面'],['act','translate','languages','按当前语种翻译'],['act','langdd','chevronDown','选择翻译语种','narrow'],['act','ocr','scanText','提取文字'],
+  ['act','long','long','长截图'],['act','rec','video','录制此区域'],['sep'],
+  ['act','undo','undo','撤销 · Ctrl+Z'],['act','redo','redo','重做 · Ctrl+Y'],['act','save','download','另存为 PNG · Ctrl+S'],['act','cancel','x','取消截图 · Esc','danger'],['finish','完成并复制 · Enter']
+];
+const SB = { tool: 'rect', size: 1, color: 0 };
+const COLORS_B = ['#FF3B30','#FFCC00','#34C759','#0A84FF','#111111','#8E8E93','#FFFFFF'];
+function renderShotB() {
+  const tb = TBB.map(it => {
+    if (it[0] === 'sep') return '<div class="sep"></div>';
+    if (it[0] === 'finish') return `<button class="finish grad-btn" data-act="finish" data-tip="${it[1]}">${ic('check',14,2.4)}完成</button>`;
+    const on = it[0] === 'tool' && SB.tool === it[1];
+    return `<button class="btn ${on ? 'on' : ''} ${it[4] || ''}" data-${it[0]}="${it[1]}" data-tip="${it[3]}">${ic(it[2], it[1] === 'langdd' ? 14 : 20)}</button>`;
+  }).join('');
+  const dots = [6,9,12].map((d,i) => `<button class="ib ${SB.size===i?'on':''}" data-size="${i}"><span class="dot" style="width:${d}px;height:${d}px"></span></button>`).join('');
+  const colors = COLORS_B.map((c,i) => `<button class="sw-b ${SB.color===i?'on':''}" data-color="${i}" style="background:${c}"></button>`).join('');
+  let sp = '';
+  if (SB.tool === 'mosaic') sp = `<button class="ib on">${ic('grid',18)}</button><button class="ib">${ic('pen',18)}</button><div class="sep"></div>` + dots + `<span style="margin:0 7px 0 12px;color:#94AECE;font-size:13px">强度</span><input type="range" style="width:112px;accent-color:#38BDF8" value="60">`;
+  else if (SB.tool !== 'select') sp = dots + '<div class="sep"></div>' + colors;
+  $('#tbShotB').innerHTML = `<div class="tb tb-b glass-b" id="tbB">${tb}</div><div class="sp sp-b glass-b" id="spB" style="${sp ? '' : 'display:none'}">${sp}</div>`;
+  $('#selShotB .ann').innerHTML = `<div style="position:absolute;left:8px;top:100px;width:584px;height:78px;border:${[2,3,4][SB.size]}px solid ${COLORS_B[SB.color]};border-radius:3px"></div>`;
+  layoutShotB();
+}
+function layoutShotB() {
+  const tb = $('#tbB'), sp = $('#spB'); if (!tb || !tb.offsetWidth) return;
+  const w = tb.offsetWidth, left = Math.max(8, Math.min(952 - w, 408 - w / 2));
+  tb.style.left = left + 'px'; tb.style.top = '334px'; sp.style.left = left + 'px'; sp.style.top = (334 + tb.offsetHeight + 8) + 'px';
+}
+$('#tbShotB').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return; const d = b.dataset;
+  if (d.tool) SB.tool = d.tool; else if (d.size) SB.size = +d.size; else if (d.color) SB.color = +d.color;
+  else if (d.act) { if (['translate','ocr','langdd'].includes(d.act)) return switchTab('text'); if (d.act === 'rec') return switchTab('rec'); return; }
+  renderShotB();
+});
+
+/* ======================= SHOT: AFTER ======================= */
+const SA = { tool: 'rect', shapeKind: 'rect', size: 1, color: 0, text: 1, mosaicKind: 'pixel', mosaicStr: 1, hist: 2, max: 2, menu: null, card: null, lang: 0 };
+const COLORS_A = [{c:'#FF453A',n:'红'},{c:'#FFD60A',n:'黄'},{c:'#32D74B',n:'绿'},{c:'#0A84FF',n:'蓝'},{c:'#FFFFFF',n:'白'}];
+const LANGS = ['简体中文','繁體中文','English','日本語','한국어'];
+const CAPS = [
+  [['tool','select','pointer','选择'],['tool','rect','square','矩形'],['tool','ellipse','circle','椭圆'],['tool','line','minus','直线'],['tool','arrow','arrow','箭头'],['tool','pen','pen','画笔'],['tool','text','type','文字'],['tool','number','numberCircle','序号'],['tool','mosaic','mosaic','马赛克']],
+  [['act','pin','pin','贴到桌面'],['act','translate','languages','翻译'],['act','lang','chevronDown','翻译成…','chev'],['act','ocr','scanText','提取文字'],['act','long','long','长截图'],['act','rec','video','录制此区域']],
+  [['act','undo','undo','撤销　Ctrl+Z'],['act','redo','redo','重做　Ctrl+Y'],['act','save','download','存储　Ctrl+S'],['act','cancel','x','取消　Esc']]
+];
+const LT_SHOT = [[12,10,146,17],[12,32,524,38],[12,109,555,23],[12,132,486,23]];
+const LT_TEXT = [[12,10,146,17],[12,33,328,36],[12,67,196,36],[12,145,325,22],[12,169,313,22],[12,192,57,22]];
+const ORIG = 'Simplicity is the ultimate sophistication. Good design is as little design as possible. Less, but better.';
+const TRANS = { '简体中文': '简约是终极的精致。好的设计是尽可能少的设计。少，但更好。', '繁體中文': '簡約是終極的精緻。好的設計是盡可能少的設計。少，但更好。', 'English': ORIG, '日本語': 'シンプルさは究極の洗練である。良いデザインとは、できる限りデザインしないこと。より少なく、しかしより良く。', '한국어': '단순함은 궁극의 정교함이다. 좋은 디자인은 가능한 한 적은 디자인이다. 더 적게, 그러나 더 좋게.' };
+let popColor = false, cardShot, cardText;
+
+function mountShotA() {
+  $('#tbShotA').innerHTML = `
+    <div class="tb-row noanim enter" id="tbA">
+      ${CAPS.map((cap, ci) => `<div class="glass cap" data-cap="${ci}">${ci === 0 ? '<span class="ind"></span>' : ''}${cap.map(it => `<button class="btn ${it[4] || ''}" data-${it[0]}="${it[1]}" data-tip="${it[3]}">${ic(it[2], it[4] === 'chev' ? 12 : 18, it[4] === 'chev' ? 2.4 : 1.7)}</button>`).join('')}</div>`).join('')}
+      <div class="glass cap"><button class="finish" data-act="finish" data-tip="拷贝到剪贴板">完成<span class="k">↵</span></button></div>
+    </div>
+    <div class="sp sp-a glass enter" id="spA"><div class="spc flex items-center"></div></div>
+    <div class="menu-a glass dark gtext" id="menuLang" hidden></div>
+    <div id="cardShotHost"></div>`;
+  decorateSel($('#selShotA'), 600, 200, 'a');
+  cardShot = makeCard($('#cardShotHost'), { l: 722, t: 124, w: 226, bezel: 'bezelShot', onClose: () => closeLive() });
+  updateTbA(); renderSpA(); updateAnnA();
+  requestAnimationFrame(() => requestAnimationFrame(() => $('#tbA').classList.remove('noanim')));
+}
+function updateTbA() {
+  const tb = $('#tbA');
+  $$('[data-tool]', tb).forEach(b => b.classList.toggle('on', b.dataset.tool === SA.tool));
+  $('[data-act="ocr"]', tb).classList.toggle('on2', SA.card === 'orig');
+  $('[data-act="translate"]', tb).classList.toggle('on2', SA.card === 'trans');
+  $('[data-act="undo"]', tb).classList.toggle('dis', SA.hist === 0);
+  $('[data-act="redo"]', tb).classList.toggle('dis', SA.hist === SA.max);
+  const m = $('#menuLang'); m.hidden = SA.menu !== 'lang';
+  if (!m.hidden) { m.innerHTML = `<div style="font-size:11px;font-weight:600;opacity:.6;padding:4px 12px 6px">翻译成</div>` + LANGS.map((l, i) => `<button class="mi" data-lang="${i}">${l}${i === SA.lang ? `<span class="ck">${ic('check',14,2.4)}</span>` : ''}</button>`).join(''); replay(m, 'enter'); }
+  $('#spA').hidden = !!SA.menu || SA.tool === 'select';
+  positionShotA();
+}
+function msegHTML(key, opts, cur, cls = '') {
+  const i = Math.max(0, opts.findIndex(o => o[0] === cur));
+  return `<div class="mseg ${cls}" style="--n:${opts.length};--i:${i}"><span class="th"></span>${opts.map(([v, l, tip], k) => `<button class="${k === i ? 'on' : ''}" data-set="${key}" data-val="${v}" ${tip ? `data-tip="${tip}"` : ''}>${l}</button>`).join('')}</div>`;
+}
+function renderSpA(enter) {
+  const t = SA.tool, col = COLORS_A[SA.color].c, sep = '<div class="vsep"></div>';
+  const widths = [1.5, 3, 5].map((w, i) => `<button class="ib ${SA.size === i ? 'on' : ''}" data-size="${i}" data-tip="${['细','中','粗'][i]}"><span style="display:block;width:16px;height:${w}px;border-radius:${w}px;background:${col};box-shadow:0 0 0 .5px rgba(0,0,0,.3)"></span></button>`).join('');
+  const colors = COLORS_A.map((c, i) => `<button class="sw ${SA.color === i ? 'on' : ''} ${SA.color === i && popColor ? 'pop' : ''}" data-color="${i}" data-tip="${c.n}" style="--c:${c.c}"></button>`).join('') + `<button class="sw wheel" data-tip="更多颜色"></button>`;
+  let html = '';
+  if (['rect','ellipse','line','arrow','pen'].includes(t)) html = widths + sep + colors;
+  else if (t === 'text') html = [11, 14, 18].map((s, i) => `<button class="ib ${SA.text === i ? 'on' : ''}" data-tsize="${i}" style="font-size:${s}px;font-weight:700;font-family:var(--disp)">A</button>`).join('') + sep + colors;
+  else if (t === 'number') html = `<span style="width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;color:${SA.color === 4 ? '#000' : '#fff'};background:${col};margin:0 6px 0 2px;box-shadow:inset 1px 1px 0 rgba(255,255,255,.5),0 2px 4px rgba(0,0,0,.35)">2</span><span class="gtext" style="font-size:11.5px;font-weight:600;opacity:.7;margin-right:4px">下一个</span>` + sep + colors;
+  else if (t === 'mosaic') html = msegHTML('mosaicKind', [['pixel', '<span class="tile px"></span>', '像素'], ['blur', '<span class="tile bl"></span>', '模糊']], SA.mosaicKind, 'ic') + sep + [0, 1, 2].map(i => `<button class="ib ${SA.mosaicStr === i ? 'on' : ''}" data-mstr="${i}" data-tip="${['轻','中','重'][i]}"><span style="display:block;width:${[9,12,15][i]}px;height:${[9,12,15][i]}px;border-radius:3px;background:repeating-conic-gradient(#d1d1d6 0 25%, #8e8e93 0 50%) 0 0/${[4,5,6][i]}px ${[4,5,6][i]}px"></span></button>`).join('');
+  $('#spA .spc').innerHTML = html;
+  popColor = false;
+  positionShotA();
+  if (enter) replay($('#spA'), 'enter');
+}
+function updateAnnA() {
+  const col = COLORS_A[SA.color].c, bw = [2, 3, 4][SA.size], el = SA.shapeKind === 'ellipse';
+  $('#selShotA .ann').innerHTML =
+    (SA.hist >= 1 ? `<div style="position:absolute;left:8px;top:${el ? 92 : 100}px;width:584px;height:${el ? 94 : 78}px;border:${bw}px solid ${col};border-radius:${el ? '50%' : '4px'};box-shadow:0 1px 2px rgba(0,0,0,.15);transition:all .4s var(--spring);animation:ltIn .4s var(--spring)"></div>` : '') +
+    (SA.hist >= 2 ? `<div style="position:absolute;left:574px;top:84px;width:26px;height:26px;border-radius:50%;background:${col};color:${SA.color === 4 ? '#000' : '#fff'};font-size:13px;font-weight:700;display:grid;place-items:center;box-shadow:inset 1px 1px 0 rgba(255,255,255,.5),0 2px 6px rgba(0,0,0,.3);animation:pop .45s var(--spring)">1</div>` : '');
+}
+function positionShotA() {
+  const tb = $('#tbA'); if (!tb || !tb.offsetWidth) return;
+  const w = tb.offsetWidth, left = Math.max(8, Math.min(952 - w, 408 - w / 2)), top = 334;
+  tb.style.left = left + 'px'; tb.style.top = top + 'px';
+  const cap0 = $('[data-cap="0"]', tb), sb = $(`[data-tool="${SA.tool}"]`, tb), ind = $('.ind', tb);
+  ind.style.width = sb.offsetWidth + 'px'; ind.style.transform = `translateX(${sb.offsetLeft}px)`;
+  const sp = $('#spA');
+  if (!sp.hidden) {
+    const pw = sp.offsetWidth, cx = left + cap0.offsetLeft + sb.offsetLeft + sb.offsetWidth / 2;
+    const pl = Math.max(8, Math.min(952 - pw, cx - pw / 2));
+    sp.style.left = pl + 'px'; sp.style.top = (top + tb.offsetHeight + 10) + 'px';
+  }
+  const m = $('#menuLang'), cap1 = $('[data-cap="1"]', tb), lb = $('[data-act="lang"]', tb);
+  m.style.left = (left + cap1.offsetLeft + lb.offsetLeft - 70) + 'px'; m.style.top = (top - (m.offsetHeight || 210) - 10) + 'px'; m.style.transformOrigin = '50% 100%';
+}
+function openLive(view) {
+  SA.card = view; SA.menu = null;
+  const lt = $('#selShotA .lt');
+  lt.innerHTML = LT_SHOT.map((r, i) => `<div class="lt-line" style="left:${r[0]}px;top:${r[1]}px;width:${r[2]}px;height:${r[3]}px;animation-delay:${80 + i * 110}ms"></div>`).join('') + '<div class="lt-sweep"></div>';
+  setTimeout(() => SA.card && cardShot.open(view, LANGS[SA.lang]), 380);
+  updateTbA();
+}
+function closeLive() { SA.card = null; $('#selShotA .lt').innerHTML = ''; cardShot.close(); updateTbA(); }
+function finishShot() {
+  const post = $('#postShot'), th = $('#thumbShot');
+  th.innerHTML = `<div class="img" style="height:${Math.round(174 * 200 / 600)}px"><div class="hold" style="position:absolute;left:0;top:0;width:960px;height:520px;transform:scale(${174 / 600}) translate(-108px,-124px);transform-origin:0 0"></div></div><div class="cap3">${ic('check',12,2.6)}已拷贝到剪贴板</div>`;
+  const holder = $('.hold', th);
+  const sc = $('#sceneShot').cloneNode(true); sc.removeAttribute('id'); holder.appendChild(sc);
+  const ann = $('#selShotA .ann').cloneNode(true); ann.style.cssText = 'position:absolute;left:108px;top:124px;width:600px;height:200px'; holder.appendChild(ann);
+  post.style.opacity = '0'; post.style.pointerEvents = 'none';
+  setTimeout(() => th.classList.add('show'), 160);
+  setTimeout(() => th.classList.remove('show'), 2700);
+  setTimeout(() => { post.style.opacity = ''; post.style.pointerEvents = ''; replay($('#tbA'), 'enter'); replay($('#spA'), 'enter'); }, 3200);
+}
+$('#tbShotA').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || b.closest('.card-a')) return; const d = b.dataset;
+  if (d.tool) { const ch = SA.tool !== d.tool; SA.tool = d.tool; if (d.tool === 'rect' || d.tool === 'ellipse') { SA.shapeKind = d.tool; updateAnnA(); } SA.menu = null; updateTbA(); renderSpA(ch); return; }
+  if (d.size) { SA.size = +d.size; renderSpA(); updateAnnA(); return; }
+  if (d.color) { SA.color = +d.color; popColor = true; renderSpA(); updateAnnA(); return; }
+  if (d.tsize) { SA.text = +d.tsize; renderSpA(); return; }
+  if (d.mstr) { SA.mosaicStr = +d.mstr; renderSpA(); return; }
+  if (d.set) { const seg = b.closest('.mseg'), idx = [...seg.querySelectorAll('button')].indexOf(b); SA[d.set] = d.val; seg.style.setProperty('--i', idx); $$('button', seg).forEach((x, k) => x.classList.toggle('on', k === idx)); return; }
+  if (d.lang) { SA.lang = +d.lang; SA.menu = null; openLive('trans'); return; }
+  const a = d.act; if (!a) return;
+  if (a === 'ocr') return SA.card === 'orig' ? closeLive() : openLive('orig');
+  if (a === 'translate') return SA.card === 'trans' ? closeLive() : openLive('trans');
+  if (a === 'lang') { SA.menu = SA.menu === 'lang' ? null : 'lang'; updateTbA(); return; }
+  if (a === 'undo') { SA.hist = Math.max(0, SA.hist - 1); updateAnnA(); updateTbA(); return; }
+  if (a === 'redo') { SA.hist = Math.min(SA.max, SA.hist + 1); updateAnnA(); updateTbA(); return; }
+  if (a === 'finish') return finishShot();
+  if (a === 'save') return bezel('bezelShot', 'check', '已存储到「图片」');
+  if (a === 'pin') return bezel('bezelShot', 'pin', '已贴到桌面');
+  if (a === 'long') return bezel('bezelShot', 'long', '开始长截图');
+  if (a === 'rec') return switchTab('rec');
+  if (a === 'cancel') return setPhase('pre');
+});
+
+/* ---------- loupe ---------- */
+function mountLoupe() {
+  const sc = $('#sceneShot').cloneNode(true); sc.removeAttribute('id'); $('#loupe .lp-in').appendChild(sc);
+  const st = $('#stShot');
+  st.addEventListener('mousemove', e => { if (phase !== 'pre' || mode !== 'a') return; const r = st.getBoundingClientRect(), s = r.width / 960; moveLoupe((e.clientX - r.left) / s, (e.clientY - r.top) / s); });
+  st.addEventListener('click', e => { if (phase === 'pre' && !e.target.closest('button')) setPhase('post'); });
+  moveLoupe(268, 176);
+}
+function hexAt(x, y) {
+  if (x >= 40 && x <= 920 && y >= 340 && y <= 498) return '#1E3A57';
+  if (x >= 124 && x <= 640 && y >= 160 && y <= 190) return '#1D1D1F';
+  if (x >= 40 && x <= 920 && y >= 28 && y <= 64) return '#F6F6F8';
+  if (x >= 40 && x <= 920 && y >= 28 && y <= 498) return '#FFFFFF';
+  return '#16293D';
+}
+function moveLoupe(x, y) {
+  x = Math.round(x); y = Math.round(y); const Z = 7, R = 64;
+  $('#xhH').style.top = y + 'px'; $('#xhV').style.left = x + 'px';
+  let lx = x + 24, ly = y + 24; if (lx + 134 > 950) lx = x - 152; if (ly + 166 > 510) ly = y - 190;
+  const lp = $('#loupe'); lp.style.left = lx + 'px'; lp.style.top = ly + 'px';
+  $('.lp-in', lp).style.transform = `translate(${R - x * Z - Z / 2}px,${R - y * Z - Z / 2}px) scale(${Z})`;
+  const hex = hexAt(x, y), info = $('#lpInfo');
+  info.innerHTML = `<span>${x * 2}, ${y * 2}</span><span style="opacity:.4">|</span><span class="chip" style="background:${hex}"></span><span>${hex}</span>`;
+  info.style.left = (lx + 64) + 'px'; info.style.top = (ly + 140) + 'px'; info.style.translate = '-50% 0';
+}
+
+/* ======================= CARD ======================= */
+function makeCard(host, o) {
+  host.innerHTML = `<div class="card-a glass" style="left:${o.l}px;top:${o.t}px;width:${o.w}px" hidden>
+      <div class="ring"></div>
+      <div class="flex items-center">${msegHTML('cv', [['orig','原文'],['trans','译文']], 'orig')}<button class="xbtn" data-close>${ic('x',11,2.6)}</button></div>
+      <div style="margin:10px 2px 0;min-height:70px"><div class="txt">${ORIG}</div></div>
+      <div class="ftr gtext"><span class="lang flex items-center gap-1"></span><button class="copy" data-copy>${ic('copy',12,2)}拷贝</button></div>
+    </div>`;
+  const el = host.firstElementChild, seg = $('.mseg', el), txt = $('.txt', el), lang = $('.lang', el);
+  let view = 'orig', target = '简体中文', busy = false, timer;
+  const setLang = () => lang.innerHTML = view === 'orig' ? `${ic('scanText',12)}英语 · 本机识别` : `英语 ${ic('arrowRight',11)} ${target}`;
+  const setSeg = i => { seg.style.setProperty('--i', i); $$('button', seg).forEach((b, k) => b.classList.toggle('on', k === i)); };
+  function show(v) {
+    clearTimeout(timer); view = v; setSeg(v === 'orig' ? 0 : 1); txt.classList.add('out');
+    if (v === 'trans') { busy = true; el.classList.add('thinking'); timer = setTimeout(() => { txt.textContent = TRANS[target]; setLang(); txt.classList.remove('out'); el.classList.remove('thinking'); busy = false; }, 1100); }
+    else { el.classList.remove('thinking'); busy = false; timer = setTimeout(() => { txt.textContent = ORIG; setLang(); txt.classList.remove('out'); }, 200); }
+  }
+  setLang();
+  el.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return; e.stopPropagation();
+    if (b.dataset.set) { if (b.dataset.val !== view && !busy) show(b.dataset.val); }
+    else if (b.dataset.close !== undefined) o.onClose && o.onClose();
+    else if (b.dataset.copy !== undefined) bezel(o.bezel, 'check', '已拷贝');
+  });
+  return {
+    open(v, t) { target = t || target; el.hidden = false; replay(el, 'enter-r'); view = v === 'orig' ? 'trans' : 'orig'; show(v); },
+    close() { clearTimeout(timer); el.hidden = true; el.classList.remove('thinking'); busy = false; }
+  };
+}
+function playText(v) {
+  if (!cardText) return;
+  cardText.close();
+  const lt = $('#selTextA .lt'); lt.innerHTML = '';
+  requestAnimationFrame(() => {
+    lt.innerHTML = LT_TEXT.map((r, i) => `<div class="lt-line" style="left:${r[0]}px;top:${r[1]}px;width:${r[2]}px;height:${r[3]}px;animation-delay:${100 + i * 90}ms"></div>`).join('') + '<div class="lt-sweep"></div>';
+    setTimeout(() => cardText.open(v, '简体中文'), 450);
+  });
+}
+
+/* ======================= REC (AFTER) ======================= */
+const R = { st: 'idle', fmt: 'mp4', sys: true, mic: false, cursor: true, t: 0, n: 3, timers: [] };
+function clearRecTimers() { R.timers.forEach(t => { clearInterval(t); clearTimeout(t); }); R.timers = []; }
+function renderRecA(anim = true) {
+  const sel = $('#selRecA');
+  sel.classList.toggle('recording', R.st === 'rec');
+  $('.hs', sel).style.display = R.st === 'idle' || R.st === 'done' ? '' : 'none';
+  const host = $('#recA'), gif = R.fmt === 'gif';
+  if (R.st === 'idle' || R.st === 'done') {
+    const tg = (k, on, a, b, tip, extra = '', dis = false) => `<button class="rbtn ${on && !dis ? 'on' : ''} ${dis ? 'dis' : ''}" data-rt="${k}" ${dis ? 'data-dis' : ''} data-tip="${tip}">${ic(on && !dis ? a : b, 17, 1.7)}${extra && on && !dis ? extra : ''}</button>`;
+    host.innerHTML = `<div style="position:absolute;left:480px;top:306px;translate:-50% 0;z-index:20"><div class="${anim ? 'enter' : ''} flex items-center gap-2">
+        <div class="glass cap" style="padding:4px">${msegHTML('fmt', [['mp4', `<span class="flex items-center gap-1.5">${ic('video',15,1.8)}视频</span>`], ['gif', `<span class="flex items-center gap-1.5">${ic('gif',15,1.8)}GIF</span>`]], R.fmt, 'ic')}</div>
+        <div class="glass cap" style="padding:4px;gap:2px">
+          ${tg('sys', R.sys, 'volume', 'volumeX', gif ? 'GIF 不含声音' : R.sys ? '录制系统声音' : '不录系统声音', '', gif)}
+          ${tg('mic', R.mic, 'mic', 'micOff', gif ? 'GIF 不含声音' : R.mic ? '录制麦克风' : '不录麦克风', '<span class="mini flex items-center gap-[1.5px]" style="height:12px"><i></i><i style="animation-delay:.2s"></i><i style="animation-delay:.4s"></i></span>', gif)}
+          ${tg('cursor', R.cursor, 'cursorClick', 'pointer', R.cursor ? '显示鼠标和点击' : '隐藏鼠标')}
+        </div>
+        <div class="glass cap" style="padding:4px"><button class="rec-go" data-go><span style="width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 2.5px rgba(255,255,255,.35)"></span>录制</button></div>
+      </div></div>`;
+  } else if (R.st === 'count') {
+    host.innerHTML = `<div class="count glass" style="left:480px;top:189px"><svg width="128" height="128"><circle cx="64" cy="64" r="58" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="3"/><circle class="arc" cx="64" cy="64" r="58" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg><span class="num">${R.n}</span></div>`;
+  } else if (R.st === 'rec') {
+    host.innerHTML = `<div style="position:absolute;left:480px;top:24px;translate:-50% 0;z-index:20"><div class="glass cap enter gtext" style="padding:4px 4px 4px 14px;gap:10px">
+        <span class="rec-dot"></span><span id="recT" style="font-variant-numeric:tabular-nums;font-size:13px;font-weight:700;min-width:30px">0:00</span>
+        <span style="font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:5px;background:rgba(255,255,255,.14);box-shadow:inset 1px 1px 0 rgba(255,255,255,.2)">${gif ? 'GIF' : 'MP4'}</span>
+        ${gif ? '' : `<span class="meter" id="meter">${Array.from({ length: 16 }, () => '<i style="height:3px"></i>').join('')}</span>`}
+        <span style="display:flex;gap:2px;margin-left:2px"><button class="rbtn on" data-tip="暂停">${ic('pause',14)}</button><button class="rbtn" data-stop data-tip="停止" style="color:#fff;background:rgba(255,69,58,.7);box-shadow:inset 1px 1px 0 rgba(255,255,255,.3)">${ic('stop',15)}</button></span>
+      </div></div>`;
+  }
+}
+function startCountdown() {
+  R.st = 'count'; R.n = 3; renderRecA();
+  const tick = () => { R.n--; if (R.n > 0) { renderRecA(); R.timers.push(setTimeout(tick, 700)); } else startRec(); };
+  R.timers.push(setTimeout(tick, 700));
+}
+function startRec() {
+  R.st = 'rec'; R.t = 0; renderRecA();
+  R.timers.push(setInterval(() => { R.t++; const el = $('#recT'); if (el) el.textContent = `${Math.floor(R.t / 60)}:${String(R.t % 60).padStart(2, '0')}`; }, 1000));
+  R.timers.push(setInterval(() => {
+    const m = $('#meter'); if (!m) return; const live = R.sys || R.mic;
+    $$('i', m).forEach((b, i) => { const env = Math.sin((Date.now() / 180) + i * .7) * .5 + .5; b.style.height = (live ? 3 + Math.random() * 11 * (0.4 + env * .6) : 3) + 'px'; });
+  }, 110));
+}
+function stopRec() {
+  clearRecTimers(); const dur = Math.max(R.t, 1); R.st = 'done'; renderRecA();
+  const th = $('#thumbRec'), gif = R.fmt === 'gif';
+  th.innerHTML = `<div class="img" style="height:${Math.round(174 * 210 / 600)}px"><div class="hold" style="position:absolute;left:0;top:0;width:960px;height:520px;transform:scale(${174 / 600}) translate(-180px,-84px);transform-origin:0 0"></div>
+      <span style="position:absolute;inset:0;display:grid;place-items:center"><span style="width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.25);backdrop-filter:blur(8px) saturate(170%);color:#fff;box-shadow:inset 1px 1px 0 rgba(255,255,255,.6),0 2px 6px rgba(0,0,0,.3)">${ic('play',12)}</span></span>
+      <span style="position:absolute;left:6px;top:5px;font-size:9.5px;font-weight:800;color:#fff;background:rgba(0,0,0,.45);padding:1px 5px;border-radius:4px">${gif ? 'GIF' : 'MP4'}</span>
+      <span style="position:absolute;right:6px;bottom:5px;font-size:10px;font-weight:700;color:#fff;background:rgba(0,0,0,.5);padding:1px 5px;border-radius:4px;font-variant-numeric:tabular-nums">0:${String(dur).padStart(2, '0')}</span></div>
+    <div class="cap3 gtext">${gif ? 'GIF 已保存' : '录屏已保存'} · 点按预览</div>`;
+  const sc = $('#sceneRec').cloneNode(true); sc.removeAttribute('id'); $('.hold', th).appendChild(sc);
+  setTimeout(() => th.classList.add('show'), 120);
+  R.timers.push(setTimeout(() => { th.classList.remove('show'); R.st = 'idle'; renderRecA(); }, 3000));
+}
+$('#recA').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.set === 'fmt') { const seg = b.closest('.mseg'), idx = [...seg.querySelectorAll('button')].indexOf(b); R.fmt = b.dataset.val; seg.style.setProperty('--i', idx); setTimeout(() => renderRecA(false), 280); return; }
+  if (b.dataset.rt) { if (b.dataset.dis !== undefined) return; R[b.dataset.rt] = !R[b.dataset.rt]; renderRecA(false); return; }
+  if (b.dataset.go !== undefined) return startCountdown();
+  if (b.dataset.stop !== undefined) return stopRec();
+});
+
+/* ======================= SETTINGS BEFORE ======================= */
+function renderSetB() {
+  const row = (t, d, ctl) => `<div class="row"><div><div class="t">${t}</div><div class="d">${d}</div></div><div class="ctl">${ctl}</div></div>`;
+  const inp = v => `<div class="in">${v}</div>`, sel = v => `<div class="in" style="justify-content:space-between">${v}${ic('chevronDown',14)}</div>`;
+  const tg = on => `<div class="tg-b ${on ? 'on' : ''}"></div>`, sec = t => `<div class="sec">${t}</div>`;
+  $('#setBMain').innerHTML = `
+    <div style="font-size:26px;font-weight:600">翻译接口</div>
+    <div style="font-size:13px;color:#94AECE;margin:4px 0 20px">配置截图翻译使用的服务、密钥和回退策略。</div>
+    <div class="card">
+      ${row('翻译显示','浮动卡片单独展示译文；原位覆盖在截图选区内替换文字',`<div class="in" style="width:220px;padding:3px;gap:3px"><span style="flex:1;text-align:center;border-radius:6px;background:rgba(56,189,248,.18);color:#7DD3FC;padding:5px 0">浮动卡片</span><span style="flex:1;text-align:center">原位覆盖</span></div>`)}
+      ${row('翻译服务','截图翻译默认使用的接口，可配置自动回退',sel('AI 自然翻译（推荐）'))}
+      ${sec('腾讯机器翻译')}
+      ${row('SecretId','腾讯云访问密钥 ID，仅保存在 Windows 凭据管理器',inp(''))}
+      ${row('SecretKey','腾讯云访问密钥，不会写入 settings.json',inp(''))}
+      ${row('接入地域','通常选择离你最近的可用区即可',sel('华南地区（广州）'))}
+      ${sec('AI 自然翻译')}
+      ${row('基础地址','OpenAI 兼容的 /chat/completions 接口地址',inp('https://api.openai.com/v1'))}
+      ${row('模型','建议使用擅长翻译与中文表达的对话模型',inp('gpt-4o-mini'))}
+      ${row('API Key','仅保存在 Windows 凭据管理器',`<div class="flex flex-col gap-2 items-end">${inp('••••••••••••')}<button style="height:30px;padding:0 12px;border-radius:8px;border:1px solid rgba(125,211,252,.35);color:#7DD3FC;font-size:12.5px">绑定 Key 到当前地址</button></div>`)}
+      ${row('第二模型竞速','两个模型同时翻译，自动采用最先返回的结果',tg(true))}
+      ${row('竞速模型基础地址','第二个 OpenAI 兼容接口地址',inp('https://api.siliconflow.cn/v1'))}
+      ${row('竞速模型名称','例如 Qwen/Qwen2.5-7B-Instruct',inp('Qwen/Qwen2.5-7B-Instruct'))}
+      ${row('竞速模型 API Key','仅保存在 Windows 凭据管理器',inp('••••••••••••'))}
+      ${row('超时后快速回退','AI 翻译等待超时后自动切换腾讯快速翻译',tg(true))}
+      ${row('快速回退等待','等待秒数，允许范围 2–30 秒',inp('6'))}
+      ${sec('MyMemory 基础翻译')}
+      ${row('联系邮箱（可选）','随保底请求发送，用于提高匿名额度；留空也能使用',inp(''))}
+      ${sec('失败回退')}
+      ${row('自动回退到 MyMemory','AI 或腾讯翻译失败时，将原文发送给 MyMemory；关闭后不使用该保底服务',tg(true))}
+      <div class="note-b">AI 翻译失败时，如已配置腾讯密钥，会先尝试腾讯翻译。直接选择 MyMemory 时，原文始终发送给 MyMemory。</div>
+      ${sec('输出与测试')}
+      ${row('原文语言','自动识别不确定时可手选；MyMemory 需要明确的原文语言',sel('自动识别'))}
+      ${row('目标语言','截图翻译默认输出的语言',sel('简体中文'))}
+      ${row('测试当前服务','使用固定文本验证接口连通性，不会修改当前截图',`<button class="grad-btn" style="height:34px;padding:0 16px;border-radius:8px;font-size:13px">测试当前服务</button>`)}
+      <div class="note-b">所有密钥均通过 Windows 凭据管理器保存，不会写入 settings.json。</div>
+    </div><div style="height:30px"></div>`;
+}
+
+/* ======================= SETTINGS AFTER ======================= */
+const SET = { page: 'text', service: 'ai', display: 'card', quality: 'std', fmt: 'mp4', launch: true, sys: true, mic: false, click: true, race: false, fbTc: true, fbFree: true, prio: false, adv: false, test: '', recKey: null, keys: { shot: ['Ctrl','Shift','A'], rec: ['Ctrl','Shift','R'], pin: ['F1'] } };
+let PREV = JSON.parse(JSON.stringify(SET));
+function renderSetA() {
+  const s = SET, p = PREV;
+  const tg = k => `<button class="tg ${p[k] ? 'on' : ''}" data-tg="${k}" data-to="${s[k] ? 1 : 0}"></button>`;
+  const seg = (k, opts) => { const pi = Math.max(0, opts.findIndex(o => o[0] === p[k])), si = Math.max(0, opts.findIndex(o => o[0] === s[k])); return `<div class="mseg" data-segi="${si}" style="--n:${opts.length};--i:${pi}"><span class="th"></span>${opts.map(([v, l], i) => `<button class="${i === si ? 'on' : ''}" data-seg="${k}" data-v="${v}">${l}</button>`).join('')}</div>`; };
+  const row = (l, r, icon) => `<div class="row2 ${icon ? 'ic' : ''}">${icon || ''}<span style="font-weight:500">${l}</span><div class="r">${r}</div></div>`;
+  const txt = (v, pw) => `<input class="txt2" ${pw ? 'type="password"' : ''} value="${v}" spellcheck="false" placeholder="必填">`;
+  const pop = v => `<span class="pop2">${v}<span class="ud">${ic('updown',10,2.6)}</span></span>`;
+  const keys = k => s.recKey === k ? `<span class="kc-wait">按下新的快捷键…</span>` : `<button data-key="${k}" class="flex gap-[4px]">${s.keys[k].map(x => `<span class="kc2">${x}</span>`).join('')}</button>`;
+  const hero = (icon, grad, title, desc, right = '') => `<div class="grp2"><div class="hero2">${sq(icon, grad, 46)}<div style="flex:1"><div style="font-size:15px;font-weight:700;letter-spacing:-.01em">${title}</div><div style="font-size:12px;color:rgba(255,255,255,.6);margin-top:2px">${desc}</div></div>${right}</div></div>`;
+  const adv = rows => `<div class="grp2 advwrap ${p.adv ? 'open' : ''}" data-advto="${s.adv ? 1 : 0}" style="margin-top:14px"><button class="row2 w-full" data-adv style="text-align:left"><span style="font-weight:500">高级</span><div class="r"><span class="chev">${ic('chevronRight',14,2.2)}</span></div></button><div class="advbody"><div>${rows}</div></div></div>`;
+  let body = '';
+  if (s.page === 'general') {
+    body = hero('sliders', G.gray, '通用', '启动方式、快捷键和存储位置。') +
+      `<div class="grp2">${row('开机时启动', tg('launch'))}${row('存储位置', pop(`${ic('folder',13)} 图片 › Screen`))}</div>
+       <div class="gh">快捷键</div>
+       <div class="grp2">${row('截图', keys('shot'), sq('scanText', G.blue, 24))}${row('录屏', keys('rec'), sq('video', G.red, 24))}</div>
+       <div class="foot2">点按快捷键，然后直接按下新的组合。</div>` +
+      adv(row('恢复穿透的贴图', keys('pin')) + row('快捷键优先交给 Screen', tg('prio')));
+  } else if (s.page === 'rec') {
+    body = hero('video', G.red, '录屏', '录下屏幕的一块区域，保存成视频或 GIF。') +
+      `<div class="grp2">${row('默认格式', seg('fmt', [['mp4','视频'],['gif','GIF']]), sq('gif', G.purple, 24))}${row('画质', seg('quality', [['std','标准'],['hd','高清']]), sq('hd', G.indigo, 24))}</div>
+       <div class="foot2">${s.fmt === 'gif' ? 'GIF 适合短小的动图演示，不含声音。' : s.quality === 'std' ? '30 帧 · 8 Mbps，适合教程和日常分享。' : '60 帧 · 12 Mbps，适合演示动画和游戏。'}</div>
+       <div class="gh">录制内容</div>
+       <div class="grp2">${row('系统声音', tg('sys'), sq('volume', G.pink, 24))}${row('麦克风', tg('mic'), sq('mic', G.orange, 24))}${row('鼠标点击效果', tg('click'), sq('cursorClick', G.teal, 24))}</div>` +
+      adv(row('帧率', pop('30 帧')) + row('码率', pop('8 Mbps')) + row('GIF 帧率', pop('15 帧')) + row('临时文件夹', pop('系统默认')));
+  } else {
+    let fields = '';
+    if (s.service === 'ai') fields = row('接口地址', txt('https://api.openai.com/v1')) + row('模型', txt('gpt-4o-mini')) + row('API Key', txt('sk-proj-xxxxxxxxxxxx', true));
+    if (s.service === 'tc') fields = row('SecretId', txt('')) + row('SecretKey', txt('', true)) + row('地域', pop('广州'));
+    if (s.service === 'free') fields = `<div class="row2" style="color:rgba(255,255,255,.6);font-size:12.5px">MyMemory 免费服务，无需配置，每天有额度限制。</div>`;
+    const test = s.test === 'ing' ? `<span class="spin"></span><span>正在连接…</span>` : s.test === 'ok' ? `<span style="color:#7dffa0;display:flex;align-items:center;gap:4px;font-weight:600">${ic('check',13,2.6)}0.8 秒</span>` : `<button class="btn2" data-test>测试连接</button>`;
+    const chip = s.test === 'ok' ? `<span class="chip2 ok"><span class="d"></span>已连接</span>` : `<span class="chip2"><span class="d"></span>未测试</span>`;
+    body = hero('languages', G.indigo, '文字与翻译', '截图里的文字，一键提取，随手翻译。', chip) +
+      `<div class="grp2">${row('翻译服务', seg('service', [['ai','AI 翻译'],['tc','腾讯'],['free','免费']]))}${fields}${row('连接', test)}</div>
+       <div class="foot2">${ic('lock',11,2.2)}密钥只保存在这台电脑上。</div>
+       <div class="grp2" style="margin-top:14px">${row('翻译成', pop('简体中文'))}${row('显示方式', seg('display', [['card','卡片'],['inplace','覆盖原文']]))}</div>` +
+      adv(row('文字识别', pop('智能 · 本机优先')) + row('原文语言', pop('自动检测')) + row('同时请求第二个模型', tg('race')) + row('AI 超时后改用腾讯', tg('fbTc')) + row('失败时改用免费服务', tg('fbFree')));
+  }
+  const titles = { general: '通用', rec: '录屏', text: '文字与翻译' };
+  const nav = (k, icon, grad, l) => `<button class="nav ${s.page === k ? 'on' : ''}" data-page="${k}">${sq(icon, grad, 24)}${l}</button>`;
+  $('#setA').innerHTML = `
+    <div class="side">
+      <div class="search">${ic('search',13,2.2)}搜索</div>
+      <div class="prof">${APP_ICON(40)}<div><div style="font-size:13px;font-weight:700">Screen</div><div style="font-size:11px;color:rgba(255,255,255,.55)">1.0.16 · 已是最新</div></div></div>
+      ${nav('general','sliders',G.gray,'通用')}${nav('rec','video',G.red,'录屏')}${nav('text','languages',G.indigo,'文字与翻译')}
+    </div>
+    <div class="main">
+      <div class="bar"><span class="navs">${ic('chevronLeft',16,2.2)}${ic('chevronRight',16,2.2)}</span>${titles[s.page]}<span class="capb"><span>—</span><span>☐</span><span>✕</span></span></div>
+      <div class="scroll"><div class="inner">${body}<div style="height:10px"></div></div></div>
+    </div>`;
+  const root = $('#setA'); void root.offsetWidth;
+  $$('[data-tg]', root).forEach(t => t.classList.toggle('on', t.dataset.to === '1'));
+  $$('.mseg[data-segi]', root).forEach(m => m.style.setProperty('--i', m.dataset.segi));
+  $$('[data-advto]', root).forEach(a => a.classList.toggle('open', a.dataset.advto === '1'));
+  PREV = JSON.parse(JSON.stringify(SET));
+}
+$('#setA').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return; const s = SET, d = b.dataset;
+  if (d.page) { s.page = d.page; s.adv = false; s.recKey = null; PREV = JSON.parse(JSON.stringify(s)); }
+  else if (d.tg) s[d.tg] = !s[d.tg];
+  else if (d.seg) s[d.seg] = d.v;
+  else if (d.adv !== undefined) s.adv = !s.adv;
+  else if (d.key) s.recKey = d.key;
+  else if (d.test !== undefined) { s.test = 'ing'; setTimeout(() => { s.test = 'ok'; renderSetA(); }, 900); }
+  else return;
+  const sc = $('#setA .scroll'), top = sc ? sc.scrollTop : 0;
+  renderSetA(); const sc2 = $('#setA .scroll'); if (sc2 && !d.page) sc2.scrollTop = top;
+});
+document.addEventListener('keydown', e => {
+  if (!SET.recKey) return; e.preventDefault();
+  if (e.key === 'Escape') { SET.recKey = null; return renderSetA(); }
+  if (['Control','Shift','Alt','Meta'].includes(e.key)) return;
+  const k = []; if (e.ctrlKey) k.push('Ctrl'); if (e.altKey) k.push('Alt'); if (e.shiftKey) k.push('Shift');
+  k.push(e.key.length === 1 ? e.key.toUpperCase() : e.key);
+  SET.keys[SET.recKey] = k; SET.recKey = null; renderSetA();
+});
+
+/* ======================= DESIGN LANGUAGE ======================= */
+function renderTok() {
+  $('#stTok').innerHTML = `<div class="desk"></div>
+    <div class="glass gtext abs flex items-center" style="left:40px;top:34px;border-radius:12px;padding:6px 16px 6px 8px;gap:10px;font-size:13px;font-weight:700">
+      ${APP_ICON(30)}<span>克制的玻璃 · 配方</span></div>
+    <div class="glass abs" style="left:40px;top:96px;width:400px;height:150px;border-radius:14px;--rim:5px">
+      <div class="gtext" style="padding:22px 26px 0;font-size:17px;font-weight:700">截一张图，然后呢？</div>
+      <div class="flex items-center justify-around" style="position:absolute;left:0;right:0;bottom:22px">${['scanText','languages','pin','video'].map(n => `<span style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))">${ic(n,22,1.8)}</span>`).join('')}</div>
+    </div>
+    <div class="abs flex items-center gap-2" style="left:40px;top:272px">
+      <div class="glass cap" style="padding:4px"><span class="ind" style="width:34px;transform:translateX(0)"></span>${['pointer','square','circle','arrow','pen'].map((n, i) => `<button class="btn ${i === 1 ? 'on' : ''}">${ic(n,18,1.7)}</button>`).join('')}</div>
+      <div class="glass cap"><button class="finish">完成<span class="k">↵</span></button></div>
+    </div>
+    <div class="abs flex items-center gap-2" style="left:40px;top:336px">${sq('sliders',G.gray,34)}${sq('video',G.red,34)}${sq('languages',G.indigo,34)}${sq('volume',G.pink,34)}${sq('mic',G.orange,34)}${sq('cursorClick',G.teal,34)}${sq('gif',G.purple,34)}</div>
+    <div class="glass abs gtext" style="left:478px;top:96px;width:442px;border-radius:14px;padding:20px 24px;--rim:5px">
+      <div class="code">
+        <div><span class="k">.glass</span> {</div>
+        <div>&nbsp;&nbsp;<span class="p">backdrop-filter</span>: blur(<span class="v">26px</span>)</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;saturate(<span class="v">170%</span>);</div>
+        <div>&nbsp;&nbsp;<span class="p">background</span>: <span class="v">中性深灰 60%</span> + 白 <span class="v">5%</span>;</div>
+        <div>&nbsp;&nbsp;<span class="p">box-shadow</span>: inset <span class="v">1px 1px</span> rgb(255 255 255 / <span class="v">26%</span>);</div>
+        <div>&nbsp;&nbsp;<span class="c">/* 圆角 8 / 12 / 14，折射默认关闭 */</span></div>
+        <div>}</div>
+      </div>
+      <div style="border-top:.5px solid rgba(255,255,255,.2);margin-top:12px;padding-top:10px;font-size:12px;line-height:1.6;opacity:.85">WPF 实现：截图浮层背后本来就是我们自己截的图，可以用 ShaderEffect 对这张图做模糊、增色和位移，效果和这里一致；设置窗口用 Windows 11 的 Acrylic 背景。</div>
+    </div>`;
+  const D = [
+    ['① 模糊', '背景模糊 26px，让后面的内容退成一片柔和的颜色，文字和图标才读得清楚。'],
+    ['② 增色', '模糊会让颜色发灰，再把饱和度拉到 170%，玻璃才有通透的颜色，而不是一层灰雾。'],
+    ['③ 叠白', '底色是中性深灰，只叠 5% 的白：既能和背景分开，又不会变成一块发亮的冰。'],
+    ['④ 亮边', '左上一道 1px 高光，透明度从参考图的 53% 降到 26%：看得出厚度，但不抢内容。'],
+    ['⑤ 折射（默认关）', '边缘一圈用位移滤镜轻微弯折背景。效果最「液态」也最抢眼，所以默认关闭，可以在上面打开对比。'],
+    ['常规圆角', '按钮 8、工具条 12、卡片 14，回到 v2 的圆角。分组靠留白和材质区分，不靠胶囊形状。'],
+    ['一个亮色', '整套界面只有两处实色：蓝色「完成」和红色「录制」，其他全是玻璃。'],
+    ['动效统一', '选中块滑动、面板弹出、开关拉伸、倒计时数字都用同一条弹簧曲线。'],
+  ];
+  $('#details').innerHTML = D.map((d, i) => `<div class="detail"><span class="n">${i < 5 ? i + 1 : '•'}</span><div><b>${d[0]}</b><br><span style="color:var(--muted-foreground)">${d[1]}</span></div></div>`).join('');
+}
+
+/* ======================= notes ======================= */
+function notes(id, rows) {
+  $('#' + id).innerHTML = `<table class="cmp w-full mt-4 text-[13px] rounded-xl overflow-hidden" style="background:var(--card);box-shadow:0 0 0 1px var(--border)">
+    <tr style="color:var(--muted-foreground);font-size:12px"><th style="width:100px"></th><th style="color:#FB7185">现在</th><th style="color:#4aa3ff">优化后</th></tr>
+    ${rows.map(r => `<tr><td style="color:var(--muted-foreground)">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</table>`;
+}
+notes('notesShot', [
+  ['框选前', '顶部模式栏：截图 / 滚动截图 / 提取文字 / 翻译', '只有十字线、放大镜（坐标 + 取色）和一行按键提示'],
+  ['工具栏', '21 个控件挤在一条深蓝渐变条里，用竖线分隔', '21 个全部保留，分成 4 组：绘制 9 / 智能 6 / 历史 4 / 完成'],
+  ['选中状态', '青色底色块', '玻璃选中块，切换时弹性滑动；选中图标轻微填充'],
+  ['撤销 / 重做', '一直可点', '没有可撤销 / 可重做内容时自动变灰'],
+  ['翻译▾', '下拉菜单', '玻璃菜单，选语种后直接翻译'],
+  ['样式面板', '固定在工具栏左下，7 个方色块', '弹到当前工具正下方；线宽直接画出粗细；圆形色点 + 色轮'],
+  ['完成之后', '直接关闭', '右下角滑出真实缩略图「已拷贝到剪贴板」'],
+]);
+notes('notesText', [
+  ['入口', '「提取文字」「翻译」两个按钮', '保持两个按钮不变'],
+  ['识别过程', '卡片里显示「正在识别…」', '选区内扫光，识别到的文字逐行亮起'],
+  ['卡片', '450 宽，深蓝渐变 + 徽标 + 状态栏 + 两个按钮', '玻璃卡片，原文 / 译文分段切换 + 拷贝'],
+  ['翻译中', '状态点和状态文字', '卡片边缘流动的彩色光环，文字模糊淡出再淡入'],
+]);
+notes('notesRec', [
+  ['格式', 'MP4 / GIF 两个标签（GIF 不可点）', '「视频 / GIF」分段控件，两个都能选；选 GIF 时声音开关自动变灰'],
+  ['形态', '竖向卡片：开始录制 + 格式行 + 4 个开关', '一排 3 组：格式 / 声音和鼠标 / 录制'],
+  ['占位', '「摄像头 · 即将推出」', '删除'],
+  ['开录', '直接开始', '3-2-1 玻璃倒计时，圆环走一圈'],
+  ['录制中', '另外弹出控制窗', '顶部一条玻璃工具条：呼吸红点、计时、格式标签、电平条、暂停、停止'],
+  ['结束', '弹出预览窗', '右下角滑出缩略图，标明 MP4 / GIF 和时长'],
+]);
+notes('notesSet', [
+  ['窗口', '不透明深蓝窗口', '整块玻璃窗口，背后的画面透出来'],
+  ['页面', '5 页，单色图标', '3 页，彩色方形图标；选中项是玻璃高光块'],
+  ['翻译页', '19 项同时展开，要滚动 3 屏', '默认 7 项；选哪个服务只显示它的字段；顶部显示连接状态'],
+  ['录屏页', '帧率、清晰度两个下拉', '默认格式（视频 / GIF）+ 画质（标准 / 高清），细节放进「高级」'],
+  ['控件', '普通开关和输入框', '玻璃开关（按下会拉长）、滑动分段控件、带厚度的玻璃键帽'],
+]);
+
+/* ======================= fit & init ======================= */
+function fitStages() { $$('.stage-wrap').forEach(w => { if (!w.offsetParent) return; const s = Math.min(1, w.clientWidth / +w.dataset.w); $('.stage', w).style.transform = `scale(${s})`; w.style.height = (+w.dataset.h * s) + 'px'; }); }
+function layoutAll() { layoutShotB(); positionShotA(); }
+window.addEventListener('resize', () => { fitStages(); layoutAll(); });
+
+renderTok();
+$$('.sea').forEach(s => s.innerHTML = SEA);
+$$('.desk').forEach(d => d.innerHTML = `<div class="sea">${SEA}</div>`);
+hydrateIcons();
+decorateSel($('#selShotB'), 600, 200, 'b');
+decorateSel($('#selTextB'), 372, 236, 'b');
+decorateSel($('#selTextA'), 372, 236, 'a');
+decorateSel($('#selRecB'), 600, 210, 'b');
+decorateSel($('#selRecA'), 600, 210, 'a');
+renderShotB(); mountShotA(); mountLoupe();
+cardText = makeCard($('#cardTextHost'), { l: 520, t: 124, w: 300, bezel: 'bezelText', onClose: () => { cardText.close(); $('#selTextA .lt').innerHTML = ''; } });
+renderRecA(); renderSetB(); renderSetA();
+setPhase('post'); setMode('a');
+{ if (location.hash.includes('still')) document.head.insertAdjacentHTML('beforeend', '<style>.enter,.enter-r,.lt-line{animation:none!important}</style>');
+  const [hm, ht, hp, hx] = location.hash.slice(1).split('-'); if (hm === 'b' || hm === 'a') setMode(hm); if (ht) switchTab(ht); if (hp && hp !== 'x') setPhase(hp);
+  if (hx === 'trans') setTimeout(() => openLive('trans'), 300); if (hx === 'lang') setTimeout(() => { SA.menu = 'lang'; updateTbA(); }, 300);
+  if (hx === 'gif') { R.fmt = 'gif'; renderRecA(false); } if (hx === 'rec') setTimeout(() => startRec(), 200); if (hx === 'recpage') { SET.page = 'rec'; PREV = JSON.parse(JSON.stringify(SET)); renderSetA(); } }
+fitStages(); layoutAll();
+</script>
+</body>
+</html>
