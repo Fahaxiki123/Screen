@@ -25,7 +25,7 @@ internal sealed class LucideIconElement : FrameworkElement
         nameof(Stroke),
         typeof(Brush),
         typeof(LucideIconElement),
-        new FrameworkPropertyMetadata(Brushes.Black, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
     public static readonly DependencyProperty FillProperty = DependencyProperty.Register(
         nameof(Fill), typeof(Brush), typeof(LucideIconElement),
@@ -51,7 +51,7 @@ internal sealed class LucideIconElement : FrameworkElement
 
     public Brush Stroke
     {
-        get => (Brush)GetValue(StrokeProperty);
+        get => (Brush?)GetValue(StrokeProperty) ?? GlassTheme.Brush("Brush.OverlayIcon");
         set => SetValue(StrokeProperty, value);
     }
 

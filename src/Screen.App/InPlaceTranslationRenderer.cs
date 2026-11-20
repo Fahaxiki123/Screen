@@ -32,7 +32,7 @@ internal static class InPlaceTranslationRenderer
 
             var background = SampleBackground(source, bounds);
             var luminance = 0.2126 * Linear(background.R) + 0.7152 * Linear(background.G) + 0.0722 * Linear(background.B);
-            var foreground = new SolidColorBrush(luminance > 0.179 ? Colors.Black : Colors.White);
+            var foreground = GlassTheme.Brush(luminance > 0.179 ? "Brush.Black" : "Brush.White");
             var padding = Math.Min(2, Math.Min(bounds.Width, bounds.Height) * 0.06);
             var availableWidth = Math.Max(0.1, bounds.Width - padding * 2);
             var availableHeight = Math.Max(0.1, bounds.Height - padding * 2);

@@ -24,14 +24,14 @@ internal sealed class ClickRippleWindow : Window
         Topmost = true;
         ShowInTaskbar = false;
         AllowsTransparency = true;
-        Background = Brushes.Transparent;
+        Background = GlassTheme.Brush("Brush.Transparent");
         IsHitTestVisible = false;
         Width = SizeDip;
         Height = SizeDip;
 
         var ring = new Ellipse
         {
-            Stroke = new SolidColorBrush(Color.FromRgb(0x25, 0x63, 0xEB)),
+            Stroke = GlassTheme.Brush("Brush.Accent"),
             StrokeThickness = 3,
             Opacity = 0.9,
             Margin = new Thickness(10),

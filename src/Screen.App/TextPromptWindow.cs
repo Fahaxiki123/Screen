@@ -9,8 +9,6 @@ namespace Screen.App;
 
 internal sealed class TextPromptWindow : Window
 {
-    private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
-
     private readonly TextBox _text;
     private readonly PixelPoint _screenPoint;
     private readonly AnnotationStyle _style;
@@ -30,7 +28,7 @@ internal sealed class TextPromptWindow : Window
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         AllowsTransparency = true;
-        Background = Brushes.Transparent;
+        Background = GlassTheme.Brush("Brush.Transparent");
         ShowInTaskbar = false;
         Topmost = true;
         SizeToContent = SizeToContent.WidthAndHeight;
@@ -50,32 +48,28 @@ internal sealed class TextPromptWindow : Window
             TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalContentAlignment = VerticalAlignment.Center,
-            FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI"),
+            FontFamily = GlassTheme.Get<FontFamily>("FontFamily.Body"),
             FontSize = Math.Clamp(style.FontSize, 14, 42),
             FontWeight = weight,
             // The editor text uses the theme for legibility. The caller still
             // renders Value with the untouched AnnotationStyle/Argb.
-            Foreground = Token("Brush.TextPrimary"),
-            Background = Brushes.Transparent,
+            Foreground = GlassTheme.Brush("Brush.Label"),
+            Background = GlassTheme.Brush("Brush.Transparent"),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(10, 7, 10, 7),
-            CaretBrush = Token("Brush.TextPrimary"),
-            SelectionBrush = Token("Brush.Accent"),
+            CaretBrush = GlassTheme.Brush("Brush.Label"),
+            SelectionBrush = GlassTheme.Brush("Brush.Accent"),
             SelectionOpacity = 0.28,
             Text = initialValue ?? string.Empty
         };
         _text.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)] =
             Application.Current.FindResource("DarkScrollBarStyle");
         _text.PreviewKeyDown += OnKeyDown;
-        // Rounded navy card: the TextBox itself cannot round its corners,
-        // so the chrome lives on the wrapping Border.
-        Content = new Border
+        Content = new GlassPanel
         {
-            CornerRadius = new CornerRadius(8),
-            Background = Token("Brush.SurfaceRaised"),
-            BorderBrush = Token("Brush.Accent"),
-            BorderThickness = new Thickness(1.5),
-            Child = _text
+            Variant = GlassVariant.Solid,
+            CornerRadius = GlassTheme.Radius("Radius.Button"),
+            Content = _text
         };
         AddHandler(
             Mouse.PreviewMouseDownOutsideCapturedElementEvent,

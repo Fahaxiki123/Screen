@@ -14,6 +14,7 @@
         <ResourceDictionary Source="Themes/RecordingHud.xaml" />
         <ResourceDictionary Source="Themes/RecordingOptions.xaml" />
         <ResourceDictionary Source="Themes/SettingsFields.xaml" />
+        <ResourceDictionary Source="Themes/ShellMenus.xaml" />
       </ResourceDictionary.MergedDictionaries>
 
       <!-- Legacy aliases: existing code references these keys; they now

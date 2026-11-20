@@ -1,0 +1,26 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- These are user-selected outlines around the captured pixels, separate from menu chrome. -->
+    <SolidColorBrush x:Key="Pin.OutlineLight" Color="#DCEBEEF2"/>
+    <SolidColorBrush x:Key="Pin.OutlineDark" Color="#DC2B3037"/>
+    <Style x:Key="Pin.Outline" TargetType="Rectangle">
+        <Setter Property="RadiusX" Value="12"/><Setter Property="RadiusY" Value="12"/>
+        <Setter Property="Stroke" Value="{DynamicResource Brush.Accent}"/>
+    </Style>
+    <Style x:Key="Pin.Close" TargetType="Button" BasedOn="{StaticResource HudIconButtonStyle}">
+        <Setter Property="Width" Value="26"/><Setter Property="MinWidth" Value="26"/><Setter Property="Height" Value="26"/>
+        <Setter Property="Margin" Value="4"/><Setter Property="Focusable" Value="False"/>
+        <Setter Property="Background" Value="{DynamicResource Brush.DarkGlassSolid}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Brush.White}"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+            <Border x:Name="Face" CornerRadius="{DynamicResource Radius.Button}" Background="{TemplateBinding Background}"
+                    BorderBrush="{DynamicResource Brush.EdgeHighlight}" BorderThickness="1">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Face" Property="Background" Value="{DynamicResource Brush.Neutral300}"/></Trigger>
+                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Face" Property="Background" Value="{DynamicResource Brush.Neutral400}"/></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+</ResourceDictionary>

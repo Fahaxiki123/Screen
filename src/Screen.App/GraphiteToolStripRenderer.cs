@@ -1,48 +1,84 @@
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Windows;
 using System.Windows.Media;
 using DrawingColor = System.Drawing.Color;
 using Forms = System.Windows.Forms;
 
 namespace Screen.App;
 
-/// <summary>Brings the WinForms tray menu onto the same palette as the WPF windows.</summary>
+/// <summary>Draws the native tray menu using the same resources as the WPF shell.</summary>
 internal sealed class GraphiteToolStripRenderer : Forms.ToolStripProfessionalRenderer
 {
     private readonly GraphiteColors _colors;
+    private readonly double _menuRadius;
+    private readonly double _itemRadius;
 
     private GraphiteToolStripRenderer(GraphiteColors colors) : base(colors)
     {
         _colors = colors;
+        _menuRadius = ((CornerRadius)Application.Current.FindResource("Radius.Button")).TopLeft;
+        _itemRadius = ((CornerRadius)Application.Current.FindResource("Radius.Control")).TopLeft;
         RoundedEdges = false;
     }
 
-    public static void ApplyTo(Forms.ToolStrip menu)
+    public static void ApplyTo(Forms.ContextMenuStrip menu)
     {
         var colors = new GraphiteColors();
-        menu.Renderer = new GraphiteToolStripRenderer(colors);
-        menu.BackColor = colors.Background;
+        var renderer = new GraphiteToolStripRenderer(colors);
+        menu.Renderer = renderer;
+        // GDI controls require an opaque BackColor. Apply the glass alpha at the native popup.
+        menu.BackColor = DrawingColor.FromArgb(colors.Background.R, colors.Background.G, colors.Background.B);
+        menu.Opacity = colors.Background.A / (double)byte.MaxValue;
         menu.ForeColor = colors.Text;
+        menu.ShowImageMargin = false;
+        menu.Padding = new Forms.Padding(4);
+        menu.ItemAdded += (_, e) =>
+        {
+            if (e.Item is Forms.ToolStripMenuItem item)
+                item.Padding = new Forms.Padding(7, 4, 7, 4);
+        };
+        menu.SizeChanged += (_, _) => renderer.UpdateRegion(menu);
+        menu.DpiChangedAfterParent += (_, _) => renderer.UpdateRegion(menu);
+        renderer.UpdateRegion(menu);
+    }
+
+    private static GraphicsPath Outline(RectangleF bounds, double logicalRadius, int dpi)
+    {
+        var radius = Math.Min((float)(logicalRadius * dpi / 96d), Math.Min(bounds.Width, bounds.Height) / 2f);
+        var path = new GraphicsPath();
+        path.AddRoundedRectangle(bounds, new SizeF(radius, radius));
+        return path;
+    }
+
+    private void UpdateRegion(Forms.ToolStrip menu)
+    {
+        if (menu.ClientSize.Width <= 0 || menu.ClientSize.Height <= 0)
+            return;
+        using var path = Outline(menu.ClientRectangle, _menuRadius, menu.DeviceDpi);
+        menu.Region = new Region(path);
     }
 
     protected override void OnRenderToolStripBackground(Forms.ToolStripRenderEventArgs e)
     {
-        using var brush = new SolidBrush(_colors.Background);
+        using var brush = new SolidBrush(e.ToolStrip.BackColor);
         e.Graphics.FillRectangle(brush, e.AffectedBounds);
     }
 
     protected override void OnRenderMenuItemBackground(Forms.ToolStripItemRenderEventArgs e)
     {
-        var color = e.Item.Enabled && (e.Item.Selected || e.Item.Pressed)
-            ? _colors.Hover
-            : _colors.Background;
-        using var brush = new SolidBrush(color);
-        e.Graphics.FillRectangle(brush, new Rectangle(System.Drawing.Point.Empty, e.Item.Size));
+        if (!e.Item.Enabled || !(e.Item.Selected || e.Item.Pressed) || e.Item.Width <= 0 || e.Item.Height <= 0)
+            return;
+        using var path = Outline(new RectangleF(0, 0, e.Item.Width, e.Item.Height), _itemRadius, e.ToolStrip.DeviceDpi);
+        using var brush = new SolidBrush(_colors.Hover);
+        var state = e.Graphics.Save();
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        e.Graphics.FillPath(brush, path);
+        e.Graphics.Restore(state);
     }
 
     protected override void OnRenderItemText(Forms.ToolStripItemTextRenderEventArgs e)
     {
-        // Render explicitly so the system's disabled gray/embossed text cannot
-        // replace the readable theme color on this dark background.
         var color = e.Item.Enabled ? _colors.Text : _colors.DisabledText;
         Forms.TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont, e.TextRectangle, color, e.TextFormat);
     }
@@ -53,58 +89,54 @@ internal sealed class GraphiteToolStripRenderer : Forms.ToolStripProfessionalRen
         base.OnRenderArrow(e);
     }
 
+    protected override void OnRenderSeparator(Forms.ToolStripSeparatorRenderEventArgs e)
+    {
+        using var pen = new System.Drawing.Pen(_colors.Divider);
+        var inset = (int)Math.Round(6 * e.ToolStrip.DeviceDpi / 96d);
+        var y = e.Item.Height / 2;
+        e.Graphics.DrawLine(pen, inset, y, Math.Max(inset, e.Item.Width - inset), y);
+    }
+
     protected override void OnRenderToolStripBorder(Forms.ToolStripRenderEventArgs e)
     {
         var bounds = e.ToolStrip.ClientRectangle;
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-        {
+        if (bounds.Width <= 1 || bounds.Height <= 1)
             return;
-        }
-        using var pen = new System.Drawing.Pen(_colors.Border);
-        e.Graphics.DrawRectangle(pen, 0, 0, bounds.Width - 1, bounds.Height - 1);
+        using var path = Outline(new RectangleF(0.5f, 0.5f, bounds.Width - 1f, bounds.Height - 1f), _menuRadius, e.ToolStrip.DeviceDpi);
+        using var pen = new System.Drawing.Pen(_colors.Edge);
+        var state = e.Graphics.Save();
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        e.Graphics.DrawPath(pen, path);
+        e.Graphics.Restore(state);
     }
 
     private sealed class GraphiteColors : Forms.ProfessionalColorTable
     {
         public GraphiteColors() => UseSystemColors = false;
-
-        public DrawingColor Background { get; } = FromTheme("Brush.SurfaceRaised", 0x24, 0x3D, 0x57);
-        public DrawingColor Text { get; } = FromTheme("Brush.TextPrimary", 0xE8, 0xF1, 0xF7);
-        public DrawingColor DisabledText { get; } = FromTheme("Brush.TextSecondary", 0xB5, 0xC9, 0xD9);
-        public DrawingColor Hover { get; } = FromTheme("Brush.SurfaceHover", 0x30, 0x4E, 0x69);
-        public DrawingColor Border { get; } = FromTheme("Brush.Border", 0x39, 0x55, 0x6F);
+        public DrawingColor Background { get; } = FromTheme("Brush.DarkGlassSolid");
+        public DrawingColor Hover { get; } = FromTheme("Brush.Accent");
+        public DrawingColor Text { get; } = FromTheme("Brush.Label");
+        public DrawingColor DisabledText { get; } = FromTheme("Brush.Neutral500");
+        public DrawingColor Divider { get; } = FromTheme("Brush.Separator");
+        public DrawingColor Edge { get; } = FromTheme("Brush.EdgeHighlight");
 
         public override DrawingColor ToolStripDropDownBackground => Background;
         public override DrawingColor ImageMarginGradientBegin => Background;
         public override DrawingColor ImageMarginGradientMiddle => Background;
         public override DrawingColor ImageMarginGradientEnd => Background;
-        public override DrawingColor ImageMarginRevealedGradientBegin => Background;
-        public override DrawingColor ImageMarginRevealedGradientMiddle => Background;
-        public override DrawingColor ImageMarginRevealedGradientEnd => Background;
-        public override DrawingColor MenuStripGradientBegin => Background;
-        public override DrawingColor MenuStripGradientEnd => Background;
         public override DrawingColor MenuItemSelected => Hover;
-        public override DrawingColor MenuItemSelectedGradientBegin => Hover;
-        public override DrawingColor MenuItemSelectedGradientEnd => Hover;
-        public override DrawingColor MenuItemPressedGradientBegin => Hover;
-        public override DrawingColor MenuItemPressedGradientMiddle => Hover;
-        public override DrawingColor MenuItemPressedGradientEnd => Hover;
-        public override DrawingColor MenuItemBorder => Border;
-        public override DrawingColor MenuBorder => Border;
-        public override DrawingColor SeparatorDark => Border;
-        public override DrawingColor SeparatorLight => Border;
+        public override DrawingColor MenuItemBorder => Edge;
+        public override DrawingColor MenuBorder => Edge;
+        public override DrawingColor SeparatorDark => Divider;
+        public override DrawingColor SeparatorLight => Divider;
         public override DrawingColor CheckBackground => Hover;
         public override DrawingColor CheckSelectedBackground => Hover;
         public override DrawingColor CheckPressedBackground => Hover;
 
-        private static DrawingColor FromTheme(string key, byte red, byte green, byte blue)
+        private static DrawingColor FromTheme(string key)
         {
-            if (Application.Current?.TryFindResource(key) is SolidColorBrush brush)
-            {
-                var color = brush.Color;
-                return DrawingColor.FromArgb(color.A, color.R, color.G, color.B);
-            }
-            return DrawingColor.FromArgb(red, green, blue);
+            var color = ((SolidColorBrush)Application.Current.FindResource(key)).Color;
+            return DrawingColor.FromArgb(color.A, color.R, color.G, color.B);
         }
     }
 }

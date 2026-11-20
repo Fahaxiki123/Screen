@@ -7,7 +7,7 @@ namespace Screen.App;
 
 internal sealed partial class CaptureOverlayWindow
 {
-    private readonly Border _inPlaceStatusBar = new() { Visibility = Visibility.Collapsed };
+    private readonly GlassPanel _inPlaceStatusBar = new() { Visibility = Visibility.Collapsed };
     private readonly TextBlock _inPlaceStatus = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     private Button _originalToggle = null!;
     private Button _copyTranslation = null!;
@@ -52,12 +52,9 @@ internal sealed partial class CaptureOverlayWindow
         _inPlaceStatus.FontSize = 12;
         _inPlaceStatus.Margin = new Thickness(6, 0, 12, 0);
         row.Children.Add(_inPlaceStatus);
-        _inPlaceStatusBar.Child = row;
-        _inPlaceStatusBar.Background = FindResourceBrush("Brush.ChromeGradient");
-        _inPlaceStatusBar.BorderBrush = FindResourceBrush("Brush.OverlayBorder");
-        _inPlaceStatusBar.BorderThickness = new Thickness(1);
-        _inPlaceStatusBar.CornerRadius = new CornerRadius(9);
-        _inPlaceStatusBar.Padding = new Thickness(5);
+        _inPlaceStatusBar.Content = row;
+        _inPlaceStatusBar.SetResourceReference(GlassPanel.CornerRadiusProperty, "Radius.Bar");
+        _inPlaceStatusBar.Padding = new Thickness(6, 4, 6, 4);
         _root.Children.Add(_inPlaceStatusBar);
         Panel.SetZIndex(_inPlaceStatusBar, 22);
         ClearInPlaceTranslation();
@@ -66,7 +63,7 @@ internal sealed partial class CaptureOverlayWindow
     private static Button CreateInlineButton(string text, RoutedEventHandler action)
     {
         var button = new Button { Content = text, Padding = new Thickness(10, 4, 10, 4), FontSize = 12, MinHeight = 28 };
-        button.SetResourceReference(StyleProperty, "CardSecondaryButtonStyle");
+        button.SetResourceReference(StyleProperty, "TextCardActionStyle");
         button.Click += action;
         return button;
     }
@@ -115,6 +112,8 @@ internal sealed partial class CaptureOverlayWindow
         _inPlaceResult = null;
         _inPlaceMosaics = [];
         _inPlaceText = string.Empty;
+        if (_inPlaceStatusBar.Visibility == Visibility.Visible)
+            _surface.ShowOcrLines(null);
         _inPlaceStatusBar.Visibility = Visibility.Collapsed;
         if (_originalToggle is not null)
         {
@@ -127,7 +126,11 @@ internal sealed partial class CaptureOverlayWindow
     {
         _inPlaceStatus.Text = status;
         _inPlaceStatus.ToolTip = status;
-        _inPlaceStatusBar.Visibility = Visibility.Visible;
+        if (_inPlaceStatusBar.Visibility != Visibility.Visible)
+        {
+            _inPlaceStatusBar.Visibility = Visibility.Visible;
+            Motion.PopIn(_inPlaceStatusBar);
+        }
         PositionFloatingPanels();
     }
 
@@ -164,6 +167,7 @@ internal sealed partial class CaptureOverlayWindow
         var document = await OcrCard.RecognizeAutomaticallyAsync(
             _ocrEngine, source, purpose: OcrRecognitionPurpose.Translation, cancellationToken: token);
         token.ThrowIfCancellationRequested();
+        _surface.ShowOcrLines(document);
         var regions = InPlaceTranslationLayout.CreateRegions(document, source.Width, source.Height);
         if (regions.Count == 0)
         {
@@ -208,6 +212,7 @@ internal sealed partial class CaptureOverlayWindow
         // over both the original and translated versions by the capture surface.
         _inPlaceResult = InPlaceTranslationRenderer.Render(_surface.RenderOriginalSelection(), translated);
         _inPlaceMosaics = _surface.GetMosaicAnnotations();
+        _surface.ShowOcrLines(null);
         _surface.SetTranslatedSelection(_inPlaceResult);
         _inPlaceText = string.Join(Environment.NewLine + Environment.NewLine, translated.Select(region => region.Text));
         _originalToggle.Visibility = _copyTranslation.Visibility = Visibility.Visible;

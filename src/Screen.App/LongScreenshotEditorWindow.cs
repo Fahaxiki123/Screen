@@ -1,8 +1,10 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shell;
+using System.Windows.Shapes;
 using Lucide.NET;
 using Screen.Core;
 
@@ -26,11 +28,11 @@ internal sealed class LongScreenshotEditorWindow : Window
     private TextBlock _zoomText = null!;
     private readonly Dictionary<CaptureTool, Button> _toolButtons = [];
     private readonly Dictionary<double, Button> _thicknessButtons = [];
-    private readonly Dictionary<uint, Button> _colorButtons = [];
+    private readonly Dictionary<uint, Ellipse> _colorRings = [];
     private StackPanel _styleOptions = null!;
     private StackPanel _cropOptions = null!;
     private Button _cropButton = null!;
-    private uint _color = 0xFFFF4D4F;
+    private uint _color;
     private double _thickness = 4;
     private double _zoom = 1;
     private bool _fitWidth = true;
@@ -46,6 +48,10 @@ internal sealed class LongScreenshotEditorWindow : Window
         _sourceImage = image;
         _sourceRegion = new PixelRect(0, 0, image.Width, image.Height);
         _themeResources = themeResources;
+        // Detached editors (e.g. history tests) do not have an application's merged dictionaries.
+        if (TryFindResource("Annotation.Red") is null)
+            Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Screen;component/Themes/CaptureToolbar.xaml", UriKind.Relative) });
+        _color = AnnotationColor((SolidColorBrush)FindResource("Annotation.Red"));
         _originalImage = image;
         _currentFactor = WorkingScaleFactor(image);
         _image = _currentFactor == 1 ? image : Downscale(image, _currentFactor);
@@ -57,15 +63,15 @@ internal sealed class LongScreenshotEditorWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.CanResize;
-        Background = Theme("Brush.WindowBackdrop", "#15223A");
-        Foreground = Theme("Brush.TextPrimary", "#E8F1F7");
-        FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI");
+        Background = GlassTheme.Brush("Brush.Window");
+        Foreground = GlassTheme.Brush("Brush.TextPrimary");
+        FontFamily = GlassTheme.Get<FontFamily>("FontFamily.Body");
         WindowChrome.SetWindowChrome(this, new WindowChrome
         {
             CaptionHeight = 0,
             ResizeBorderThickness = new Thickness(6),
             GlassFrameThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(0),
+            CornerRadius = GlassTheme.Radius("Radius.Bar"),
             UseAeroCaptionButtons = false
         });
 
@@ -84,23 +90,16 @@ internal sealed class LongScreenshotEditorWindow : Window
 
         _canvasHost = new Border
         {
-            Background = Theme("Brush.Surface", "#1B3049"),
-            BorderBrush = Theme("Brush.Border", "#39556F"),
+            Background = GlassTheme.Brush("Brush.Surface"),
+            BorderBrush = GlassTheme.Brush("Brush.Border"),
             BorderThickness = new Thickness(1),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect
-            {
-                BlurRadius = 18,
-                Color = Colors.Black,
-                Opacity = 0.12,
-                ShadowDepth = 3
-            },
             Child = _surface
         };
         _viewport = new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Background = Theme("Brush.WindowBackdrop", "#15223A"),
+            Background = GlassTheme.Brush("Brush.Window"),
             Padding = new Thickness(38),
             Content = _canvasHost
         };
@@ -109,7 +108,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         root.Children.Add(_viewport);
         Content = new Border
         {
-            BorderBrush = Theme("Brush.Border", "#39556F"),
+            BorderBrush = GlassTheme.Brush("Brush.Border"),
             BorderThickness = new Thickness(1),
             Background = Background,
             Child = root
@@ -204,7 +203,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         return surface;
     }
 
-    private Border BuildHeader()
+    private GlassPanel BuildHeader()
     {
         var panel = new StackPanel();
         var tools = new StackPanel
@@ -218,9 +217,10 @@ internal sealed class LongScreenshotEditorWindow : Window
             Width = 90,
             TextAlignment = TextAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 14,
+            FontSize = 13,
             FontWeight = FontWeights.SemiBold
         };
+        Typography.SetNumeralAlignment(_zoomText, FontNumeralAlignment.Tabular);
         tools.Children.Add(_zoomText);
         tools.Children.Add(IconButton(LucideIconKind.ZoomIn, "放大", (_, _) => SetZoom(_zoom * 1.15)));
         tools.Children.Add(TextButton("适应宽度", (_, _) => FitWidth()));
@@ -272,7 +272,7 @@ internal sealed class LongScreenshotEditorWindow : Window
             Kind = LucideIconKind.GripHorizontal,
             Width = 18,
             Height = 18,
-            Stroke = Theme("Brush.TextSecondary", "#B5C9D9"),
+            Stroke = GlassTheme.Brush("Brush.TextSecondary"),
             StrokeThickness = 1.8,
             Margin = new Thickness(0, 0, 7, 0)
         });
@@ -280,17 +280,17 @@ internal sealed class LongScreenshotEditorWindow : Window
         {
             Text = "拖动窗口",
             FontSize = 13,
-            Foreground = Theme("Brush.TextSecondary", "#B5C9D9"),
+            Foreground = GlassTheme.Brush("Brush.TextSecondary"),
             VerticalAlignment = VerticalAlignment.Center
         });
         var dragHandle = new Border
         {
             Height = 36,
             Margin = new Thickness(10, 10, 10, 7),
-            Background = Theme("Brush.Neutral100", "#243D57"),
-            BorderBrush = Theme("Brush.Border", "#39556F"),
+            Background = GlassTheme.Brush("Brush.Neutral100"),
+            BorderBrush = GlassTheme.Brush("Brush.Border"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = GlassTheme.Radius("Radius.Button"),
             Cursor = Cursors.SizeAll,
             ToolTip = "按住这里拖动窗口，双击最大化或还原",
             Child = dragContent
@@ -313,7 +313,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         {
             Orientation = Orientation.Horizontal,
             Margin = new Thickness(4, 10, 16, 7),
-            Background = Brushes.Transparent
+            Background = GlassTheme.Brush("Brush.Transparent")
         };
         _copyButton = TextButton("完成并复制", async (_, _) => await FinishAndCopyAsync(), primary: true);
         actions.Children.Add(_copyButton);
@@ -332,7 +332,7 @@ internal sealed class LongScreenshotEditorWindow : Window
         {
             Text = "粗细",
             FontSize = 13,
-            Foreground = Theme("Brush.TextSecondary", "#B5C9D9"),
+            Foreground = GlassTheme.Brush("Brush.TextSecondary"),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 8, 0)
         });
@@ -349,11 +349,11 @@ internal sealed class LongScreenshotEditorWindow : Window
                 {
                     Width = Math.Max(5, size * 1.6),
                     Height = Math.Max(5, size * 1.6),
-                    Fill = Theme("Brush.TextPrimary", "#E8F1F7")
+                    Fill = GlassTheme.Brush("Brush.TextPrimary")
                 },
                 ToolTip = $"{size:0}px"
             };
-            button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
+            button.SetResourceReference(StyleProperty, "HudIconButtonStyle");
             button.Click += (_, _) =>
             {
                 _thickness = size;
@@ -365,19 +365,15 @@ internal sealed class LongScreenshotEditorWindow : Window
             _styleOptions.Children.Add(button);
         }
         _styleOptions.Children.Add(Separator());
-        foreach (var color in new[] { 0xFFFF4D4Fu, 0xFFFFB51Bu, 0xFF31C56Au, 0xFF2563EBu, 0xFF101216u, 0xFF9299A6u, 0xFFFFFFFFu })
+        foreach (var (token, name) in new[] { ("Red", "红"), ("Yellow", "黄"), ("Green", "绿"), ("Blue", "蓝"), ("Black", "黑"), ("Gray", "灰"), ("White", "白") })
         {
-            var swatch = new Button { Width = 34, MinWidth = 34, Height = 32, Margin = new Thickness(2), Padding = new Thickness(0) };
-            swatch.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
-            swatch.Content = new Border
-            {
-                Width = 22,
-                Height = 22,
-                CornerRadius = new CornerRadius(3),
-                Background = BrushFromArgb(color),
-                BorderBrush = Theme("Brush.TextSecondary", "#B5C9D9"),
-                BorderThickness = color is 0xFFFFFFFFu or 0xFF101216u ? new Thickness(1) : new Thickness(0)
-            };
+            var brush = (SolidColorBrush)FindResource($"Annotation.{token}");
+            var color = AnnotationColor(brush);
+            var swatch = new Button { Width = 34, MinWidth = 34, Height = 32, Margin = new Thickness(1), ToolTip = name };
+            swatch.SetResourceReference(StyleProperty, "HudIconButtonStyle");
+            var ring = new Ellipse { Width = 29, Height = 29, StrokeThickness = 2, Stroke = GlassTheme.Brush("Brush.White") };
+            var dot = new Ellipse { Width = 20, Height = 20, Fill = brush, Stroke = GlassTheme.Brush("Brush.GlassRim") };
+            swatch.Content = new Grid { Children = { ring, dot } };
             swatch.Click += (_, _) =>
             {
                 _color = color;
@@ -385,7 +381,7 @@ internal sealed class LongScreenshotEditorWindow : Window
                 ApplyCurrentStyleToSelection();
                 UpdateStyleSelectionVisuals();
             };
-            _colorButtons[color] = swatch;
+            _colorRings[color] = ring;
             _styleOptions.Children.Add(swatch);
         }
         panel.Children.Add(_styleOptions);
@@ -398,9 +394,9 @@ internal sealed class LongScreenshotEditorWindow : Window
         };
         _cropOptions.Children.Add(new TextBlock
         {
-            Text = "拖动蓝色边框或控制点调整裁切范围",
+            Text = "拖动边框或控制点调整裁切范围",
             FontSize = 13,
-            Foreground = Theme("Brush.TextSecondary", "#B5C9D9"),
+            Foreground = GlassTheme.Brush("Brush.TextSecondary"),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 12, 0)
         });
@@ -410,14 +406,14 @@ internal sealed class LongScreenshotEditorWindow : Window
         SelectTool(CaptureTool.Rectangle);
         UpdateStyleSelectionVisuals();
 
-        var header = new Border
+        return new GlassPanel
         {
-            Background = Theme("Brush.ChromeGradient", "#1B3049"),
-            BorderBrush = Theme("Brush.Border", "#39556F"),
-            BorderThickness = new Thickness(0, 0, 0, 1),
-            Child = panel
+            Variant = GlassVariant.Solid,
+            CornerRadius = GlassTheme.Radius("Radius.Bar"),
+            Padding = new Thickness(0),
+            Margin = new Thickness(3, 3, 3, 0),
+            Content = panel
         };
-        return header;
     }
 
     private void BeginWindowDrag(MouseButtonEventArgs e)
@@ -464,12 +460,8 @@ internal sealed class LongScreenshotEditorWindow : Window
         }
         foreach (var (candidate, button) in _toolButtons)
         {
-            button.Background = candidate == tool
-                ? Theme("Brush.AccentSubtleDark", "#294960")
-                : Brushes.Transparent;
-            button.Foreground = candidate == tool
-                ? Theme("Brush.AccentText", "#C5E5F0")
-                : Theme("Brush.TextPrimary", "#E8F1F7");
+            button.SetResourceReference(BackgroundProperty, candidate == tool ? "Brush.SelectedGradient" : "Brush.Transparent");
+            button.SetResourceReference(ForegroundProperty, "Brush.Label");
         }
         UpdateAnnotationStyle();
         UpdateStyleSelectionVisuals();
@@ -531,19 +523,11 @@ internal sealed class LongScreenshotEditorWindow : Window
         {
             button.ToolTip = numberTool ? $"序号直径 {NumberSizeForOption(size):0}px" : $"{size:0}px";
             var selected = Math.Abs(size - _thickness) < 0.01;
-            button.Background = selected ? Theme("Brush.AccentSubtleDark", "#294960") : Brushes.Transparent;
-            button.BorderBrush = selected ? Theme("Brush.AccentText", "#C5E5F0") : Brushes.Transparent;
-            button.BorderThickness = selected ? new Thickness(2) : new Thickness(0);
+            button.SetResourceReference(BackgroundProperty, selected ? "Brush.SelectedGradient" : "Brush.Transparent");
         }
-        foreach (var (color, button) in _colorButtons)
-        {
-            var selected = color == _color;
-            button.Background = selected ? Theme("Brush.AccentSubtleDark", "#294960") : Brushes.Transparent;
-            button.BorderBrush = selected ? Theme("Brush.AccentText", "#C5E5F0") : Brushes.Transparent;
-            button.BorderThickness = selected ? new Thickness(2) : new Thickness(0);
-        }
+        foreach (var (color, ring) in _colorRings)
+            ring.Visibility = color == _color ? Visibility.Visible : Visibility.Hidden;
     }
-
     private void FitWidth()
     {
         var available = Math.Max(100, _viewport.ActualWidth - _viewport.Padding.Left - _viewport.Padding.Right - 24);
@@ -584,8 +568,8 @@ internal sealed class LongScreenshotEditorWindow : Window
         _surface.InitializeCommittedSelection(new PixelRect(0, 0, _image.Width, _image.Height), showSelectionChrome: true);
         _styleOptions.Visibility = Visibility.Collapsed;
         _cropOptions.Visibility = Visibility.Visible;
-        _cropButton.Background = Theme("Brush.AccentSubtleDark", "#294960");
-        _cropButton.Foreground = Theme("Brush.AccentText", "#C5E5F0");
+        _cropButton.SetResourceReference(BackgroundProperty, "Brush.SelectedGradient");
+        _cropButton.SetResourceReference(ForegroundProperty, "Brush.Label");
     }
 
     private void ApplyCrop()
@@ -733,8 +717,8 @@ internal sealed class LongScreenshotEditorWindow : Window
         _cropping = false;
         _styleOptions.Visibility = Visibility.Visible;
         _cropOptions.Visibility = Visibility.Collapsed;
-        _cropButton.Background = Brushes.Transparent;
-        _cropButton.Foreground = Theme("Brush.TextPrimary", "#E8F1F7");
+        _cropButton.SetResourceReference(BackgroundProperty, "Brush.Transparent");
+        _cropButton.Foreground = GlassTheme.Brush("Brush.TextPrimary");
     }
 
     private async Task FinishAndCopyAsync()
@@ -860,9 +844,9 @@ internal sealed class LongScreenshotEditorWindow : Window
         var iconElement = new LucideIconElement
         {
             Kind = icon,
-            Width = 20,
-            Height = 20,
-            StrokeThickness = 1.8
+            Width = 18,
+            Height = 18,
+            StrokeThickness = 1.7
         };
         iconElement.SetBinding(LucideIconElement.StrokeProperty, new System.Windows.Data.Binding(nameof(Button.Foreground))
         {
@@ -874,7 +858,7 @@ internal sealed class LongScreenshotEditorWindow : Window
             Content = iconElement,
             ToolTip = tooltip
         };
-        button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
+        button.SetResourceReference(StyleProperty, "HudIconButtonStyle");
         button.Click += handler;
         return button;
     }
@@ -891,7 +875,7 @@ internal sealed class LongScreenshotEditorWindow : Window
             Content = ToolbarIcons.DualIcon(strokeGeometry, fillGeometry, strokeThickness),
             ToolTip = tooltip
         };
-        button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
+        button.SetResourceReference(StyleProperty, "HudIconButtonStyle");
         button.Click += handler;
         return button;
     }
@@ -904,13 +888,12 @@ internal sealed class LongScreenshotEditorWindow : Window
             Height = 36,
             MinWidth = primary ? 104 : 58,
             Padding = new Thickness(11, 0, 11, 0),
-            FontSize = 14,
+            FontSize = 13,
             FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal,
             Margin = primary ? new Thickness(8, 0, 0, 0) : new Thickness(2),
-            Background = primary ? Theme("Brush.PrimaryAction", "#A7CFDF") : Brushes.Transparent,
-            Foreground = primary ? Theme("Brush.OnAccent", "#15223A") : Theme("Brush.TextPrimary", "#E8F1F7")
+            Width = double.NaN
         };
-        button.SetResourceReference(StyleProperty, primary ? "CardPrimaryButtonStyle" : "CardSecondaryButtonStyle");
+        button.SetResourceReference(StyleProperty, primary ? "PrimaryButtonStyle" : "HudIconButtonStyle");
         button.Click += handler;
         return button;
     }
@@ -919,20 +902,15 @@ internal sealed class LongScreenshotEditorWindow : Window
     {
         Width = 1,
         Height = 22,
-        Background = Theme("Brush.Border", "#39556F"),
+        Background = GlassTheme.Brush("Brush.Border"),
         Margin = new Thickness(8, 5, 8, 5)
     };
 
-    private static Brush BrushFromArgb(uint color) => new SolidColorBrush(Color.FromArgb(
-        (byte)(color >> 24),
-        (byte)(color >> 16),
-        (byte)(color >> 8),
-        (byte)color));
-
-    private static Brush Theme(string key, string fallback) =>
-        Application.Current?.TryFindResource(key) as Brush
-        ?? new SolidColorBrush((Color)ColorConverter.ConvertFromString(fallback));
-
+    private static uint AnnotationColor(SolidColorBrush brush)
+    {
+        var c = brush.Color;
+        return ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+    }
     private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject
     {
         while (source is not null)

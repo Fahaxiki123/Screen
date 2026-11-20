@@ -550,8 +550,6 @@ internal sealed class ScrollCaptureController : IDisposable
 
 internal sealed class ScrollCapturePreviewWindow : Window
 {
-    private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
-
     private readonly Image _image;
     private readonly TextBlock _status;
     private readonly PixelRect _region;
@@ -568,7 +566,8 @@ internal sealed class ScrollCapturePreviewWindow : Window
         ShowActivated = false;
         Width = 220;
         Height = 150;
-        Background = Token("Brush.Surface");
+        AllowsTransparency = true;
+        Background = GlassTheme.Brush("Brush.Transparent");
 
         var root = new DockPanel();
         _status = new TextBlock
@@ -577,7 +576,7 @@ internal sealed class ScrollCapturePreviewWindow : Window
             Height = 38,
             Padding = new Thickness(12, 9, 12, 0),
             FontSize = 12,
-            Foreground = Token("Brush.TextPrimary"),
+            Foreground = GlassTheme.Brush("Brush.Label"),
             FontWeight = FontWeights.SemiBold
         };
         DockPanel.SetDock(_status, Dock.Top);
@@ -591,14 +590,7 @@ internal sealed class ScrollCapturePreviewWindow : Window
         };
         RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.HighQuality);
         root.Children.Add(_image);
-        Content = new Border
-        {
-            BorderBrush = Token("Brush.Accent"),
-            BorderThickness = new Thickness(1.5),
-            CornerRadius = new CornerRadius(12),
-            Background = Background,
-            Child = root
-        };
+        Content = new GlassPanel { Variant = GlassVariant.Solid, Content = root };
 
         SourceInitialized += (_, _) =>
         {
@@ -653,9 +645,9 @@ internal sealed class ScrollCapturePreviewWindow : Window
 }
 
 /// <summary>
-/// Single navy control capsule shown during scroll capture: inline status,
+/// Floating controls shown during scroll capture: status,
 /// auto-scroll toggle, and the finish/edit/save/cancel actions. Replaces the
-/// previous trio of unrelated white floating windows.
+/// separate control windows without obscuring the capture region.
 /// </summary>
 internal sealed class ScrollCaptureControlWindow : Window
 {
@@ -678,8 +670,8 @@ internal sealed class ScrollCaptureControlWindow : Window
         ShowInTaskbar = false;
         ShowActivated = false;
         AllowsTransparency = true;
-        Background = Brushes.Transparent;
-        // Fit the capsule to its content: a fixed width clipped the action
+        Background = GlassTheme.Brush("Brush.Transparent");
+        // Fit the toolbar to its content: a fixed width clipped the action
         // buttons whenever the status line grew. Height stays fixed.
         SizeToContent = SizeToContent.Width;
         MinWidth = 260;
@@ -694,52 +686,8 @@ internal sealed class ScrollCaptureControlWindow : Window
             FontSize = 13,
             FontWeight = FontWeights.SemiBold
         };
-        // Text toggle with auto width — the shared icon-button style is fixed
-        // at 36px and would clip the label.
-        var autoTemplate = new ControlTemplate(typeof(Button));
-        var autoChrome = new FrameworkElementFactory(typeof(Border));
-        autoChrome.Name = "Chrome";
-        autoChrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
-        autoChrome.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
-        autoChrome.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
-        autoChrome.SetValue(Border.BorderThicknessProperty, new Thickness(1));
-        var autoPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
-        autoPresenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        autoPresenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-        autoChrome.AppendChild(autoPresenter);
-        autoTemplate.VisualTree = autoChrome;
-        var autoHover = new Trigger
-        {
-            Property = UIElement.IsMouseOverProperty,
-            Value = true
-        };
-        autoHover.Setters.Add(new Setter(
-            Border.BackgroundProperty, Token("Brush.OverlayHover"), "Chrome"));
-        autoTemplate.Triggers.Add(autoHover);
-        var autoPressed = new Trigger
-        {
-            Property = Button.IsPressedProperty,
-            Value = true
-        };
-        autoPressed.Setters.Add(new Setter(
-            Border.BackgroundProperty, Token("Brush.OverlayPressed"), "Chrome"));
-        autoTemplate.Triggers.Add(autoPressed);
-        var autoFocus = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
-        autoFocus.Setters.Add(new Setter(Border.BorderBrushProperty, Token("Brush.AccentText"), "Chrome"));
-        autoTemplate.Triggers.Add(autoFocus);
-
-        _autoButton = new Button
-        {
-            Content = _autoLabel,
-            Height = 34,
-            Padding = new Thickness(14, 0, 14, 0),
-            Margin = new Thickness(1),
-            Background = Brushes.Transparent,
-            BorderBrush = Brushes.Transparent,
-            Foreground = Token("Brush.OverlayIcon"),
-            Cursor = System.Windows.Input.Cursors.Hand,
-            Template = autoTemplate
-        };
+        _autoButton = new Button { Content = _autoLabel, Width = 86, ToolTip = "切换自动滚动" };
+        _autoButton.SetResourceReference(StyleProperty, "HudIconButtonStyle");
         _autoButton.Click += (_, _) =>
         {
             _enabled = !_enabled;
@@ -756,28 +704,18 @@ internal sealed class ScrollCaptureControlWindow : Window
         row.Children.Add(_saveButton);
         row.Children.Add(IconAction(
             LucideIconKind.X, "取消长截图",
-            () => CancelRequested?.Invoke(this, EventArgs.Empty),
-            "Brush.DangerOnDark"));
+            () => CancelRequested?.Invoke(this, EventArgs.Empty)));
         _finishButton = IconAction(
             LucideIconKind.Check, "完成并复制",
             () => FinishRequested?.Invoke(this, EventArgs.Empty));
-        _finishButton.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
+        _finishButton.SetResourceReference(StyleProperty, "PrimaryButtonStyle");
         _finishButton.Width = _finishButton.MinWidth = 36;
         _finishButton.Height = 36;
         _finishButton.Margin = new Thickness(3, 1, 1, 1);
         _finishButton.Padding = new Thickness(0);
         row.Children.Add(_finishButton);
 
-        Content = new Border
-        {
-            Background = Token("Brush.ChromeGradient"),
-            BorderBrush = Token("Brush.OverlayBorder"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(5, 4, 5, 4),
-            Effect = (System.Windows.Media.Effects.DropShadowEffect)Application.Current.FindResource("Shadow.Floating"),
-            Child = row
-        };
+        Content = new GlassPanel { Variant = GlassVariant.Solid, Padding = new Thickness(5, 4, 5, 4), Content = row };
 
         SourceInitialized += (_, _) =>
         {
@@ -788,7 +726,7 @@ internal sealed class ScrollCaptureControlWindow : Window
         };
         // Position once layout has produced a real width (SizeToContent means
         // Width is NaN at SourceInitialized time). Hidden until then so the
-        // capsule never flashes at the default location.
+        // toolbar never flashes at the default location.
         ContentRendered += (_, _) =>
         {
             if (_positioned)
@@ -818,11 +756,8 @@ internal sealed class ScrollCaptureControlWindow : Window
         };
     }
 
-    private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
-
     /// <summary>
-    /// Lucide icons do not inherit the button foreground by default; without
-    /// this binding they render with the default black stroke on dark chrome.
+    /// Let icons follow the active and disabled states of their buttons.
     /// </summary>
     private static void BindIconStrokeToForeground(LucideIconElement icon) =>
         icon.SetBinding(
@@ -839,12 +774,12 @@ internal sealed class ScrollCaptureControlWindow : Window
     {
         Width = 1,
         Height = 20,
-        Background = Token("Brush.OverlayBorder"),
+        Background = GlassTheme.Brush("Brush.Separator"),
         Margin = new Thickness(6, 0, 5, 0),
         VerticalAlignment = VerticalAlignment.Center
     };
 
-    private static Button IconAction(LucideIconKind icon, string tooltip, Action action, string? foregroundKey = null)
+    private static Button IconAction(LucideIconKind icon, string tooltip, Action action)
     {
         var iconElement = new LucideIconElement
         {
@@ -859,11 +794,7 @@ internal sealed class ScrollCaptureControlWindow : Window
             Content = iconElement,
             ToolTip = tooltip
         };
-        button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
-        if (foregroundKey is not null)
-        {
-            button.Foreground = Token(foregroundKey);
-        }
+        button.SetResourceReference(StyleProperty, "HudIconButtonStyle");
         button.Click += (_, _) => action();
         return button;
     }
@@ -871,8 +802,8 @@ internal sealed class ScrollCaptureControlWindow : Window
     private void ApplyAutomaticVisual()
     {
         _autoLabel.Text = _enabled ? "停止自动" : "自动滚动";
-        _autoButton.Background = _enabled ? Token("Brush.AccentSubtleDark") : Brushes.Transparent;
-        _autoButton.Foreground = _enabled ? Token("Brush.AccentText") : Token("Brush.OverlayIcon");
+        HudActiveButton.SetIsActive(_autoButton, _enabled);
+        _autoButton.SetResourceReference(Control.ForegroundProperty, _enabled ? "Brush.AccentText" : "Brush.OverlayIcon");
     }
 
     public void SetAutomatic(bool enabled)
@@ -972,7 +903,7 @@ internal sealed class RegionBorderWindow : Window
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         AllowsTransparency = true;
-        Background = Brushes.Transparent;
+        Background = GlassTheme.Brush("Brush.Transparent");
         Topmost = true;
         ShowInTaskbar = false;
         ShowActivated = false;
@@ -1007,11 +938,11 @@ internal sealed class RegionBorderWindow : Window
             root.Children.Add(new System.Windows.Shapes.Path
             {
                 Data = maskGeometry,
-                Fill = new SolidColorBrush(Color.FromArgb(112, 0, 0, 0))
+                Fill = GlassTheme.Brush("Brush.Dim")
             });
             root.Children.Add(new Border
             {
-                BorderBrush = (Brush)Application.Current.FindResource("Brush.Accent"),
+                BorderBrush = GlassTheme.Brush("Brush.Accent"),
                 BorderThickness = new Thickness(2),
                 Width = hole.Width,
                 Height = hole.Height,

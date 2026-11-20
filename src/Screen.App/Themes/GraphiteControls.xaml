@@ -17,6 +17,7 @@
     <Setter Property="Padding" Value="10,7" />
   </Style>
   <Style TargetType="MenuItem">
+    <Setter Property="MinHeight" Value="30" />
     <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Padding" Value="10,4" />
@@ -24,7 +25,7 @@
       <Setter.Value>
         <ControlTemplate TargetType="MenuItem">
           <Grid>
-            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource Radius.Control}" Padding="{TemplateBinding Padding}">
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="24" />
@@ -40,11 +41,11 @@
               </Grid>
             </Border>
             <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="3" IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}" AllowsTransparency="True" Focusable="False">
-              <Border Background="{DynamicResource Brush.SurfaceRaised}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="10" Padding="5" MinWidth="180">
+              <local:GlassPanel Variant="DarkSolid" CornerRadius="{DynamicResource Radius.Menu}" Padding="4" MinWidth="170">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="560" CanContentScroll="True">
                   <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
                 </ScrollViewer>
-              </Border>
+              </local:GlassPanel>
             </Popup>
           </Grid>
           <ControlTemplate.Triggers>
@@ -64,7 +65,7 @@
   <Style TargetType="Separator">
     <Setter Property="Margin" Value="8,4" />
     <Setter Property="Template">
-      <Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="{DynamicResource Brush.Border}" /></ControlTemplate></Setter.Value>
+      <Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="{DynamicResource Brush.Separator}" /></ControlTemplate></Setter.Value>
     </Setter>
   </Style>
   <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator" BasedOn="{StaticResource {x:Type Separator}}" />

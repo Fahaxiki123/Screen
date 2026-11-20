@@ -3,7 +3,6 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using Lucide.NET;
 using Screen.Core;
@@ -71,7 +70,7 @@ internal sealed class PinWindow : Window
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         AllowsTransparency = true;
-        Background = Brushes.Transparent;
+        SetResourceReference(BackgroundProperty, "Brush.Transparent");
         Topmost = true;
         ShowInTaskbar = false;
 
@@ -110,25 +109,23 @@ internal sealed class PinWindow : Window
             ToolTip = "关闭贴图",
             Visibility = Visibility.Collapsed
         };
-        _closeButton.SetResourceReference(StyleProperty, "PinCloseButtonStyle");
+        _closeButton.SetResourceReference(StyleProperty, "Pin.Close");
         _closeButton.Click += (_, _) => Close();
 
         _outline = new Rectangle
         {
             StrokeThickness = 1.5,
-            RadiusX = 12,
-            RadiusY = 12,
             Margin = new Thickness(0.75),
             SnapsToDevicePixels = false,
             IsHitTestVisible = false,
             Opacity = 0
         };
-        _outline.SetResourceReference(Shape.StrokeProperty, "Brush.Accent");
+        _outline.SetResourceReference(StyleProperty, "Pin.Outline");
         var root = new Grid
         {
-            Background = Brushes.Transparent,
             ContextMenu = BuildContextMenu(buffer)
         };
+        root.SetResourceReference(Grid.BackgroundProperty, "Brush.Transparent");
         root.Children.Add(image);
         root.Children.Add(_outline);
         root.Children.Add(_closeButton);
@@ -145,23 +142,24 @@ internal sealed class PinWindow : Window
         MouseEnter += (_, _) =>
         {
             _closeButton.Visibility = Visibility.Visible;
-            if (!_outlineExplicit)
-            {
-                _outline.BeginAnimation(
-                    UIElement.OpacityProperty,
-                    new DoubleAnimation(1, TimeSpan.FromMilliseconds(110)));
-            }
+            ShowHoverOutline(1);
         };
         MouseLeave += (_, _) =>
         {
             _closeButton.Visibility = Visibility.Collapsed;
-            if (!_outlineExplicit)
-            {
-                _outline.BeginAnimation(
-                    UIElement.OpacityProperty,
-                    new DoubleAnimation(0, TimeSpan.FromMilliseconds(110)));
-            }
+            ShowHoverOutline(0);
         };
+    }
+
+    private void ShowHoverOutline(double opacity)
+    {
+        if (_outlineExplicit)
+            return;
+        var previous = _outline.Opacity;
+        _outline.BeginAnimation(OpacityProperty, null);
+        _outline.Opacity = opacity;
+        if (SystemParameters.ClientAreaAnimation)
+            _outline.BeginAnimation(OpacityProperty, Motion.Tween(previous, opacity, 150));
     }
 
     public bool IsClickThrough => _clickThrough;
@@ -188,9 +186,7 @@ internal sealed class PinWindow : Window
     private ContextMenu BuildContextMenu(PixelBuffer buffer)
     {
         var menu = new ContextMenu();
-        menu.SetResourceReference(BackgroundProperty, "Brush.Surface");
-        menu.SetResourceReference(ForegroundProperty, "Brush.TextPrimary");
-        menu.SetResourceReference(BorderBrushProperty, "Brush.Border");
+        menu.SetResourceReference(StyleProperty, "GlassMenuStyle");
         var opacity = new MenuItem { Header = "透明度" };
         foreach (var value in new[] { 100, 80, 60, 40, 20 })
         {
@@ -200,10 +196,10 @@ internal sealed class PinWindow : Window
         }
 
         var outline = new MenuItem { Header = "描边" };
-        AddOutlineItem(outline, "无描边", Brushes.Transparent, 0);
-        AddOutlineItem(outline, "浅色描边", new SolidColorBrush(Color.FromArgb(220, 235, 238, 242)), 1);
-        AddOutlineItem(outline, "深色描边", new SolidColorBrush(Color.FromArgb(220, 43, 48, 55)), 1);
-        AddOutlineItem(outline, "蓝色描边", new SolidColorBrush(Color.FromRgb(0x25, 0x63, 0xEB)), 2);
+        AddOutlineItem(outline, "无描边", "Brush.Transparent", 0);
+        AddOutlineItem(outline, "浅色描边", "Pin.OutlineLight", 1);
+        AddOutlineItem(outline, "深色描边", "Pin.OutlineDark", 1);
+        AddOutlineItem(outline, "蓝色描边", "Brush.Accent", 2);
 
         var through = new MenuItem { Header = "鼠标穿透（从托盘恢复）", IsCheckable = true };
         _clickThroughMenuItem = through;
@@ -243,7 +239,7 @@ internal sealed class PinWindow : Window
         return menu;
     }
 
-    private void AddOutlineItem(MenuItem parent, string text, Brush brush, double thickness)
+    private void AddOutlineItem(MenuItem parent, string text, string brushKey, double thickness)
     {
         var item = new MenuItem { Header = text };
         item.Click += (_, _) =>
@@ -252,7 +248,7 @@ internal sealed class PinWindow : Window
             _outlineExplicit = thickness > 0;
             _outline.BeginAnimation(UIElement.OpacityProperty, null);
             _outline.Opacity = thickness > 0 ? 1 : 0;
-            _outline.Stroke = brush;
+            _outline.SetResourceReference(Shape.StrokeProperty, brushKey);
             _outline.StrokeThickness = Math.Max(1, thickness);
         };
         parent.Items.Add(item);
