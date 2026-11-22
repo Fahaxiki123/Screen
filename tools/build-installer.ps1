@@ -52,7 +52,7 @@ function Assert-WorkspacePath([string]$Path) {
     $isOfficialDirectory = [string]::Equals($full, $publishDirectory, [StringComparison]::OrdinalIgnoreCase)
     $isInstallerDirectory = [string]::Equals($full, $outputDirectory, [StringComparison]::OrdinalIgnoreCase)
     $isInstallerFile = [string]::Equals([IO.Path]::GetDirectoryName($full), $outputDirectory, [StringComparison]::OrdinalIgnoreCase) -and
-        [IO.Path]::GetFileName($full) -match '^Screen-\d+\.\d+\.\d+-win-x64-Setup\.exe$'
+        [IO.Path]::GetFileName($full) -match '^(Flick|Screen)-\d+\.\d+\.\d+-win-x64-Setup\.exe$'
     if (-not ($insideProject -or $isOfficialDirectory -or $isInstallerDirectory -or $isInstallerFile)) {
         throw "Path is outside the project and the exact release targets: $full"
     }
@@ -97,7 +97,8 @@ if ([string]::IsNullOrWhiteSpace($CompilerPath)) {
         "$env:LOCALAPPDATA\Programs\NSIS\makensis.exe",
         "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
         "$env:ProgramFiles\NSIS\makensis.exe",
-        (Join-Path $artifactsDirectory 'tooling\nsis-3.12\Bin\makensis.exe')
+        (Join-Path $artifactsDirectory 'tooling\nsis-3.12\Bin\makensis.exe'),
+        (Join-Path $artifactsDirectory 'tooling\nsis-3.12\makensis.exe')
     )
     $CompilerPath = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
 }
@@ -164,7 +165,7 @@ try {
     if ($reader.ReadUInt32() -ne 0x00004550 -or $reader.ReadUInt16() -ne 0x8664) { throw 'Screen.exe is not an AMD64 PE executable.' }
 } finally { $reader.Dispose() }
 
-$installerName = "Screen-$appVersion-win-x64-Setup.exe"
+$installerName = "Flick-$appVersion-win-x64-Setup.exe"
 $stagedInstaller = Join-Path $buildDirectory $installerName
 $outputInstaller = Join-Path $outputDirectory $installerName
 $excludedFiles = [Collections.Generic.List[string]]::new()
@@ -247,7 +248,7 @@ try {
     }
     # Remove only older generated installers after the replacement is complete.
     foreach ($old in @(Get-ChildItem -LiteralPath $outputDirectory -File)) {
-        if ($old.Name -match '^Screen-\d+\.\d+\.\d+-win-x64-Setup\.exe$' -and $old.FullName -ne $outputInstaller) {
+        if ($old.Name -match '^(Flick|Screen)-\d+\.\d+\.\d+-win-x64-Setup\.exe$' -and $old.FullName -ne $outputInstaller) {
             Assert-WorkspacePath $old.FullName
             Assert-NoReparsePoints $old.FullName
             Remove-Item -LiteralPath $old.FullName -Force

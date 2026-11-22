@@ -12,9 +12,9 @@
 
 截至 **2026-11-23** 最新发布版本：**2.0.0**。以下程序包、校验文件和源码均对应 `v2.0.0`；后续升级使用上方最新稳定版入口。
 
-**[下载 2.0.0 Windows x64 绿色便携版（.zip）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/Flick-2.0.0-win-x64-Portable.zip)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.0) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v2.0.0)
+**[下载 2.0.0 Windows x64 安装包（.exe，推荐）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/Flick-2.0.0-win-x64-Setup.exe)** · **[绿色便携版（.zip）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/Flick-2.0.0-win-x64-Portable.zip)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.0) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v2.0.0)
 
-绿色便携版支持 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64，已自包含 .NET Desktop Runtime、本地 PaddleOCR 模型与 FFmpeg，解压后运行 `Screen.exe` 即可使用，无需管理员权限。原有 `%LOCALAPPDATA%\Screen` 设置与 Windows 凭据管理器中的 API 密钥完全保留兼容。更新前请完成截图或录屏并从托盘退出旧版程序。
+安装包与绿色便携版均支持 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64，已完整自包含 .NET Desktop Runtime、Visual C++ 运行库、本地 PaddleOCR 模型与 FFmpeg，无需管理员权限。原有 `%LOCALAPPDATA%\Screen` 设置与 Windows 凭据管理器中的 API 密钥完全保留兼容。更新前请完成截图或录屏并从托盘退出旧版程序。
 
 ### 2.0.0 主要更新
 
