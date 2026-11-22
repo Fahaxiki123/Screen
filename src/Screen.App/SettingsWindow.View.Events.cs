@@ -5,6 +5,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using Screen.Core;
 
@@ -16,9 +17,45 @@ namespace Screen.App;
 /// </summary>
 public partial class SettingsWindow
 {
-    private void CaptureHotKey(Button input, string propertyName, KeyEventArgs e)
+    private void OnHotKeyInput(object sender, KeyEventArgs e)
     {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var modifiers = Keyboard.Modifiers;
+        // Let WPF handle ordinary Tab traversal when it delivers the keystroke.
+        if (IsNavigationTab(key, modifiers) || _hotKeyEditor is not { } editor || editor.Button != sender)
+            return;
         e.Handled = true;
+        CaptureHotKey(editor.PropertyName, key, modifiers);
+    }
+
+    private static bool IsNavigationTab(Key key, ModifierKeys modifiers) =>
+        key == Key.Tab && modifiers is ModifierKeys.None or ModifierKeys.Shift;
+
+    internal bool TryCaptureRegisteredHotKey(Key key, ModifierKeys modifiers)
+    {
+        if (_hotKeyEditor is not { } editor || !IsActive || !editor.Button.IsVisible || !editor.Button.IsKeyboardFocused ||
+            NativeMethods.GetForegroundWindow() != new WindowInteropHelper(this).Handle)
+            return false;
+
+        if (IsNavigationTab(key, modifiers))
+        {
+            // A registered Shift+Tab can arrive solely as WM_HOTKEY.
+            editor.Button.MoveFocus(new TraversalRequest(modifiers == ModifierKeys.Shift
+                ? FocusNavigationDirection.Previous : FocusNavigationDirection.Next));
+        }
+        else
+            CaptureHotKey(editor.PropertyName, key, modifiers);
+        return true;
+    }
+
+    private void CaptureHotKey(string propertyName, Key key, ModifierKeys modifiers)
+    {
+        if (key == Key.Escape && modifiers == ModifierKeys.None)
+        {
+            EndHotKeyCapture();
+            Focus();
+            return;
+        }
 
         var isClickThroughRecovery = string.Equals(
             propertyName,
@@ -28,7 +65,6 @@ public partial class SettingsWindow
             propertyName,
             nameof(SettingsViewModel.RecordHotKey),
             StringComparison.Ordinal);
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
 
         if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
             or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin)
@@ -36,12 +72,10 @@ public partial class SettingsWindow
             return;
         }
 
-        var modifiers = Keyboard.Modifiers;
         var isFunctionKey = key is >= Key.F1 and <= Key.F24;
         if (modifiers == ModifierKeys.None && !isFunctionKey)
         {
             _viewModel.SetStatus("可以直接按 F1–F24，其他键请搭配 Ctrl、Shift、Alt 或 Win。", isError: true);
-            input.Content = BuildKeycapPanel(GetHotKeyValue(propertyName));
             return;
         }
 
@@ -72,7 +106,6 @@ public partial class SettingsWindow
         if (otherHotKeys.Any(other => string.Equals(value, other, StringComparison.OrdinalIgnoreCase)))
         {
             _viewModel.SetStatus("该快捷键已分配给另一项功能，请换一个组合。", isError: true);
-            input.Content = BuildKeycapPanel(previous);
             return;
         }
 
@@ -83,8 +116,7 @@ public partial class SettingsWindow
             : isRecord ? _registerRecordHotKey : _registerCaptureHotKey;
         if (register is not null && !register(value))
         {
-            _viewModel.SetStatus($"快捷键 {value} 注册失败，已保留 {previous}。冲突时可启用 Screen 优先。", isError: true);
-            input.Content = BuildKeycapPanel(previous);
+            _viewModel.SetStatus($"快捷键 {value} 注册失败，已保留 {previous}。冲突时可启用 Flick 优先。", isError: true);
             return;
         }
 
@@ -101,7 +133,7 @@ public partial class SettingsWindow
             _viewModel.HotKey = value;
         }
 
-        input.Content = BuildKeycapPanel(value);
+        EndHotKeyCapture();
         // Return focus to the window instead of advancing to the next control:
         // focus traversal wraps around to the FIRST sidebar nav button, whose
         // focused state looked like a stuck selection on "通用".

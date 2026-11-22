@@ -9,16 +9,12 @@ using Screen.Core;
 
 namespace Screen.App;
 
-/// <summary>
-/// 3-2-1 Liquid Sapphire optical orb countdown over the recording region.
-/// Everything outside the region stays dimmed, while a luminous frosted-sapphire
-/// medallion pulses cleanly at the region center before capture begins.
-/// </summary>
 internal sealed class RecordingCountdownWindow : Window
 {
     private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TextBlock _number;
-    private readonly Grid _orb;
+    private readonly Ellipse _progressArc;
+    private const double ArcLength = Math.PI * (78 - 2.5) / 2.5;
     private readonly Ellipse _pulseRing;
     private readonly ScaleTransform _numberScale = new(1, 1);
     private readonly DispatcherTimer _timer;
@@ -26,138 +22,75 @@ internal sealed class RecordingCountdownWindow : Window
 
     public RecordingCountdownWindow(PixelRect region)
     {
-        Title = "Screen 录屏倒计时";
+        Title = "Flick 录屏倒计时";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
         ShowInTaskbar = false;
+        ShowActivated = false;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
         IsHitTestVisible = false;
         UseLayoutRounding = true;
 
-        var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
-        var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
-            region.X + region.Width / 2,
-            region.Y + region.Height / 2)) / 96.0;
-        Left = screen.Left / dpi;
-        Top = screen.Top / dpi;
-        Width = screen.Width / dpi;
-        Height = screen.Height / dpi;
-
-        // Region rect in this window's DIP space.
-        var rx = (region.X - screen.Left) / dpi;
-        var ry = (region.Y - screen.Top) / dpi;
-        var rw = region.Width / dpi;
-        var rh = region.Height / dpi;
-
-        var mask = RecordingTheme.Brush("Brush.WindowBackground", "#0A1222").Clone();
-        mask.Opacity = 0.56;
+        // The persistent recording border already dims the desktop. This window
+        // only hosts the 88-DIP orb and the largest frame of its expanding ring.
+        Width = Height = 132;
+        var center = new NativeMethods.NativePoint(region.X + region.Width / 2, region.Y + region.Height / 2);
+        double scale = NativeMethods.GetDpiAtPoint(center) / 96d;
+        int extent = (int)Math.Ceiling(Width * scale);
+        var bounds = new System.Drawing.Rectangle(center.X - extent / 2, center.Y - extent / 2, extent, extent);
+        Left = bounds.Left / scale;
+        Top = bounds.Top / scale;
         var canvas = new Canvas { ClipToBounds = true };
-        canvas.Children.Add(MaskRect(mask, 0, 0, Width, ry));
-        canvas.Children.Add(MaskRect(mask, 0, ry + rh, Width, Height - ry - rh));
-        canvas.Children.Add(MaskRect(mask, 0, ry, rx, rh));
-        canvas.Children.Add(MaskRect(mask, rx + rw, ry, Width - rx - rw, rh));
 
-        const double orbDiameter = 128;
-        _orb = new Grid
-        {
-            Width = orbDiameter + 32,
-            Height = orbDiameter + 32
-        };
-
+        var orb = new Grid { Width = 88, Height = 88 };
         _pulseRing = new Ellipse
         {
-            Width = orbDiameter,
-            Height = orbDiameter,
-            Stroke = new SolidColorBrush(Color.FromArgb(0x90, 0x7D, 0xD3, 0xFC)),
+            Stroke = RecordingTheme.Brush("Brush.Accent", "#007AFF"),
             StrokeThickness = 1.5,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
             RenderTransformOrigin = new Point(0.5, 0.5),
-            RenderTransform = new ScaleTransform(1, 1)
+            RenderTransform = new ScaleTransform()
         };
-
-        var orbFill = new RadialGradientBrush
+        var glass = new Ellipse
         {
-            GradientOrigin = new Point(0.32, 0.24),
-            Center = new Point(0.5, 0.5),
-            RadiusX = 0.68,
-            RadiusY = 0.68,
-            GradientStops = new GradientStopCollection
-            {
-                new(Color.FromArgb(0xEB, 0x1A, 0x35, 0x5E), 0),
-                new(Color.FromArgb(0xF2, 0x0E, 0x1B, 0x33), 0.65),
-                new(Color.FromArgb(0xF8, 0x09, 0x12, 0x24), 1)
-            }
+            Fill = RecordingTheme.Brush("Brush.ChromeGradient", "#D9FFFFFF"),
+            Stroke = RecordingTheme.Brush("Brush.GlassRim", "#F5FFFFFF"),
+            StrokeThickness = 2,
+            Effect = new DropShadowEffect { Color = Color.FromRgb(15, 23, 42), BlurRadius = 12, ShadowDepth = 2, Opacity = 0.2 }
         };
-        var orbRim = new LinearGradientBrush(
-            Color.FromArgb(0x90, 0xBA, 0xE6, 0xFD),
-            Color.FromArgb(0x30, 0x38, 0xBD, 0xF8),
-            new Point(0, 0),
-            new Point(1, 1));
-
-        var numberBrush = new LinearGradientBrush(
-            Colors.White,
-            Color.FromRgb(0x93, 0xC5, 0xFD),
-            new Point(0, 0),
-            new Point(0, 1));
-
+        _progressArc = new Ellipse
+        {
+            Width = 78,
+            Height = 78,
+            StrokeThickness = 2.5,
+            Stroke = RecordingTheme.Brush("Brush.Accent", "#007AFF"),
+            StrokeDashArray = new DoubleCollection { ArcLength, ArcLength },
+            StrokeDashCap = PenLineCap.Round,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            RenderTransform = new RotateTransform(-90)
+        };
         _number = new TextBlock
         {
             Text = "3",
-            FontSize = 52,
-            FontWeight = FontWeights.Bold,
-            Foreground = numberBrush,
+            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+            FontSize = 34,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#1D1D1F"),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, -10, 0, 0),
             RenderTransformOrigin = new Point(0.5, 0.5),
             RenderTransform = _numberScale
         };
-
-        var readyLabel = new TextBlock
-        {
-            Text = "READY",
-            FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI Variable Text"),
-            FontSize = 10.5,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = RecordingTheme.Brush("Brush.AccentText", "#7DD3FC"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0, 0, 0, 20),
-            Opacity = 0.88
-        };
-
-        var coreCircle = new Border
-        {
-            Width = orbDiameter,
-            Height = orbDiameter,
-            CornerRadius = new CornerRadius(orbDiameter / 2),
-            Background = orbFill,
-            BorderBrush = orbRim,
-            BorderThickness = new Thickness(1.5),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Effect = new DropShadowEffect
-            {
-                Color = Color.FromRgb(0x0E, 0xA5, 0xE9),
-                BlurRadius = 32,
-                ShadowDepth = 0,
-                Opacity = 0.35
-            },
-            Child = new Grid
-            {
-                Children = { _number, readyLabel }
-            }
-        };
-
-        _orb.Children.Add(_pulseRing);
-        _orb.Children.Add(coreCircle);
-        Canvas.SetLeft(_orb, rx + (rw - _orb.Width) / 2);
-        Canvas.SetTop(_orb, ry + (rh - _orb.Height) / 2);
-        canvas.Children.Add(_orb);
-        RecordingRegionWindow.Attach(this, canvas, screen);
+        System.Windows.Documents.Typography.SetNumeralAlignment(_number, FontNumeralAlignment.Tabular);
+        orb.Children.Add(_pulseRing);
+        orb.Children.Add(glass);
+        orb.Children.Add(_progressArc);
+        orb.Children.Add(_number);
+        Canvas.SetLeft(orb, (Width - orb.Width) / 2);
+        Canvas.SetTop(orb, (Height - orb.Height) / 2);
+        canvas.Children.Add(orb);
+        RecordingRegionWindow.Attach(this, canvas, bounds);
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) =>
@@ -186,7 +119,8 @@ internal sealed class RecordingCountdownWindow : Window
 
     private void PlayBeatAnimation()
     {
-        var pop = new DoubleAnimation(1.18, 1.0, TimeSpan.FromMilliseconds(320))
+        _progressArc.BeginAnimation(Shape.StrokeDashOffsetProperty, new DoubleAnimation(ArcLength, 0, TimeSpan.FromSeconds(1)));
+        var pop = new DoubleAnimation(1.06, 1.0, TimeSpan.FromMilliseconds(260))
         {
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
         };
@@ -195,28 +129,15 @@ internal sealed class RecordingCountdownWindow : Window
 
         if (_pulseRing.RenderTransform is ScaleTransform ringScale)
         {
-            var expand = new DoubleAnimation(1.0, 1.22, TimeSpan.FromMilliseconds(720))
+            var expand = new DoubleAnimation(0.92, 1.44, TimeSpan.FromMilliseconds(750))
             {
                 EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
             };
-            var fade = new DoubleAnimation(0.75, 0.0, TimeSpan.FromMilliseconds(720));
+            var fade = new DoubleAnimation(0.55, 0.0, TimeSpan.FromMilliseconds(750));
             ringScale.BeginAnimation(ScaleTransform.ScaleXProperty, expand);
             ringScale.BeginAnimation(ScaleTransform.ScaleYProperty, expand);
             _pulseRing.BeginAnimation(OpacityProperty, fade);
         }
-    }
-
-    private static Border MaskRect(Brush mask, double left, double top, double width, double height)
-    {
-        var rect = new Border
-        {
-            Background = mask,
-            Width = Math.Max(0, width),
-            Height = Math.Max(0, height)
-        };
-        Canvas.SetLeft(rect, left);
-        Canvas.SetTop(rect, top);
-        return rect;
     }
 
     public Task<bool> Completion => _completion.Task;
@@ -225,7 +146,7 @@ internal sealed class RecordingCountdownWindow : Window
     public void Finish()
     {
         _timer.Stop();
-        _completion.TrySetResult(true);
-        Close();
+        if (_completion.TrySetResult(true))
+            Close();
     }
 }

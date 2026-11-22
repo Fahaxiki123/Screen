@@ -3,6 +3,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Shapes;
+using System.Windows.Threading;
 using Screen.Core;
 
 namespace Screen.App;
@@ -16,6 +18,8 @@ internal sealed class TextPromptWindow : Window
     private readonly AnnotationStyle _style;
     private readonly double? _maxContentWidth;
     private bool _completing;
+    private bool _composing;
+    private static readonly Thickness EditorPadding = new(5, 3, 5, 3);
 
     public TextPromptWindow(
         AnnotationStyle style,
@@ -41,42 +45,64 @@ internal sealed class TextPromptWindow : Window
             AnnotationVariants.TextBold => FontWeights.Bold,
             _ => FontWeights.Normal
         };
+        var ink = new SolidColorBrush(Color.FromArgb(
+            (byte)(style.Argb >> 24), (byte)(style.Argb >> 16), (byte)(style.Argb >> 8), (byte)style.Argb));
+        ink.Freeze();
         _text = new TextBox
         {
-            Width = 300,
-            MinHeight = 44,
+            Width = 276 + EditorPadding.Left + EditorPadding.Right,
             MaxHeight = 180,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalContentAlignment = VerticalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Top,
             FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI"),
-            FontSize = Math.Clamp(style.FontSize, 14, 42),
+            FontSize = style.FontSize,
             FontWeight = weight,
-            // The editor text uses the theme for legibility. The caller still
-            // renders Value with the untouched AnnotationStyle/Argb.
-            Foreground = Token("Brush.TextPrimary"),
+            Foreground = ink,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
-            Padding = new Thickness(10, 7, 10, 7),
-            CaretBrush = Token("Brush.TextPrimary"),
+            Padding = EditorPadding,
+            FocusVisualStyle = null,
+            CaretBrush = ink,
             SelectionBrush = Token("Brush.Accent"),
             SelectionOpacity = 0.28,
             Text = initialValue ?? string.Empty
         };
-        _text.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)] =
-            Application.Current.FindResource("DarkScrollBarStyle");
+        _text.AddHandler(TextCompositionManager.PreviewTextInputStartEvent,
+            new TextCompositionEventHandler((_, _) =>
+            {
+                _composing = true;
+                // Let the native IME candidate list receive mouse clicks.
+                if (Mouse.Captured == _text)
+                    Mouse.Capture(null);
+            }), true);
+        _text.AddHandler(TextCompositionManager.PreviewTextInputEvent,
+            new TextCompositionEventHandler((_, _) =>
+            {
+                if (_composing)
+                {
+                    _composing = false;
+                    RestoreCaptureAfterInput();
+                }
+            }), true);
+        // TextBox releases capture after selecting text with the mouse.
+        _text.AddHandler(Mouse.MouseUpEvent, new MouseButtonEventHandler((_, _) => RestoreCaptureAfterInput()), true);
+        _text.ContextMenuClosing += (_, _) => RestoreCaptureAfterInput();
         _text.PreviewKeyDown += OnKeyDown;
-        // Rounded navy card: the TextBox itself cannot round its corners,
-        // so the chrome lives on the wrapping Border.
-        Content = new Border
+        var editor = new Grid();
+        editor.Children.Add(new Rectangle { Fill = new SolidColorBrush(Color.FromArgb(0x29, 0, 0, 0)), RadiusX = 6, RadiusY = 6 });
+        editor.Children.Add(_text);
+        editor.Children.Add(new Rectangle
         {
-            CornerRadius = new CornerRadius(8),
-            Background = Token("Brush.SurfaceRaised"),
-            BorderBrush = Token("Brush.Accent"),
-            BorderThickness = new Thickness(1.5),
-            Child = _text
-        };
+            Stroke = new SolidColorBrush(Color.FromArgb(0xC7, 255, 255, 255)),
+            StrokeThickness = 1,
+            StrokeDashArray = new DoubleCollection { 3, 2 },
+            RadiusX = 6,
+            RadiusY = 6,
+            IsHitTestVisible = false
+        });
+        Content = editor;
         AddHandler(
             Mouse.PreviewMouseDownOutsideCapturedElementEvent,
             new MouseButtonEventHandler(OnMouseDownOutsideCapturedElement),
@@ -103,6 +129,15 @@ internal sealed class TextPromptWindow : Window
 
     public string Value => _text.Text.Trim();
 
+    private void RestoreCaptureAfterInput()
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        {
+            if (IsActive && !_completing && !_composing && _text.IsKeyboardFocusWithin && Mouse.Captured is null)
+                Mouse.Capture(_text, CaptureMode.SubTree);
+        }));
+    }
+
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
@@ -110,26 +145,26 @@ internal sealed class TextPromptWindow : Window
             (int)Math.Round(_screenPoint.X),
             (int)Math.Round(_screenPoint.Y)));
         var dpiScale = dpi / 96.0;
-        _text.FontSize = Math.Clamp(_style.FontSize / dpiScale, 10, 42);
+        _text.FontSize = _style.FontSize / dpiScale;
         TextBlock.SetLineHeight(_text, _style.FontSize * 1.22 / dpiScale);
         if (_maxContentWidth is double maxContentWidth)
         {
-            _text.Width = Math.Max(48, maxContentWidth / dpiScale + 24);
+            _text.Width = Math.Max(1, maxContentWidth / dpiScale) + EditorPadding.Left + EditorPadding.Right;
         }
-        var width = (int)Math.Round((_text.Width + 4) * dpiScale);
-        var height = (int)Math.Round(Math.Max(48, ActualHeight) * dpi / 96.0);
         NativeMethods.SetWindowPos(
             handle,
             new nint(-1),
-            (int)Math.Round(_screenPoint.X - 12 * dpiScale),
-            (int)Math.Round(_screenPoint.Y - 9 * dpiScale),
-            width,
-            height,
-            NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+            (int)Math.Round(_screenPoint.X - EditorPadding.Left * dpiScale),
+            (int)Math.Round(_screenPoint.Y - EditorPadding.Top * dpiScale),
+            0, 0, NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
     }
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
+        if (_composing || e.Key == Key.ImeProcessed)
+        {
+            return;
+        }
         if (e.Key == Key.Escape)
         {
             Complete(false);
@@ -144,6 +179,10 @@ internal sealed class TextPromptWindow : Window
 
     private void OnMouseDownOutsideCapturedElement(object sender, MouseButtonEventArgs e)
     {
+        if (_composing)
+        {
+            return;
+        }
         Complete(!string.IsNullOrWhiteSpace(_text.Text));
         e.Handled = true;
     }

@@ -19,6 +19,15 @@ public sealed class CaptureBoundaryRegressionTests
     private static readonly PixelRect Region = new(30, 25, 80, 60);
 
     [TestMethod]
+    public void CommittedSelectionStartsWithoutAnAnnotationTool() => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        Assert.IsTrue(surface.IsSelectionCommitted);
+        Assert.AreEqual(CaptureTool.Select, surface.Tool);
+        Assert.IsFalse(surface.CanUndo);
+    });
+
+    [TestMethod]
     public void PinRendersSourcePixelsToEveryEdgeWhenNotHovered() => OnSta(() =>
     {
         const int width = 48;
@@ -50,6 +59,132 @@ public sealed class CaptureBoundaryRegressionTests
     });
 
     [TestMethod]
+    public void PinWindowTemplateClipsOnlyTheCornersAndSharesItsOutlineWithTheHoverStroke() => OnSta(() =>
+    {
+        const int width = 80, height = 60;
+        var pixels = new byte[width * height * 4];
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i + 1] = 170;
+            pixels[i + 3] = 255;
+        }
+        var pin = new PinWindow(new PixelBuffer(pixels, width, height, width * 4),
+            new PixelRect(-32000, -32000, width, height))
+        { ShowActivated = false, Left = -32000, Top = -32000 };
+        try
+        {
+            pin.Show();
+            pin.UpdateLayout();
+            var presenter = (System.Windows.Controls.Decorator)pin.Template.FindName("PART_PinChrome", pin);
+            var host = (System.Windows.Controls.Grid)presenter.Child;
+            var hitSurface = (System.Windows.Shapes.Path)host.Children[0];
+            var artwork = (System.Windows.Controls.Grid)host.Children[1];
+            var imageLayer = (FrameworkElement)artwork.Children[1];
+            var outlineLayer = (System.Windows.Controls.Canvas)artwork.Children[2];
+            var outline = (System.Windows.Shapes.Path)outlineLayer.Children[0];
+            Assert.IsTrue(imageLayer.Clip.IsFrozen);
+            Assert.AreSame(imageLayer.Clip, hitSurface.Data);
+            Assert.AreSame(imageLayer.Clip, outline.Data);
+            Assert.AreEqual(1.8, outline.StrokeThickness);
+            Assert.AreEqual(0d, outline.Opacity);
+
+            var dpi = VisualTreeHelper.GetDpi(host);
+            var rendered = new RenderTargetBitmap((int)Math.Round(presenter.ActualWidth * dpi.DpiScaleX),
+                (int)Math.Round(presenter.ActualHeight * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+            rendered.Render(presenter);
+            var origin = host.TranslatePoint(new Point(), presenter);
+            var actual = new byte[width * height * 4];
+            rendered.CopyPixels(new Int32Rect((int)Math.Round(origin.X * dpi.DpiScaleX),
+                (int)Math.Round(origin.Y * dpi.DpiScaleY), width, height), actual, width * 4, 0);
+            foreach (var (x, y) in new[] { (0, height / 2), (width - 1, height / 2), (width / 2, 0), (width / 2, height - 1) })
+                Assert.AreEqual(0xFF00AA00u, PixelAt(actual, width * 4, x, y));
+            foreach (var (x, y) in new[] { (0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1) })
+                Assert.IsTrue(actual[(y * width + x) * 4 + 3] < 100, "Only the soft shadow can reach a clipped corner.");
+
+            // With a short pin the lower edge of its artwork moves up from under a stationary mouse.
+            var edge = host.TranslatePoint(new Point(host.ActualWidth / 2, host.ActualHeight - 0.25), presenter);
+            Assert.AreSame(hitSurface, presenter.InputHitTest(edge));
+            var transform = (TransformGroup)artwork.RenderTransform;
+            var scale = (ScaleTransform)transform.Children[0];
+            scale.ScaleX = scale.ScaleY = 1.015;
+            ((TranslateTransform)transform.Children[1]).Y = -2;
+            Assert.AreSame(hitSurface, presenter.InputHitTest(edge));
+            Assert.IsTrue(presenter.TranslatePoint(edge, artwork).Y > artwork.ActualHeight);
+        }
+        finally
+        {
+            pin.Close();
+        }
+    });
+
+    [TestMethod]
+    public void LargePinRetainsItsHitWindowAndRestoresArtworkWhenTheCompositorCloses() => OnSta(() =>
+    {
+        const int width = 1480, height = 900;
+        var pin = new PinWindow(new PixelBuffer(new byte[width * height * 4], width, height, width * 4),
+            new PixelRect(-32000, -32000, width, height))
+        { Left = -32000, Top = -32000, ShowActivated = false };
+        try
+        {
+            pin.Show();
+            pin.UpdateLayout();
+            var handle = new System.Windows.Interop.WindowInteropHelper(pin).Handle;
+            var image = (Visual)pin.Content;
+            var imageSource = (System.Windows.Interop.HwndSource)PresentationSource.FromVisual(image)!;
+            Assert.AreNotEqual(nint.Zero, handle);
+            Assert.IsTrue(pin.AllowsTransparency);
+            if (imageSource.Handle != handle)
+            {
+                var renderer = (PinCompositionWindow)imageSource.RootVisual;
+                Assert.AreEqual(0, NativeMethods.DwmGetWindowAttribute(imageSource.Handle, NativeMethods.DwmwaCloaked,
+                    out int cloak, sizeof(int)));
+                Assert.AreNotEqual(0, cloak);
+                // The original, fully functional layout must take over if its DWM visual source disappears.
+                renderer.Close();
+                pin.UpdateLayout();
+            }
+            Assert.AreEqual(handle, ((System.Windows.Interop.HwndSource)PresentationSource.FromVisual(image)!).Handle);
+            pin.SetClickThrough(true);
+            Assert.AreNotEqual(0L, NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlExStyle).ToInt64() & NativeMethods.WsExTransparent);
+            pin.SetClickThrough(false);
+            Assert.AreEqual(0L, NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlExStyle).ToInt64() & NativeMethods.WsExTransparent);
+        }
+        finally
+        {
+            pin.Close();
+        }
+    });
+
+    [TestMethod]
+    [DataRow(160, 120)]
+    [DataRow(12, 8)]
+    public void PinWheelZoomReturnsToTheOriginalPhysicalSize(int width, int height) => OnSta(() =>
+    {
+        var pin = new PinWindow(new PixelBuffer(new byte[width * height * 4], width, height, width * 4),
+            new PixelRect(-32000, -32000, width, height))
+        { ShowActivated = false, Left = -32000, Top = -32000 };
+        try
+        {
+            pin.Show();
+            var originalSize = new Size(pin.Width, pin.Height);
+            void Wheel(int delta) => pin.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, 0, delta)
+            {
+                RoutedEvent = Mouse.MouseWheelEvent
+            });
+            Wheel(Mouse.MouseWheelDeltaForOneLine);
+            Assert.IsTrue(pin.Width > originalSize.Width);
+            Wheel(-Mouse.MouseWheelDeltaForOneLine);
+            Assert.AreEqual(originalSize, new Size(pin.Width, pin.Height));
+            Wheel(-Mouse.MouseWheelDeltaForOneLine);
+            Assert.IsTrue(pin.Width <= originalSize.Width);
+        }
+        finally
+        {
+            pin.Close();
+        }
+    });
+
+    [TestMethod]
     public void SelectionDragIncludesTheLastRowAndColumnInEitherDirection()
     {
         var first = new PixelPoint(0, 0);
@@ -59,6 +194,42 @@ public sealed class CaptureBoundaryRegressionTests
         Assert.AreEqual(full, CaptureSurface.SelectionFromDrag(first, last));
         Assert.AreEqual(full, CaptureSurface.SelectionFromDrag(last, first));
     }
+
+    [TestMethod]
+    public void MagnifierAndColorCopyUseThePixelContainingTheCursorOnAScaledSurface() => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        surface.InitializeCommittedSelection(default);
+        surface.Arrange(new Rect(0, 0, Width / 1.25, Height / 1.25));
+        var cursor = (PixelPoint)Invoke(surface, "ToPixel", new Point(9.5, 6))!;
+        SetField(surface, "_cursor", cursor); // Physical position (11.875, 7.5).
+        Invoke(surface, "RefreshCaptureChrome");
+        var source = GetField<PixelBuffer>(surface, "_sourceBuffer");
+        var expected = PixelAt(source.Pixels, source.Stride, 11, 7);
+        Assert.AreEqual(expected, surface.HoverColor);
+        Assert.AreEqual(ColorText.ToHex(expected), GetField<System.Windows.Controls.TextBlock>(surface, "_colorText").Text);
+        Assert.AreEqual("  ·  11, 7", GetField<System.Windows.Controls.TextBlock>(surface, "_coordinates").Text);
+
+        surface.Arrange(new Rect(0, 0, Width / 1.5, Height / 1.5));
+        Assert.AreEqual(new PixelPoint(1, 1), Invoke(surface, "ToPixel", new Point(1 / 1.5, 1 / 1.5)));
+    });
+
+    [TestMethod]
+    public void MovingOntoTheDesktopClearsThePreviousWindowHighlight() => OnSta(() =>
+    {
+        var window = new WindowTarget(1, "Window", Region);
+        var surface = CreateSurface([window]);
+        surface.InitializeCommittedSelection(default);
+        SetField(surface, "_cursor", new PixelPoint(40, 32));
+        Assert.IsTrue((bool)Invoke(surface, "UpdateWindowSelection")!);
+        Assert.AreEqual(window, surface.SelectedWindow);
+        Assert.AreEqual(Region, surface.Selection);
+
+        SetField(surface, "_cursor", new PixelPoint(2, 2));
+        Assert.IsTrue((bool)Invoke(surface, "UpdateWindowSelection")!);
+        Assert.IsNull(surface.SelectedWindow);
+        Assert.IsTrue(surface.Selection.IsEmpty);
+    });
 
     [TestMethod]
     public void DeletingASelectedMarkPreservesOtherMarksAndUndoOrder() => OnSta(() =>
@@ -112,6 +283,35 @@ public sealed class CaptureBoundaryRegressionTests
         surface.SetTranslatedSelection(null);
         Assert.IsFalse(surface.IsShowingTranslation);
         CollectionAssert.AreEqual(surface.RenderOriginalSelection().Pixels, surface.RenderSelection().Pixels);
+    });
+
+    [TestMethod]
+    public void ComparingTranslationKeepsMosaicPixelsProtectedAndExportsTheSelectedViewImmediately() => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        DrawExportMosaic(surface, AnnotationVariants.MosaicPixelate);
+        surface.ClearAnnotationSelection();
+        var originalPreview = Render(surface);
+        var originalExport = surface.RenderSelection().Pixels;
+        var translation = FillSelection(0xFF204C88);
+        surface.SetTranslatedSelection(translation);
+        var translatedPreview = Render(surface);
+        var translatedExport = surface.RenderSelection().Pixels;
+        surface.SetTranslatedSelection(null);
+
+        void AssertMosaicMatches(byte[] expected)
+        {
+            var displayed = Render(surface);
+            for (int y = 32; y < 78; y++)
+                for (int x = 37; x < 93; x++)
+                    Assert.AreEqual(PixelAt(expected, Width * 4, x, y), PixelAt(displayed, Width * 4, x, y));
+        }
+        surface.SetTranslatedSelection(translation, animateComparison: true);
+        AssertMosaicMatches(translatedPreview);
+        CollectionAssert.AreEqual(translatedExport, surface.RenderSelection().Pixels);
+        surface.SetTranslatedSelection(null, animateComparison: true);
+        AssertMosaicMatches(originalPreview);
+        CollectionAssert.AreEqual(originalExport, surface.RenderSelection().Pixels);
     });
 
     [TestMethod]
@@ -389,7 +589,7 @@ public sealed class CaptureBoundaryRegressionTests
             "Incremental overlapping mosaic rebuild must match a full clean render without block/halo seams.");
     });
 
-    private static CaptureSurface CreateSurface()
+    private static CaptureSurface CreateSurface(IReadOnlyList<WindowTarget>? windows = null)
     {
         var resources = new ResourceDictionary();
         foreach (var key in new[] { "Brush.Accent", "Brush.OverlayBase", "Brush.OverlayBorder", "Brush.OverlayText", "Brush.OverlayTextDim", "Brush.OverlayIcon", "Brush.Neutral500" })
@@ -410,7 +610,7 @@ public sealed class CaptureBoundaryRegressionTests
         }
         var frame = new CaptureFrame(pixels, Width, Height, Width * 4, 96, 96,
             new PixelRect(0, 0, Width, Height), CaptureColorSpace.Srgb, DateTimeOffset.UtcNow);
-        var surface = new CaptureSurface(frame, [], new WindowSnapService(), resources);
+        var surface = new CaptureSurface(frame, windows ?? [], new WindowSnapService(), resources);
         surface.InitializeCommittedSelection(Region, showSelectionChrome: false);
         surface.Measure(new Size(Width, Height));
         surface.Arrange(new Rect(0, 0, Width, Height));

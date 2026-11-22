@@ -16,12 +16,7 @@ internal sealed partial class CaptureSurface
         {
             return;
         }
-        // Walk the sample ladder: wheel up zooms in, wheel down zooms out.
-        _magnifierSampleIndex = Math.Clamp(
-            _magnifierSampleIndex + (e.Delta > 0 ? -1 : 1),
-            0,
-            MagnifierSamples.Length - 1);
-        InvalidateVisual();
+        ChangeMagnification(Math.Sign(e.Delta));
         e.Handled = true;
     }
 
@@ -222,18 +217,8 @@ internal sealed partial class CaptureSurface
         }
         else if (!_draggingSelection && !_drawing && !_selectionCommitted && (Selection.IsEmpty || Tool == CaptureTool.Select))
         {
-            var screenPoint = new PixelPoint(_frame.ScreenBounds.X + _cursor.X, _frame.ScreenBounds.Y + _cursor.Y);
-            var target = _snapService.HitTest(_windows, screenPoint);
-            if (target is not null)
-            {
-                SelectedWindow = target;
-                Selection = new PixelRect(
-                    target.Bounds.X - _frame.ScreenBounds.X,
-                    target.Bounds.Y - _frame.ScreenBounds.Y,
-                    target.Bounds.Width,
-                    target.Bounds.Height).Intersect(new PixelRect(0, 0, _frame.Width, _frame.Height));
+            if (UpdateWindowSelection())
                 SelectionChanged?.Invoke(this, EventArgs.Empty);
-            }
         }
         UpdateIdleCursor();
         InvalidateVisual();
@@ -309,21 +294,9 @@ internal sealed partial class CaptureSurface
             Selection = SelectionFromDrag(_start, _cursor);
             if (Math.Abs(_cursor.X - _start.X) <= 2 || Math.Abs(_cursor.Y - _start.Y) <= 2)
             {
-                var target = _snapService.HitTest(
-                    _windows,
-                    new PixelPoint(_frame.ScreenBounds.X + _cursor.X, _frame.ScreenBounds.Y + _cursor.Y));
-                if (target is not null)
+                UpdateWindowSelection();
+                if (Selection.IsEmpty)
                 {
-                    SelectedWindow = target;
-                    Selection = new PixelRect(
-                        target.Bounds.X - _frame.ScreenBounds.X,
-                        target.Bounds.Y - _frame.ScreenBounds.Y,
-                        target.Bounds.Width,
-                        target.Bounds.Height).Intersect(new PixelRect(0, 0, _frame.Width, _frame.Height));
-                }
-                else
-                {
-                    Selection = default;
                     ReleaseMouseCapture();
                     SelectionChanged?.Invoke(this, EventArgs.Empty);
                     InvalidateVisual();
@@ -332,6 +305,7 @@ internal sealed partial class CaptureSurface
                 }
             }
             _selectionCommitted = true;
+            AnimateSelectionHandles();
             SelectionChanged?.Invoke(this, EventArgs.Empty);
             SelectionCommitted?.Invoke(this, EventArgs.Empty);
         }
@@ -345,6 +319,19 @@ internal sealed partial class CaptureSurface
         }
         UpdateIdleCursor();
         InvalidateVisual();
+    }
+
+    private bool UpdateWindowSelection()
+    {
+        var screenPoint = new PixelPoint(_frame.ScreenBounds.X + _cursor.X, _frame.ScreenBounds.Y + _cursor.Y);
+        var target = _snapService.HitTest(_windows, screenPoint);
+        var bounds = target is null ? default : new PixelRect(
+            target.Bounds.X - _frame.ScreenBounds.X, target.Bounds.Y - _frame.ScreenBounds.Y,
+            target.Bounds.Width, target.Bounds.Height).Intersect(new PixelRect(0, 0, _frame.Width, _frame.Height));
+        bool changed = target != SelectedWindow || bounds != Selection;
+        SelectedWindow = target;
+        Selection = bounds;
+        return changed;
     }
 
     private void FinishDrawing(PixelPoint point)

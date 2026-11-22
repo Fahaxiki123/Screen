@@ -3,9 +3,8 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
-using System.Runtime.InteropServices;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shell;
 using System.Windows.Threading;
@@ -23,10 +22,19 @@ namespace Screen.App;
 /// </summary>
 internal sealed partial class RecordingPreviewWindow : Window
 {
-    private readonly string _filePath;
+    private string _filePath;
+    private readonly RecordingExportFormat _exportFormat;
+    private readonly CancellationTokenSource _exportLifetime = new();
+    private readonly DispatcherTimer _statusReset = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly Image _videoImage;
     private readonly TimelineBar _timeline;
     private readonly TextBlock _timeText;
+    private readonly TextBlock _trimRange = new()
+    {
+        FontSize = 12,
+        FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+        Foreground = RecordingTheme.Brush("Brush.TextSecondary", "#9E1D1D1F")
+    };
     private readonly TextBlock _statusText;
     private readonly LucideIconElement _playIcon;
     private readonly DispatcherTimer _ticker;
@@ -41,12 +49,11 @@ internal sealed partial class RecordingPreviewWindow : Window
     private bool _tickerUpdating;
     private bool _loaded;
 
-    // Compact editor chrome: navy caption bar and moon-blue control strip.
     private const double TitleBarHeight = 44;
     private readonly Border _videoHost;
     private LucideIconElement _volumeIcon = null!;
     private TextBlock _speedLabel = null!;
-    private Popup _volumePopup = null!;
+    private Popup? _volumePopup;
     private Popup _speedPopup = null!;
     private double _volume = 1.0;
     private bool _muted;
@@ -55,29 +62,30 @@ internal sealed partial class RecordingPreviewWindow : Window
     private readonly RecordingExportCache _exportCache = new();
     private bool _closed;
 
-    public RecordingPreviewWindow(string filePath)
+    public RecordingPreviewWindow(string filePath, RecordingExportFormat format = RecordingExportFormat.Mp4, string? savedPath = null)
     {
         _filePath = filePath;
+        _savedPath = savedPath ?? filePath;
+        _originalGifAvailable = format == RecordingExportFormat.Gif && savedPath is not null;
+        _exportFormat = format;
         Title = "编辑录屏";
         Width = Math.Min(1040, SystemParameters.WorkArea.Width * 0.8);
         Height = Math.Min(700, SystemParameters.WorkArea.Height * 0.85);
         MinWidth = 720;
         MinHeight = 480;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Background = RecordingTheme.Brush("Brush.WindowBackdrop", "#15223A");
+        Background = RecordingTheme.Brush("Brush.WindowBackdrop", "#F4F6F9");
         FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI");
         UseLayoutRounding = true;
 
-        // Borderless navy chrome: a calm caption bar, full-bleed
-        // video, bottom control strip.  WindowChrome keeps native resize
-        // borders, caption drag and double-click maximize.
+        // Keep native resize, caption dragging and maximize behavior.
         WindowStyle = WindowStyle.None;
         WindowChrome.SetWindowChrome(this, new WindowChrome
         {
             CaptionHeight = TitleBarHeight,
             ResizeBorderThickness = new Thickness(5),
             GlassFrameThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(16),
+            CornerRadius = new CornerRadius(13),
             UseAeroCaptionButtons = false
         });
 
@@ -89,7 +97,7 @@ internal sealed partial class RecordingPreviewWindow : Window
         };
         _videoHost = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x06, 0x0B, 0x15)),
+            Background = RecordingTheme.Brush("Brush.WindowBackground", "#F4F6F9"),
             Child = _videoImage
         };
         _videoHost.MouseLeftButtonDown += (_, e) =>
@@ -111,7 +119,7 @@ internal sealed partial class RecordingPreviewWindow : Window
             Close, close: true));
         var titleBar = new Grid
         {
-            Background = RecordingTheme.Brush("Brush.ChromeGradient", "#1B3049"),
+            Background = RecordingTheme.Brush("Brush.ChromeGradient", "#D9FFFFFF"),
             MinHeight = TitleBarHeight
         };
         titleBar.Children.Add(new TextBlock
@@ -119,7 +127,7 @@ internal sealed partial class RecordingPreviewWindow : Window
             Text = "编辑录屏",
             FontSize = 16,
             FontWeight = FontWeights.Medium,
-            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#E8F1F7"),
+            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#1D1D1F"),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             IsHitTestVisible = false
@@ -132,9 +140,7 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             Kind = LucideIconKind.Play,
             Width = 18,
-            Height = 18,
-            StrokeThickness = 2,
-            Stroke = RecordingTheme.Brush("Brush.TextPrimary", "#E8F1F7")
+            Height = 18
         };
         var playButton = MakeFlatButton(_playIcon, 36, 36, Brushes.Transparent, HoverBrush(),
             (_, _) => TogglePlayback());
@@ -145,10 +151,12 @@ internal sealed partial class RecordingPreviewWindow : Window
             Text = "00:00:00 / 00:00:00",
             FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI Variable Text"),
             FontSize = 12.5,
-            Foreground = RecordingTheme.Brush("Brush.TextSecondary", "#94AECE"),
+            Foreground = RecordingTheme.Brush("Brush.TextSecondary", "#9E1D1D1F"),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(10, 0, 12, 0)
         };
+        Typography.SetNumeralAlignment(_timeText, FontNumeralAlignment.Tabular);
+        Typography.SetNumeralAlignment(_trimRange, FontNumeralAlignment.Tabular);
         _timeline = new TimelineBar();
         WindowChrome.SetIsHitTestVisibleInChrome(_timeline, true);
         _timeline.ToolTip = "拖动进度定位，拖动两侧浅蓝手柄裁剪录屏";
@@ -184,17 +192,16 @@ internal sealed partial class RecordingPreviewWindow : Window
             }
             Seek(_timeline.Value);
         };
-        _timeline.TrimChanged += (_, _) => OnTrimChanged();
+        _timeline.TrimChanged += (_, _) => UpdateTrimReadout();
 
-        var volumeHost = BuildVolumeControls();
-        volumeHost.VerticalAlignment = VerticalAlignment.Center;
         var speedButton = BuildSpeedButton();
         speedButton.VerticalAlignment = VerticalAlignment.Center;
 
         _statusText = new TextBlock
         {
+            TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
-            Foreground = RecordingTheme.Brush("Brush.Success", "#83C8B3"),
+            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#1D1D1F"),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(12, 0, 0, 0)
         };
@@ -204,19 +211,23 @@ internal sealed partial class RecordingPreviewWindow : Window
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center
         };
-        rightButtons.Children.Add(_statusText);
-        rightButtons.Children.Add(volumeHost);
+        if (format == RecordingExportFormat.Mp4)
+        {
+            var volumeHost = BuildVolumeControls();
+            volumeHost.VerticalAlignment = VerticalAlignment.Center;
+            rightButtons.Children.Add(volumeHost);
+        }
         rightButtons.Children.Add(speedButton);
         var separator = new Border
         {
             Width = 1,
             Height = 18,
-            Background = RecordingTheme.Brush("Brush.Border", "#39556F"),
+            Background = RecordingTheme.Brush("Brush.Border", "#210F172A"),
             Margin = new Thickness(10, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
         rightButtons.Children.Add(separator);
-        var downloadButton = MakeTextButton("下载", SaveAs, primary: false);
+        var downloadButton = MakeTextButton(format == RecordingExportFormat.Gif ? "导出 GIF" : "导出 MP4", SaveAs, primary: false);
         var copyButton = MakeTextButton("复制", CopyToClipboard, primary: true);
         copyButton.Margin = new Thickness(6, 0, 0, 0);
         rightButtons.Children.Add(downloadButton);
@@ -226,67 +237,54 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             Height = 52,
             Margin = new Thickness(14, 0, 14, 0),
-            LastChildFill = false
+            LastChildFill = true
         };
         playButton.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(rightButtons, Dock.Right);
         bottomBar.Children.Add(rightButtons);
         bottomBar.Children.Add(playButton);
         bottomBar.Children.Add(_timeText);
+        bottomBar.Children.Add(_statusText);
 
-        // The reference's trim band is 33 physical pixels at this desktop's
-        // 125% scale: 26.4 DIP, edge to edge, with no extra border or padding.
-        var progressHost = new Border
+        var progressHost = new SquircleGlassBorder
         {
             Height = 30,
-            Margin = new Thickness(14, 8, 14, 0),
-            CornerRadius = new CornerRadius(7),
-            ClipToBounds = true,
-            Background = RecordingTheme.Brush("Brush.SurfaceSunken", "#080F1D"),
-            BorderBrush = RecordingTheme.Brush("Brush.Border", "#2694C5FF"),
-            BorderThickness = new Thickness(1),
-            SnapsToDevicePixels = true,
+            Margin = new Thickness(12, 10, 12, 0),
+            CornerRadiusRadius = 9,
+            ShowRim = false,
+            ShadowLevel = 0,
+            GlassBackground = RecordingTheme.Brush("Brush.SurfaceSunken", "#0E0F172A"),
             Child = _timeline
         };
+        var rangeHeader = new DockPanel { Margin = new Thickness(14, 9, 14, 0) };
+        DockPanel.SetDock(_trimRange, Dock.Right);
+        rangeHeader.Children.Add(_trimRange);
+        rangeHeader.Children.Add(new TextBlock { Text = "裁切范围", FontSize = 12, FontWeight = FontWeights.SemiBold });
+        var controls = new DockPanel();
+        DockPanel.SetDock(rangeHeader, Dock.Top);
+        controls.Children.Add(rangeHeader);
         DockPanel.SetDock(progressHost, Dock.Top);
-        var buttonHost = new Border
+        controls.Children.Add(progressHost);
+        controls.Children.Add(bottomBar);
+        var bottomHost = new SquircleGlassBorder
         {
-            Child = bottomBar
+            CornerRadiusRadius = 13,
+            Margin = new Thickness(12),
+            GlassBackground = RecordingTheme.Brush("Brush.AuroraCard", "#EBFFFFFF"),
+            Child = controls
         };
-        var bottomHost = new DockPanel
-        {
-            Background = RecordingTheme.Brush("Brush.ChromeGradient", "#1B3049"),
-            LastChildFill = true
-        };
-        bottomHost.Children.Add(progressHost);
-        bottomHost.Children.Add(buttonHost);
-
-        var root = new DockPanel
-        {
-            LastChildFill = true,
-            Background = RecordingTheme.Brush("Brush.WindowBackground", "#15223A")
-        };
+        var root = new DockPanel();
         DockPanel.SetDock(titleBar, Dock.Top);
         root.Children.Add(titleBar);
         DockPanel.SetDock(bottomHost, Dock.Bottom);
         root.Children.Add(bottomHost);
         root.Children.Add(_videoHost);
-        var windowFrame = new Border
+        DesktopWindowChrome.SetEditorContent(this, root, RecordingTheme.Brush("Brush.Border", "#210F172A"));
+        _statusReset.Tick += (_, _) =>
         {
-            Background = RecordingTheme.Brush("Brush.WindowBackground", "#0A1222"),
-            BorderBrush = RecordingTheme.Brush("Brush.GlassRim", "#4594C5FF"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            SnapsToDevicePixels = true,
-            Child = root
+            _statusReset.Stop();
+            _statusText.Text = string.Empty;
         };
-        StateChanged += (_, _) =>
-        {
-            var maximized = WindowState == WindowState.Maximized;
-            windowFrame.CornerRadius = maximized ? new CornerRadius(0) : new CornerRadius(16);
-            windowFrame.BorderThickness = maximized ? new Thickness(0) : new Thickness(1);
-        };
-        Content = windowFrame;
 
         _ticker = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _ticker.Tick += (_, _) =>
@@ -318,7 +316,12 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             if (e.Key == Key.Escape)
             {
-                Close();
+                if (_speedPopup.IsOpen)
+                    _speedPopup.IsOpen = false;
+                else if (_volumePopup?.IsOpen == true)
+                    _volumePopup.IsOpen = false;
+                else
+                    Close();
                 e.Handled = true;
             }
             else if (e.Key == Key.Space)
@@ -331,8 +334,12 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             _closed = true;
             _ticker.Stop();
+            _statusReset.Stop();
+            _exportLifetime.Cancel();
+            _exportLifetime.Dispose();
             StopDecoder();
             _exportCache.Dispose();
+            _gifExportCache.Dispose();
         };
         Loaded += async (_, _) => await LoadMediaInfoAsync();
         _videoHost.SizeChanged += (_, _) => OnVideoHostSizeChanged();
@@ -354,15 +361,13 @@ internal sealed partial class RecordingPreviewWindow : Window
         TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss");
 
     // ------------------------------------------------------------------
-    // Chrome + control strip builders (shared moon-blue theme tokens)
+    // Playback controls
     // ------------------------------------------------------------------
 
-    private static Brush HoverBrush() => RecordingTheme.Brush("Brush.SurfaceHover", "#304E69");
+    private static Brush HoverBrush() => RecordingTheme.Brush("Brush.SurfaceHover", "#0E0F172A");
 
     /// <summary>
-    /// Flat button with a code-built template (Border + ContentPresenter):
-    /// no default chrome, corner radius 8, explicit hover background, so it
-    /// reads correctly on the navy control strip.
+    /// Compact playback controls share one hover and press treatment.
     /// </summary>
     private static Button MakeFlatButton(
         FrameworkElement content,
@@ -414,17 +419,15 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             Kind = kind,
             Width = 15,
-            Height = 15,
-            StrokeThickness = 1.8,
-            Stroke = RecordingTheme.Brush("Brush.TextPrimary", "#E8F1F7")
+            Height = 15
         };
-        var danger = RecordingTheme.Brush("Brush.Danger", "#E9959B");
+        var danger = RecordingTheme.Brush("Brush.Danger", "#FF3B30");
         var button = MakeFlatButton(icon, 44, 32, Brushes.Transparent,
             close ? danger : HoverBrush(), (_, _) => action());
         if (close)
         {
-            button.MouseEnter += (_, _) => icon.Stroke = RecordingTheme.Brush("Brush.OnAccent", "#15223A");
-            button.MouseLeave += (_, _) => icon.Stroke = RecordingTheme.Brush("Brush.TextPrimary", "#E8F1F7");
+            button.MouseEnter += (_, _) => button.Foreground = RecordingTheme.Brush("Brush.OnAccent", "#FFFFFF");
+            button.MouseLeave += (_, _) => button.Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#1D1D1F");
         }
         button.ToolTip = tip;
         WindowChrome.SetIsHitTestVisibleInChrome(button, true);
@@ -433,28 +436,17 @@ internal sealed partial class RecordingPreviewWindow : Window
 
     private Button MakeTextButton(string text, RoutedEventHandler handler, bool primary)
     {
-        var label = new TextBlock
+        var button = new Button
         {
-            Text = text,
-            FontSize = 13,
-            FontWeight = primary ? FontWeights.SemiBold : FontWeights.Medium,
-            Foreground = primary
-                ? Brushes.White
-                : RecordingTheme.Brush("Brush.TextPrimary", "#F4F8FF")
+            Content = text,
+            Height = 34,
+            MinWidth = 76,
+            Margin = new Thickness(0),
+            Padding = new Thickness(14, 0, 14, 0),
+            Cursor = Cursors.Hand
         };
-        Brush background = primary
-            ? RecordingTheme.Brush("Brush.PrimaryAction", "#0EA5E9")
-            : RecordingTheme.Brush("Brush.SurfaceRaised", "#13223D");
-        Brush hoverBackground = primary
-            ? RecordingTheme.Brush("Brush.PrimaryActionHover", "#38BDF8")
-            : HoverBrush();
-        var button = MakeFlatButton(label, double.NaN, 32, background, hoverBackground, handler);
-        button.MinWidth = 76;
-        button.Padding = new Thickness(16, 0, 16, 0);
-        button.BorderThickness = new Thickness(1);
-        button.BorderBrush = primary
-            ? RecordingTheme.Brush("Brush.GlassRim", "#50FFFFFF")
-            : RecordingTheme.Brush("Brush.Border", "#2694C5FF");
+        button.SetResourceReference(StyleProperty, primary ? "CardPrimaryButtonStyle" : "CardSecondaryButtonStyle");
+        button.Click += handler;
         return button;
     }
 
@@ -468,9 +460,7 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             Kind = LucideIconKind.Volume2,
             Width = 16,
-            Height = 16,
-            StrokeThickness = 1.8,
-            Stroke = RecordingTheme.Brush("Brush.TextPrimary", "#E8F1F7")
+            Height = 16
         };
         var button = MakeFlatButton(_volumeIcon, 36, 36, Brushes.Transparent, HoverBrush(),
             (_, _) =>
@@ -479,23 +469,21 @@ internal sealed partial class RecordingPreviewWindow : Window
                 ApplyVolume();
             });
         System.Windows.Automation.AutomationProperties.SetName(button, "音量");
-        var bar = new VolumeBar { Width = 96, Height = 20, Value = _volume };
+        var bar = new Slider { Width = 96, Height = 24, Minimum = 0, Maximum = 1, Value = _volume, IsMoveToPointEnabled = true };
+        System.Windows.Automation.AutomationProperties.SetName(bar, "播放音量");
         bar.ValueChanged += (_, _) =>
         {
             _volume = bar.Value;
             _muted = false;
             ApplyVolume();
         };
-        var popupBorder = new Border
+        var popupBorder = new SquircleGlassBorder
         {
-            Background = RecordingTheme.Brush("Brush.SurfaceRaised", "#243D57"),
-            BorderBrush = RecordingTheme.Brush("Brush.Border", "#39556F"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
+            CornerRadiusRadius = 10.5,
             Padding = new Thickness(12, 8, 12, 8),
             Child = bar
         };
-        _volumePopup = new Popup
+        var popup = new Popup
         {
             PlacementTarget = button,
             Placement = PlacementMode.Top,
@@ -506,6 +494,7 @@ internal sealed partial class RecordingPreviewWindow : Window
             VerticalOffset = 2,
             Child = popupBorder
         };
+        _volumePopup = popup;
         var host = new Grid();
         host.Children.Add(button);
         var closeTimer = new DispatcherTimer
@@ -517,13 +506,13 @@ internal sealed partial class RecordingPreviewWindow : Window
             closeTimer.Stop();
             if (!host.IsMouseOver && !popupBorder.IsMouseOver)
             {
-                _volumePopup.IsOpen = false;
+                popup.IsOpen = false;
             }
         };
         void KeepOpen()
         {
             closeTimer.Stop();
-            _volumePopup.IsOpen = true;
+            popup.IsOpen = true;
         }
         void ScheduleClose()
         {
@@ -534,7 +523,7 @@ internal sealed partial class RecordingPreviewWindow : Window
         host.MouseLeave += (_, _) => ScheduleClose();
         popupBorder.MouseEnter += (_, _) => KeepOpen();
         popupBorder.MouseLeave += (_, _) => ScheduleClose();
-        _volumePopup.Closed += (_, _) => closeTimer.Stop();
+        popup.Closed += (_, _) => closeTimer.Stop();
         return host;
     }
 
@@ -544,7 +533,7 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             Text = "1x",
             FontSize = 12,
-            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#E8F1F7")
+            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#1D1D1F")
         };
         var button = MakeFlatButton(_speedLabel, 38, 36, Brushes.Transparent, HoverBrush(),
             (_, _) => OpenSpeedMenu());
@@ -568,7 +557,7 @@ internal sealed partial class RecordingPreviewWindow : Window
         _speedPopup.IsOpen = true;
     }
 
-    private Border BuildSpeedMenu()
+    private SquircleGlassBorder BuildSpeedMenu()
     {
         var panel = new StackPanel();
         foreach (var speed in new[] { 0.5, 1.0, 1.5, 2.0 })
@@ -584,8 +573,7 @@ internal sealed partial class RecordingPreviewWindow : Window
                     Kind = LucideIconKind.Check,
                     Width = 14,
                     Height = 14,
-                    StrokeThickness = 2,
-                    Stroke = RecordingTheme.Brush("Brush.AccentText", "#C5E5F0")
+                    Foreground = RecordingTheme.Brush("Brush.AccentText", "#007AFF")
                 });
             }
             row.Children.Add(slot);
@@ -594,13 +582,13 @@ internal sealed partial class RecordingPreviewWindow : Window
                 Text = speed.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "x",
                 FontSize = 12,
                 Foreground = selected
-                    ? RecordingTheme.Brush("Brush.AccentText", "#C5E5F0")
-                    : RecordingTheme.Brush("Brush.TextSecondary", "#B5C9D9"),
+                    ? RecordingTheme.Brush("Brush.AccentText", "#007AFF")
+                    : RecordingTheme.Brush("Brush.TextSecondary", "#9E1D1D1F"),
                 Margin = new Thickness(6, 0, 10, 0),
                 VerticalAlignment = VerticalAlignment.Center
             });
             var item = MakeFlatButton(row, double.NaN, 30,
-                selected ? RecordingTheme.Brush("Brush.AccentSubtle", "#294960") : Brushes.Transparent,
+                selected ? RecordingTheme.Brush("Brush.AccentSubtle", "#1C007AFF") : Brushes.Transparent,
                 HoverBrush(),
                 (_, _) =>
                 {
@@ -611,12 +599,9 @@ internal sealed partial class RecordingPreviewWindow : Window
             item.Padding = new Thickness(10, 0, 10, 0);
             panel.Children.Add(item);
         }
-        return new Border
+        return new SquircleGlassBorder
         {
-            Background = RecordingTheme.Brush("Brush.SurfaceRaised", "#243D57"),
-            BorderBrush = RecordingTheme.Brush("Brush.Border", "#39556F"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
+            CornerRadiusRadius = 10.5,
             Padding = new Thickness(6),
             Child = panel
         };
@@ -664,123 +649,20 @@ internal sealed partial class RecordingPreviewWindow : Window
             ? WindowState.Normal
             : WindowState.Maximized;
 
-    // ------------------------------------------------------------------
-    // Borderless maximize: clamp to the monitor work area (the taskbar
-    // would otherwise be covered).
-    // ------------------------------------------------------------------
-
-    protected override void OnSourceInitialized(EventArgs e)
+    private void UpdateTrimReadout()
     {
-        base.OnSourceInitialized(e);
-        if (PresentationSource.FromVisual(this) is HwndSource source)
-        {
-            // Ask DWM to clip the custom chrome to real Windows 11 rounded
-            // corners. The WPF border supplies the visible one-pixel outline.
-            var darkMode = 1;
-            _ = NativeMethods.DwmSetWindowAttribute(source.Handle, 20, ref darkMode, sizeof(int));
-            var cornerPreference = 2; // DWMWCP_ROUND
-            _ = NativeMethods.DwmSetWindowAttribute(source.Handle, 33, ref cornerPreference, sizeof(int));
-            source.AddHook(WndProc);
-        }
-    }
-
-    private static IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        const int WM_GETMINMAXINFO = 0x0024;
-        if (msg == WM_GETMINMAXINFO)
-        {
-            ClampMaximizeToWorkArea(hwnd, lParam);
-            handled = true;
-        }
-        return IntPtr.Zero;
-    }
-
-    private static void ClampMaximizeToWorkArea(IntPtr hwnd, IntPtr lParam)
-    {
-        var info = (MINMAXINFO)Marshal.PtrToStructure(lParam, typeof(MINMAXINFO))!;
-        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        if (monitor == IntPtr.Zero)
-        {
-            return;
-        }
-        var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-        if (!GetMonitorInfo(monitor, ref monitorInfo))
-        {
-            return;
-        }
-        info.ptMaxPosition.X = monitorInfo.rcWork.Left - monitorInfo.rcMonitor.Left;
-        info.ptMaxPosition.Y = monitorInfo.rcWork.Top - monitorInfo.rcMonitor.Top;
-        info.ptMaxSize.X = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
-        info.ptMaxSize.Y = monitorInfo.rcWork.Bottom - monitorInfo.rcWork.Top;
-        Marshal.StructureToPtr(info, lParam, true);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MINMAXINFO
-    {
-        public POINT ptReserved;
-        public POINT ptMaxSize;
-        public POINT ptMaxPosition;
-        public POINT ptMinTrackSize;
-        public POINT ptMaxTrackSize;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RECT
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MONITORINFO
-    {
-        public int cbSize;
-        public RECT rcMonitor;
-        public RECT rcWork;
-        public int dwFlags;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
-
-    private const uint MONITOR_DEFAULTTONEAREST = 2;
-
-    private void OnTrimChanged()
-    {
-        // Each range owns its cache entry. An export already underway keeps
-        // the selection it started with, even while the handles are moved.
-        if (!_playing && (_positionSeconds < _timeline.TrimStart || _positionSeconds > _timeline.TrimEnd))
-        {
-            _positionSeconds = _timeline.TrimStart;
-            _timeline.Value = _positionSeconds;
-            UpdateTimeText();
-        }
+        var start = TimeSpan.FromSeconds(_timeline.TrimStart);
+        var end = TimeSpan.FromSeconds(_timeline.TrimEnd);
+        const string timeFormat = @"hh\:mm\:ss\.f";
+        _trimRange.Text = $"{start.ToString(timeFormat)} – {end.ToString(timeFormat)}  ·  {(end - start).TotalSeconds:F1} s";
     }
 
     private void SetStatus(string text)
     {
         _statusText.Text = text;
-        var clear = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-        clear.Tick += (_, _) =>
-        {
-            _statusText.Text = string.Empty;
-            clear.Stop();
-        };
-        clear.Start();
+        _statusText.ToolTip = text;
+        _statusReset.Stop();
+        _statusReset.Start();
     }
 
     private void ShowPlaybackError(string message)
@@ -794,13 +676,13 @@ internal sealed partial class RecordingPreviewWindow : Window
         {
             Text = message,
             FontSize = 14,
-            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#E8F1F7")
+            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#1D1D1F")
         });
         var openFolderButton = MakeTextButton("在资源管理器中显示", (_, _) =>
         {
             try
             {
-                Process.Start("explorer.exe", $"/select,\"{_filePath}\"");
+                Process.Start("explorer.exe", $"/select,\"{_savedPath}\"");
             }
             catch
             {

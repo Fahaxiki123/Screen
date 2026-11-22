@@ -4,7 +4,9 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Screen.App;
 using Screen.Core;
@@ -55,6 +57,44 @@ public sealed class InteractionRegressionTests
         Assert.AreEqual(expected, key);
         Assert.IsFalse(HotKeyWindow.TryParseHotKey("A", out _, out _));
     }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void RegisteredShortcutsReachTheEditorBeforeTheirGlobalActions(bool priority) => OnSta(() =>
+    {
+        using var window = new HotKeyWindow();
+        Assert.IsTrue(window.TrySetPriority(priority));
+        Assert.IsTrue(window.RegisterCaptureHotKey("F13"));
+        Assert.IsTrue(window.RegisterClickThroughRecoveryHotKey("Ctrl+Shift+F14"));
+        Assert.IsTrue(window.RegisterRecordHotKey("Ctrl+Alt+F15"));
+        var source = (HwndSource)typeof(HotKeyWindow).GetField("_source", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+        var actions = new List<string>();
+        window.CaptureRequested += (_, _) => actions.Add("capture");
+        window.ClickThroughRecoveryRequested += (_, _) => actions.Add("recover");
+        window.RecordRequested += (_, _) => actions.Add("record");
+
+        var chords = new[] { (Key.F13, ModifierKeys.None), (Key.F14, ModifierKeys.Control | ModifierKeys.Shift), (Key.F15, ModifierKeys.Control | ModifierKeys.Alt) };
+        var ids = new nuint[] { 0x5343, 0x5350, 0x5352 };
+        var received = new List<(Key, ModifierKeys)>();
+        foreach (bool editing in new[] { true, false })
+        {
+            received.Clear();
+            window.TryCaptureInEditor = (key, modifiers) => { received.Add((key, modifiers)); return editing; };
+            for (int i = 0; i < chords.Length; i++)
+            {
+                var (key, modifiers) = chords[i];
+                int vk = KeyInterop.VirtualKeyFromKey(key);
+                // WM_HOTKEY packs the modifiers and VK. The priority hook posts its validated VK directly.
+                int payload = priority ? vk : (vk << 16) | (int)modifiers;
+                Assert.IsTrue(NativeMethods.PostMessageW(source.Handle, priority ? 0x8001u : NativeMethods.WmHotKey, ids[i], payload));
+            }
+            var drained = source.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+            Assert.AreEqual(DispatcherOperationStatus.Completed, drained.Wait(TimeSpan.FromSeconds(2)));
+            CollectionAssert.AreEqual(chords, received);
+            CollectionAssert.AreEqual(editing ? Array.Empty<string>() : new[] { "capture", "recover", "record" }, actions);
+        }
+    });
 
     [TestMethod]
     public void F12AndPriorityBindingsCanBeConfiguredWithoutOwningTheNativeHotKey() => OnSta(() =>

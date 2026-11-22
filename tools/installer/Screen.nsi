@@ -23,14 +23,14 @@ ShowUninstDetails show
 !define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
 !define APP_MUTEX "Local\Screen.NativeScreenshot.SingleInstance.v1"
 
-Name "Screen ${APP_VERSION}"
+Name "Flick ${APP_VERSION}"
 OutFile "${OUTPUT_FILE}"
 InstallDir "$LOCALAPPDATA\Programs\Screen"
 InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
-BrandingText "Screen"
+BrandingText "Flick"
 VIProductVersion "${APP_FILE_VERSION}"
-VIAddVersionKey /LANG=2052 "ProductName" "Screen"
-VIAddVersionKey /LANG=2052 "FileDescription" "Screen 离线安装程序"
+VIAddVersionKey /LANG=2052 "ProductName" "Flick"
+VIAddVersionKey /LANG=2052 "FileDescription" "Flick 离线安装程序"
 VIAddVersionKey /LANG=2052 "FileVersion" "${APP_FILE_VERSION}"
 VIAddVersionKey /LANG=2052 "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "LegalCopyright" ""
@@ -45,10 +45,10 @@ Var InstallerMutexHandle
 !define MUI_ICON "${ICON_FILE}"
 !define MUI_UNICON "${ICON_FILE}"
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TITLE "安装 Screen"
-!define MUI_WELCOMEPAGE_TEXT "安装截图、录屏和文字识别功能。所需运行组件已包含在安装包中，无需联网下载，无需管理员权限。$\r$\n$\r$\n支持 Windows 10 21H2（19044）或更新版本的 Windows 10 / Windows 11 x64 系统。$\r$\n$\r$\n安装或升级前，请先保存录屏并从系统托盘退出 Screen。安装程序不会强行结束截图或录屏。"
+!define MUI_WELCOMEPAGE_TITLE "安装 Flick"
+!define MUI_WELCOMEPAGE_TEXT "安装截图、贴图、录屏、文字识别与翻译功能。所需运行组件已包含在安装包中，无需联网下载，无需管理员权限。$\r$\n$\r$\n支持 Windows 10 21H2（19044）或更新版本的 Windows 10 / Windows 11 x64 系统。$\r$\n$\r$\n安装或升级前，请先保存录屏并从系统托盘退出 Flick。安装程序不会强行结束截图或录屏。"
 !insertmacro MUI_PAGE_WELCOME
-!define MUI_LICENSEPAGE_TEXT_TOP "以下协议仅适用于随附的 Microsoft Visual C++ 运行库。Screen 和其他开源组件的许可说明保存在安装目录的 licenses 文件夹中。"
+!define MUI_LICENSEPAGE_TEXT_TOP "以下协议仅适用于随附的 Microsoft Visual C++ 运行库。Flick 和其他开源组件的许可说明保存在安装目录的 licenses 文件夹中。"
 !define MUI_LICENSEPAGE_CHECKBOX
 !define MUI_LICENSEPAGE_CHECKBOX_TEXT "我接受 Microsoft Visual C++ 运行库许可协议"
 !insertmacro MUI_PAGE_LICENSE "${VC_LICENSE_FILE}"
@@ -57,10 +57,10 @@ Var InstallerMutexHandle
 !insertmacro MUI_PAGE_DIRECTORY
 Page custom OptionsPageCreate OptionsPageLeave
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_TITLE "Screen 已安装"
-!define MUI_FINISHPAGE_TEXT "可以从开始菜单或桌面启动 Screen。启动后会显示在系统托盘中。$\r$\n$\r$\n默认快捷键：$\r$\n截图：Ctrl + Shift + A$\r$\n录屏：Ctrl + Shift + R$\r$\n$\r$\n开机启动可在软件设置中自行开启。"
+!define MUI_FINISHPAGE_TITLE "Flick 已安装"
+!define MUI_FINISHPAGE_TEXT "可以从开始菜单或桌面启动 Flick。启动后会显示在系统托盘中。$\r$\n$\r$\n默认快捷键：$\r$\n截图：Ctrl + Shift + A$\r$\n录屏：Ctrl + Shift + R$\r$\n$\r$\n开机启动可在软件设置中自行开启。"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\Screen.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "启动 Screen"
+!define MUI_FINISHPAGE_RUN_TEXT "启动 Flick"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -84,7 +84,7 @@ Function ${Prefix}AcquireApplicationMutex
     ${If} $0 != 0
       System::Call 'kernel32::CloseHandle(p r0)'
     ${EndIf}
-    !insertmacro VisibleError "Screen 正在运行，或无法确认程序已退出。请先保存录屏并从系统托盘退出 Screen，然后重试。程序文件未修改。"
+    !insertmacro VisibleError "Flick 正在运行，或无法确认程序已退出。请先保存录屏并从系统托盘退出 Flick，然后重试。程序文件未修改。"
     SetErrorLevel 2
     Abort
   ${EndIf}
@@ -122,7 +122,7 @@ Function .onInit
   Pop $1
   ${If} $0 == 0
   ${OrIf} $1 == 183
-    !insertmacro VisibleError "另一个 Screen 安装程序正在运行，请等待其结束后重试。"
+    !insertmacro VisibleError "另一个 Flick 安装程序正在运行，请等待其结束后重试。"
     SetErrorLevel 2
     Quit
   ${EndIf}
@@ -175,7 +175,7 @@ Function ValidateInstallDirectory
   ${OrIf} $INSTDIR == "$WINDIR"
   ${OrIf} $INSTDIR == "$SYSDIR"
   ${OrIf} $INSTDIR == "$PROGRAMFILES64"
-    !insertmacro VisibleError "请选择 Screen 专用的安装文件夹，不能使用磁盘根目录、系统目录或个人设置目录。"
+    !insertmacro VisibleError "请选择 Flick 专用的安装文件夹，不能使用磁盘根目录、系统目录或个人设置目录。"
     SetErrorLevel 1
     Abort
   ${EndIf}
@@ -197,7 +197,7 @@ Function OptionsPageCreate
   ${If} $0 == error
     Abort
   ${EndIf}
-  ${NSD_CreateLabel} 0 0 100% 30u "安装后可以从开始菜单启动 Screen。截图、录屏、OCR 模型和运行环境均已包含在安装包中。"
+  ${NSD_CreateLabel} 0 0 100% 30u "安装后可以从开始菜单启动 Flick。截图、贴图、录屏、OCR 模型和运行环境均已包含在安装包中。"
   Pop $0
   ${NSD_CreateCheckbox} 0 42u 100% 14u "创建桌面快捷方式"
   Pop $DesktopCheckbox
@@ -218,7 +218,7 @@ Function ${Prefix}CheckFileUnlocked
   IfFileExists "$0" 0 unlocked
   System::Call 'kernel32::CreateFileW(w r0, i 0xC0000000, i 0, p 0, i 3, i 0x80, p 0) p.r1'
   ${If} $1 == -1
-    !insertmacro VisibleError "安装文件正在使用或无法写入。请关闭 Screen 及使用此安装目录的程序后重试。"
+    !insertmacro VisibleError "安装文件正在使用或无法写入。请关闭 Flick 及使用此安装目录的程序后重试。"
     SetErrorLevel 2
     Abort
   ${EndIf}
@@ -256,7 +256,7 @@ Function MigrateExistingStartup
   ${EndIf}
 FunctionEnd
 
-Section "Screen" MainSection
+Section "Flick" MainSection
   Call AcquireApplicationMutex
   Call ValidateInstallDirectory
   !insertmacro CheckPayloadLocks ""
@@ -269,13 +269,19 @@ Section "Screen" MainSection
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   IfErrors install_failed
 
-  CreateDirectory "$SMPROGRAMS\Screen"
-  CreateShortcut "$SMPROGRAMS\Screen\Screen.lnk" "$INSTDIR\Screen.exe" "" "$INSTDIR\Screen.exe" 0
-  CreateShortcut "$SMPROGRAMS\Screen\卸载 Screen.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
+  ; 清理旧品牌 Screen 残留快捷方式，升级为 Flick 统一入口
+  Delete "$SMPROGRAMS\Screen\Screen.lnk"
+  Delete "$SMPROGRAMS\Screen\卸载 Screen.lnk"
+  RMDir "$SMPROGRAMS\Screen"
+  Delete "$DESKTOP\Screen.lnk"
+
+  CreateDirectory "$SMPROGRAMS\Flick"
+  CreateShortcut "$SMPROGRAMS\Flick\Flick.lnk" "$INSTDIR\Screen.exe" "" "$INSTDIR\Screen.exe" 0
+  CreateShortcut "$SMPROGRAMS\Flick\卸载 Flick.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
   ${If} $DesktopShortcut == ${BST_CHECKED}
-    CreateShortcut "$DESKTOP\Screen.lnk" "$INSTDIR\Screen.exe" "" "$INSTDIR\Screen.exe" 0
+    CreateShortcut "$DESKTOP\Flick.lnk" "$INSTDIR\Screen.exe" "" "$INSTDIR\Screen.exe" 0
   ${EndIf}
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Screen"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Flick"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\Screen.exe,0"
@@ -323,7 +329,7 @@ Function un.onInit
   ${EndIf}
   ReadINIStr $0 "$INSTDIR\Screen.installation.ini" "Product" "Id"
   ${If} $0 != "${APP_ID}"
-    !insertmacro VisibleError "无法验证此目录的 Screen 安装身份，卸载已取消。"
+    !insertmacro VisibleError "无法验证此目录的 Flick 安装身份，卸载已取消。"
     SetErrorLevel 1
     Quit
   ${EndIf}
@@ -341,6 +347,10 @@ Section "Uninstall"
     DeleteRegValue HKCU "${RUN_KEY}" "Screen"
   ${EndIf}
   ${If} $OwnsRegistration == 1
+    Delete "$SMPROGRAMS\Flick\Flick.lnk"
+    Delete "$SMPROGRAMS\Flick\卸载 Flick.lnk"
+    RMDir "$SMPROGRAMS\Flick"
+    Delete "$DESKTOP\Flick.lnk"
     Delete "$SMPROGRAMS\Screen\Screen.lnk"
     Delete "$SMPROGRAMS\Screen\卸载 Screen.lnk"
     RMDir "$SMPROGRAMS\Screen"

@@ -1,6 +1,10 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Controls;
+using System.Windows.Shapes;
+using Path = System.IO.Path;
 using Microsoft.Win32;
 using Screen.Core;
 
@@ -27,22 +31,7 @@ internal sealed partial class CaptureOverlayWindow
         _surface.Tool = tool;
         _stylePanel.Visibility = Visibility.Visible;
         ConfigureStylePanel(tool);
-        foreach (var pair in _toolButtons)
-        {
-            var isSelected = pair.Key == tool;
-            pair.Value.Background = isSelected
-                ? (Brush)Application.Current.FindResource("Brush.AccentSubtleDark")
-                : Brushes.Transparent;
-            pair.Value.Foreground = isSelected
-                ? (Brush)Application.Current.FindResource("Brush.AccentOnDark")
-                : (Brush)Application.Current.FindResource("Brush.OverlayIcon");
-            pair.Value.BorderBrush = isSelected
-                ? (Brush)Application.Current.FindResource("Brush.AccentSubtleDarkBorder")
-                : Brushes.Transparent;
-            pair.Value.BorderThickness = isSelected
-                ? new Thickness(1)
-                : new Thickness(0);
-        }
+        UpdateDrawingSelection();
         PositionFloatingPanels();
     }
 
@@ -133,7 +122,7 @@ internal sealed partial class CaptureOverlayWindow
         try
         {
             BitmapUtilities.SetClipboardTextWithRetry(text);
-            _surface.ColorStatus = "已复制 ✓";
+            _surface.ColorStatus = $"✓ 已复制 {text}";
         }
         catch (Exception)
         {
@@ -202,11 +191,7 @@ internal sealed partial class CaptureOverlayWindow
         _ocrCard.Visibility = Visibility.Collapsed;
         _surface.ClearAnnotationSelection();
         _surface.Tool = CaptureTool.Select;
-        foreach (var button in _toolButtons.Values)
-        {
-            button.Background = Brushes.Transparent;
-            button.Foreground = FindResourceBrush("Brush.OverlayIcon");
-        }
+        UpdateDrawingSelection();
         var settings = _settingsStore.Load();
         _inPlaceMode = settings.TranslationDisplayMode == TranslationDisplayMode.InPlace;
         // Cancel but do NOT dispose the previous source: the in-flight task may
@@ -246,17 +231,13 @@ internal sealed partial class CaptureOverlayWindow
                 await TranslateInPlaceAsync(settings, targetLanguage, operation);
                 return;
             }
-            var document = await TryExtractDirectTextAsync(cancellationToken)
-                           ?? await OcrCard.RecognizeAutomaticallyAsync(
-                               _ocrEngine,
-                               _surface.RenderSelection(),
-                               purpose: OcrRecognitionPurpose.Translation,
-                               cancellationToken: cancellationToken);
-            if (operation.IsCancellationRequested)
-            {
-                // A newer translation has already taken over the card.
-                return;
-            }
+            var document = await TryExtractDirectTextAsync(cancellationToken);
+            // The UIA lookup can finish empty after the card closes or another language is selected.
+            cancellationToken.ThrowIfCancellationRequested();
+            document ??= await OcrCard.RecognizeAutomaticallyAsync(
+                _ocrEngine, _surface.RenderSelection(), purpose: OcrRecognitionPurpose.Translation,
+                cancellationToken: cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             var sourceText = OcrTextFormatter.Format(document);
             _translationCard.SetSourceLanguage(document.LanguageTag);
             if (string.IsNullOrWhiteSpace(sourceText))
@@ -269,7 +250,7 @@ internal sealed partial class CaptureOverlayWindow
                 ? "文字识别"
                 : document.ProviderName;
             _translationCard.SetStatus(
-                $"文字提取完成（{extractedBy}，用时 {timer.Elapsed.TotalSeconds:F1} 秒）· 正在翻译…");
+                $"文字提取完成（{extractedBy}，用时 {timer.Elapsed.TotalSeconds:F1} 秒）· 正在翻译…", "正在翻译…");
             var extractionSeconds = timer.Elapsed.TotalSeconds;
             double? firstTokenSeconds = null;
             var progress = new Progress<string>(text =>
@@ -293,6 +274,12 @@ internal sealed partial class CaptureOverlayWindow
                 cancellationToken);
             if (operation.IsCancellationRequested)
             {
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(result.Text))
+            {
+                _translationCard.SetError("翻译服务未返回译文，请重试。");
+                PositionFloatingPanels();
                 return;
             }
             var translationSeconds = timer.Elapsed.TotalSeconds - extractionSeconds;
@@ -408,26 +395,61 @@ internal sealed partial class CaptureOverlayWindow
         catch (Exception ex)
         {
             SimpleLogger.LogError("Failed to save screenshot", ex);
-            MessageBox.Show(this, $"保存截图失败：{ex.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, $"保存截图失败：{ex.Message}", "Flick", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
+    private bool _finishing;
+
     private void Finish(object sender, RoutedEventArgs e)
     {
-        if (!_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
+        if (_finishing || !_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
         {
             return;
         }
         try
         {
             BitmapUtilities.CopyToClipboard(_surface.RenderSelection());
-            Close();
         }
         catch (Exception ex)
         {
             SimpleLogger.LogError("Failed to copy screenshot to clipboard", ex);
-            MessageBox.Show(this, ex.Message, "Screen", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, ex.Message, "Flick", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
+
+        _finishing = true;
+        _root.IsHitTestVisible = false;
+        var region = _surface.Selection;
+        var scaleX = _surface.ActualWidth / _frame.Width;
+        var scaleY = _surface.ActualHeight / _frame.Height;
+        var flash = new Rectangle
+        {
+            Width = region.Width * scaleX,
+            Height = region.Height * scaleY,
+            Fill = Brushes.White,
+            Opacity = 0,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(flash, region.X * scaleX);
+        Canvas.SetTop(flash, region.Y * scaleY);
+        Panel.SetZIndex(flash, 19);
+        _root.Children.Add(flash);
+        var exposure = new DoubleAnimationUsingKeyFrames();
+        exposure.KeyFrames.Add(new LinearDoubleKeyFrame(0.55, TimeSpan.FromMilliseconds(85)));
+        exposure.KeyFrames.Add(new LinearDoubleKeyFrame(0, TimeSpan.FromMilliseconds(280)));
+        exposure.Completed += (_, _) =>
+        {
+            if (_captureClosed)
+            {
+                return;
+            }
+            Close();
+            HintToastWindow.ShowCopied(new NativeMethods.NativePoint(
+                _frame.ScreenBounds.X + region.X + region.Width / 2,
+                _frame.ScreenBounds.Y + region.Y + region.Height / 2));
+        };
+        flash.BeginAnimation(OpacityProperty, exposure);
     }
 
     private void StartLongCapture(object sender, RoutedEventArgs e)
@@ -474,26 +496,34 @@ internal sealed partial class CaptureOverlayWindow
         RecordingRegionConfirmed?.Invoke(this, new RecordingSelection(
             region,
             _showCursorChoice,
-            // The panel's 鼠标设置 switch owns both the cursor and the click
-            // ripple effect — otherwise the effect stays bound to a hidden
-            // settings flag and looks broken.
-            _showCursorChoice,
-            _recordSystemAudioChoice,
-            _recordMicrophoneChoice));
+            _showClickEffectsChoice,
+            _recordingFormat == RecordingExportFormat.Mp4 && _recordSystemAudioChoice,
+            _recordingFormat == RecordingExportFormat.Mp4 && _recordMicrophoneChoice,
+            _recordingFormat));
     }
 
-    private async void StartRegionRecording(object sender, RoutedEventArgs e)
+    private void StartRegionRecording(object sender, RoutedEventArgs e)
     {
-        if (!_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
+        if (_recordingMode || !_surface.IsSelectionCommitted || _surface.Selection.IsEmpty)
         {
             return;
         }
-        var selection = _surface.Selection;
-        var region = new PixelRect(
-            _frame.ScreenBounds.X + selection.X,
-            _frame.ScreenBounds.Y + selection.Y,
-            selection.Width,
-            selection.Height);
+        CancelTextOperations();
+        _translationPopup.IsOpen = false;
+        _surface.ClearAnnotationSelection();
+        _surface.Tool = CaptureTool.Select;
+        _surface.AllowAnnotationEditing = false;
+        _recordingMode = true;
+        _entryMode = CaptureEntryMode.Recording;
+        _recordingPanel = BuildRecordingPanel();
+        _root.Children.Add(_recordingPanel);
+        RecordingRegionConfirmed += StartPreparedRegionRecording;
+        PositionFloatingPanels();
+    }
+
+    private async void StartPreparedRegionRecording(object? sender, RecordingSelection selection)
+    {
+        RecordingRegionConfirmed -= StartPreparedRegionRecording;
         var host = ((App)Application.Current).Host;
         if (host is null)
         {
@@ -501,19 +531,24 @@ internal sealed partial class CaptureOverlayWindow
             return;
         }
         // Persistent border first, then close — the outline must never blink.
-        var border = new RecordingBorderWindow(region);
+        var border = new RecordingBorderWindow(selection.Region);
         border.Show();
         Close();
-        await host.StartRecordingWithRegionAsync(region, border);
+        await host.StartRecordingWithRegionAsync(selection, border);
     }
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (_finishing)
+        {
+            e.Handled = true;
+            return;
+        }
         if (_recordingMode)
         {
-            // Recording selection only understands Esc (cancel) and Enter
-            // (confirm); everything else — including the copy/finish keys —
-            // stays swallowed so it cannot trigger screenshot actions.
+            if (e.Key is Key.Tab or Key.Space
+                || (_recordingPanel?.IsKeyboardFocusWithin == true && e.Key is Key.Left or Key.Right))
+                return;
             if (e.Key == Key.Escape)
             {
                 Close();

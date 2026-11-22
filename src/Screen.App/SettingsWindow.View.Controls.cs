@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Documents;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Lucide.NET;
 using Screen.Core;
 
@@ -27,143 +30,179 @@ public partial class SettingsWindow
         _ => FontWeights.Normal
     };
 
-    private Border CreateCard(out StackPanel body)
+    private static StackPanel AddGroup(Panel page, string title, out StackPanel rows)
     {
-        body = new StackPanel();
-        return new Border
+        rows = new StackPanel();
+        var card = new SquircleGlassBorder
         {
-            Style = GetResource<Style>("SettingsCardStyle"),
-            // Never stretch to fill the page area — the card hugs its rows
-            // and the remaining window space stays background.
-            VerticalAlignment = VerticalAlignment.Top,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Child = body
+            CornerRadiusRadius = 10,
+            ShowRim = false,
+            ShadowLevel = 0,
+            OutlineBrush = CardOutlineBrush,
+            OutlineThickness = 1,
+            GlassBackground = Brushes.White,
+            Child = rows
         };
+        var group = new StackPanel { Tag = card, Margin = new Thickness(0, 0, 0, 18) };
+        group.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 11.5,
+            FontWeight = FontWeights.Medium,
+            Foreground = RowDescriptionBrush,
+            Margin = new Thickness(2, 0, 0, 7)
+        });
+        group.Children.Add(card);
+        page.Children.Add(group);
+        return group;
     }
 
-    private Border CreateSettingRow(
-        LucideIconKind icon,
-        string title,
-        string description,
-        FrameworkElement control)
-    {
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+    private static readonly SolidColorBrush RowTitleBrush = FrozenBrush(0xFF, 0x11, 0x18, 0x27);
+    private static readonly SolidColorBrush RowDescriptionBrush = FrozenBrush(0xFF, 0x8A, 0x94, 0xA6);
+    private static readonly SolidColorBrush IconPlateBrush = FrozenBrush(0xFF, 0xF2, 0xF5, 0xFA);
+    private static readonly SolidColorBrush DividerBrush = FrozenBrush(0x0E, 0x0F, 0x17, 0x2A);
+    private static readonly SolidColorBrush CardOutlineBrush = FrozenBrush(0x13, 0x0F, 0x17, 0x2A);
+    private static readonly SolidColorBrush KeycapOutlineBrush = FrozenBrush(0x1A, 0x0F, 0x17, 0x2A);
+    private static readonly SolidColorBrush ReadyBadgeBackground = FrozenBrush(0xFF, 0xDC, 0xFC, 0xE7);
+    private static readonly SolidColorBrush ReadyBadgeForeground = FrozenBrush(0xFF, 0x15, 0x80, 0x3D);
+    private static readonly SolidColorBrush ReadyBadgeDot = FrozenBrush(0xFF, 0x22, 0xC5, 0x5E);
+    private static readonly SolidColorBrush WarningBadgeBackground = FrozenBrush(0xFF, 0xFE, 0xF3, 0xC7);
+    private static readonly SolidColorBrush WarningBadgeForeground = FrozenBrush(0xFF, 0xB4, 0x53, 0x09);
+    private static readonly SolidColorBrush WarningBadgeDot = FrozenBrush(0xFF, 0xF5, 0x9E, 0x0B);
+    private static readonly SolidColorBrush VersionBadgeBackground = FrozenBrush(0xFF, 0xF1, 0xF5, 0xF9);
+    private static readonly SolidColorBrush VersionBadgeForeground = FrozenBrush(0xFF, 0x64, 0x74, 0x8B);
 
+    private static SolidColorBrush FrozenBrush(byte a, byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static void AnimatePageGroups(FrameworkElement page)
+    {
+        if (page is not StackPanel panel)
+            return;
+        var index = 0;
+        Animate(panel);
+        void Animate(StackPanel parent)
+        {
+            foreach (var child in parent.Children)
+            {
+                if (child is not StackPanel { Visibility: Visibility.Visible } group)
+                    continue;
+                if (group.Tag is not SquircleGlassBorder card)
+                {
+                    Animate(group);
+                    continue;
+                }
+                var delay = TimeSpan.FromMilliseconds(32 * index++);
+                var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                var rise = new TranslateTransform(0, 3);
+                card.RenderTransform = rise;
+                card.Opacity = 0.25;
+                card.BeginAnimation(OpacityProperty, new DoubleAnimation(0.25, 1, TimeSpan.FromMilliseconds(180))
+                {
+                    BeginTime = delay,
+                    EasingFunction = ease
+                });
+                rise.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(3, 0, TimeSpan.FromMilliseconds(180))
+                {
+                    BeginTime = delay,
+                    EasingFunction = ease
+                });
+            }
+        }
+    }
+
+    private FrameworkElement AddSettingRow(Panel rows, LucideIconKind icon, string title, string description, FrameworkElement control)
+    {
+        var grid = new Grid { MinHeight = 30, Margin = new Thickness(16, 14, 16, 14) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.Children.Add(CreateRowIcon(icon));
 
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(11, 0, 12, 0) };
         text.Children.Add(new TextBlock
         {
             Text = title,
-            FontSize = (double)FindResource("Settings.FontSize.SettingTitle"),
-            FontWeight = GetFontWeight("Settings.FontWeight.SettingTitle"),
-            Foreground = GetResource<Brush>("Settings.Brush.TextPrimary"),
+            FontSize = 13.5,
+            FontWeight = FontWeights.Medium,
+            Foreground = RowTitleBrush,
             TextWrapping = TextWrapping.Wrap,
-            LineHeight = 20
+            LineHeight = 18
         });
         text.Children.Add(new TextBlock
         {
             Text = description,
+            FontSize = 12,
+            Foreground = RowDescriptionBrush,
             Margin = new Thickness(0, 2, 0, 0),
-            FontSize = (double)FindResource("Settings.FontSize.SettingDescription"),
-            FontWeight = GetFontWeight("Settings.FontWeight.SettingDescription"),
-            Foreground = GetResource<Brush>("Settings.Brush.TextSecondary"),
             TextWrapping = TextWrapping.Wrap,
-            LineHeight = 20
+            LineHeight = 16
         });
-        Grid.SetColumn(text, 2);
+        Grid.SetColumn(text, 1);
         grid.Children.Add(text);
-
         control.VerticalAlignment = VerticalAlignment.Center;
         control.HorizontalAlignment = HorizontalAlignment.Right;
-        Grid.SetColumn(control, 4);
+        AutomationProperties.SetName(control, title);
+        Grid.SetColumn(control, 2);
         grid.Children.Add(control);
 
-        return new Border
+        var row = new Grid { MinHeight = 58 };
+        if (rows.Children.Count > 0)
         {
-            MinHeight = 64,
-            Padding = (Thickness)FindResource("Settings.Spacing.RowPadding"),
-            Child = grid
-        };
+            row.Children.Add(new Border
+            {
+                Height = 1,
+                Margin = new Thickness(16, 0, 16, 0),
+                VerticalAlignment = VerticalAlignment.Top,
+                Background = DividerBrush,
+                SnapsToDevicePixels = true
+            });
+        }
+        row.Children.Add(grid);
+        rows.Children.Add(row);
+        return row;
     }
 
-    // A quiet accent icon keeps each setting aligned with the navigation.
-    private LucideIconElement CreateRowIcon(LucideIconKind icon)
+    private FrameworkElement CreateRowIcon(LucideIconKind kind)
     {
-        return new LucideIconElement
+        var color = GetResource<Brush>("Settings.Brush.TextSecondary");
+        var plate = new SquircleGlassBorder
         {
-            Kind = icon,
-            Width = 19,
-            Height = 19,
-            StrokeThickness = 1.75,
-            Stroke = GetResource<Brush>("Settings.Brush.AccentText"),
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Left
+            Width = 32,
+            Height = 32,
+            CornerRadiusRadius = 7.5,
+            GlassBackground = IconPlateBrush,
+            ShowRim = false,
+            ShadowLevel = 0,
+            Child = new LucideIconElement { Kind = kind, Width = 16, Height = 16 },
+            VerticalAlignment = VerticalAlignment.Center
         };
+        TextElement.SetForeground(plate, color);
+        return plate;
     }
 
-    private Border CreateDivider()
+    private static void AddFootnote(Panel rows, string text)
     {
-        return new Border
-        {
-            Height = 1,
-            Margin = new Thickness(18, 0, 18, 0),
-            Background = GetResource<Brush>("Settings.Brush.Divider"),
-            SnapsToDevicePixels = true
-        };
-    }
-
-    private TextBlock CreateSectionHeader(string text)
-    {
-        return new TextBlock
+        rows.Children.Add(new TextBlock
         {
             Text = text,
-            Padding = (Thickness)FindResource("Settings.Spacing.SectionHeaderPadding"),
-            FontSize = (double)FindResource("Settings.FontSize.Section"),
-            FontWeight = GetFontWeight("Settings.FontWeight.Section"),
-            Foreground = GetResource<Brush>("Settings.Brush.TextSecondary")
-        };
-    }
-
-    private StackPanel CreateSection(bool withLeadingDivider)
-    {
-        var section = new StackPanel();
-        if (withLeadingDivider)
-        {
-            section.Children.Add(CreateDivider());
-        }
-        return section;
-    }
-
-    private Border CreateFootnote(string text)
-    {
-        return new Border
-        {
-            Margin = new Thickness(18, 4, 18, 16),
-            Padding = new Thickness(12, 9, 12, 9),
-            Background = GetResource<Brush>("Settings.Brush.ControlBackgroundSubtle"),
-            CornerRadius = (CornerRadius)FindResource("Settings.CornerRadius.Control"),
-            Child = new TextBlock
-            {
-                Text = text,
-                FontSize = (double)FindResource("Settings.FontSize.SettingDescription"),
-                Foreground = GetResource<Brush>("Settings.Brush.TextSecondary"),
-                TextWrapping = TextWrapping.Wrap,
-                LineHeight = 20
-            }
-        };
+            FontSize = 12,
+            Foreground = RowDescriptionBrush,
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 17,
+            Margin = new Thickness(16, 0, 16, 14)
+        });
     }
 
     private ToggleButton CreateBoundToggle(string propertyName)
     {
         var toggle = new ToggleButton
         {
-            Style = GetResource<Style>("SettingsToggleStyle"),
+            Style = GetResource<Style>("AppleSwitchStyle"),
             VerticalAlignment = VerticalAlignment.Center
         };
         toggle.SetBinding(
@@ -177,7 +216,7 @@ public partial class SettingsWindow
         return toggle;
     }
 
-    private TextBox CreateBoundTextBox(string propertyName, double width = 280)
+    private TextBox CreateBoundTextBox(string propertyName, double width = 190)
     {
         var textBox = new TextBox
         {
@@ -195,7 +234,7 @@ public partial class SettingsWindow
         return textBox;
     }
 
-    private PasswordBox CreateCredentialPasswordBox(string propertyName, double width = 280, string? password = null)
+    private PasswordBox CreateCredentialPasswordBox(string propertyName, double width = 190, string? password = null)
     {
         var passwordBox = new PasswordBox
         {
@@ -265,7 +304,7 @@ public partial class SettingsWindow
         return panel;
     }
 
-    private ComboBox CreateBoundComboBox(string propertyName, IReadOnlyList<string> items, double width = 280)
+    private ComboBox CreateBoundComboBox(string propertyName, IReadOnlyList<string> items, double width = 190)
     {
         var comboBox = new ComboBox
         {
@@ -293,15 +332,6 @@ public partial class SettingsWindow
         };
     }
 
-    private Button CreatePrimaryButton(string text)
-    {
-        return new Button
-        {
-            Content = text,
-            Style = GetResource<Style>("SettingsPrimaryButtonStyle")
-        };
-    }
-
     private Button CreateHotKeyButton(string propertyName)
     {
         var button = new Button
@@ -310,24 +340,44 @@ public partial class SettingsWindow
             Content = BuildKeycapPanel(GetHotKeyValue(propertyName)),
             ToolTip = "点击后直接按新的快捷键"
         };
-        button.Click += (_, _) => button.Focus();
-        button.GotKeyboardFocus += (_, _) =>
+        button.Click += (_, _) =>
         {
-            button.Content = new TextBlock
-            {
-                Text = "请按新的快捷键…",
-                FontSize = (double)FindResource("Settings.FontSize.Control"),
-                FontWeight = GetFontWeight("Settings.FontWeight.SettingTitle"),
-                Foreground = GetResource<Brush>("Settings.Brush.AccentText"),
-                VerticalAlignment = VerticalAlignment.Center
-            };
+            button.Focus();
+            if (button.IsKeyboardFocused)
+                BeginHotKeyCapture(button, propertyName);
         };
+        button.GotKeyboardFocus += (_, _) => BeginHotKeyCapture(button, propertyName);
         button.LostKeyboardFocus += (_, _) =>
         {
-            button.Content = BuildKeycapPanel(GetHotKeyValue(propertyName));
+            if (_hotKeyEditor?.Button == button)
+                EndHotKeyCapture();
         };
-        button.PreviewKeyDown += (_, e) => CaptureHotKey(button, propertyName, e);
+        button.PreviewKeyDown += OnHotKeyInput;
         return button;
+    }
+
+    private void BeginHotKeyCapture(Button button, string propertyName)
+    {
+        if (_hotKeyEditor?.Button == button)
+            return;
+        EndHotKeyCapture();
+        button.Content = new TextBlock
+        {
+            Text = "请按新的快捷键…",
+            FontSize = (double)FindResource("Settings.FontSize.Control"),
+            FontWeight = GetFontWeight("Settings.FontWeight.SettingTitle"),
+            Foreground = GetResource<Brush>("Settings.Brush.AccentText"),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        _hotKeyEditor = (button, propertyName);
+    }
+
+    private void EndHotKeyCapture()
+    {
+        if (_hotKeyEditor is not { } editor)
+            return;
+        _hotKeyEditor = null;
+        editor.Button.Content = BuildKeycapPanel(GetHotKeyValue(editor.PropertyName));
     }
 
     private string GetHotKeyValue(string propertyName) => propertyName switch
@@ -361,21 +411,82 @@ public partial class SettingsWindow
                 });
             }
 
-            panel.Children.Add(new Border
+            panel.Children.Add(new SquircleGlassBorder
             {
-                Style = GetResource<Style>("SettingsKeycapStyle"),
-                Child = new TextBlock
+                CornerRadiusRadius = 5.5,
+                ShadowLevel = 1,
+                CacheShadows = true,
+                ShowRim = false,
+                OutlineBrush = KeycapOutlineBrush,
+                OutlineThickness = 1,
+                GlassBackground = Brushes.White,
+                Padding = new Thickness(7, 3, 7, 3),
+                Child = new Border
                 {
-                    Text = keys[index],
-                    FontSize = (double)FindResource("Settings.FontSize.Keycap"),
-                    FontWeight = GetFontWeight("Settings.FontWeight.Keycap"),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    Foreground = GetResource<Brush>("Settings.Brush.TextPrimary")
+                    BorderBrush = Brushes.White,
+                    BorderThickness = new Thickness(0, 1, 0, 0),
+                    Child = new TextBlock
+                    {
+                        Text = keys[index],
+                        FontSize = (double)FindResource("Settings.FontSize.Keycap"),
+                        FontWeight = GetFontWeight("Settings.FontWeight.Keycap"),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Foreground = GetResource<Brush>("Settings.Brush.TextPrimary")
+                    }
                 }
             });
         }
 
         return panel;
     }
+
+    /// <summary>创建“通用”页的状态胶囊徽章（如本地 OCR 引擎就绪态）。</summary>
+    private static FrameworkElement CreateStatusBadge(string text, bool isSuccess)
+    {
+        var content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        content.Children.Add(new System.Windows.Shapes.Ellipse
+        {
+            Width = 6,
+            Height = 6,
+            Margin = new Thickness(0, 0, 6, 0),
+            Fill = isSuccess ? ReadyBadgeDot : WarningBadgeDot,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = text,
+            FontSize = 12,
+            FontWeight = FontWeights.Medium,
+            Foreground = isSuccess ? ReadyBadgeForeground : WarningBadgeForeground,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        return new Border
+        {
+            Background = isSuccess ? ReadyBadgeBackground : WarningBadgeBackground,
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(10, 4, 10, 4),
+            Child = content
+        };
+    }
+
+    /// <summary>创建等宽字体版本号徽章。</summary>
+    private FrameworkElement CreateVersionBadge(string versionText) => new Border
+    {
+        Background = VersionBadgeBackground,
+        CornerRadius = new CornerRadius(6),
+        Padding = new Thickness(9, 3.5, 9, 3.5),
+        Child = new TextBlock
+        {
+            Text = versionText,
+            FontSize = 12,
+            FontFamily = GetResource<FontFamily>("Font.Numeric"),
+            Foreground = VersionBadgeForeground,
+            VerticalAlignment = VerticalAlignment.Center
+        }
+    };
 }

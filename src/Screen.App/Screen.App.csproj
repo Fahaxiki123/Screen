@@ -8,7 +8,10 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <RootNamespace>Screen.App</RootNamespace>
     <AssemblyName>Screen</AssemblyName>
-    <Version>1.0.15</Version>
+    <Product>Flick</Product>
+    <AssemblyTitle>Flick</AssemblyTitle>
+    <Description>Flick — 截图、贴图、录屏、文字识别与翻译工具</Description>
+    <Version>2.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Screen.ico</ApplicationIcon>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -16,6 +19,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\Screen.ico" />
+    <Resource Include="Assets\Screen.png" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" Version="3.0.0" />

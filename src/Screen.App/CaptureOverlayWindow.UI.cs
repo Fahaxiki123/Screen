@@ -1,784 +1,376 @@
+using System.Diagnostics;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
-using Lucide.NET;
+using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 using Screen.Core;
 
 namespace Screen.App;
 
-/// <summary>
-/// UI building methods for CaptureOverlayWindow (toolbars, panels, buttons).
-/// </summary>
 internal sealed partial class CaptureOverlayWindow
 {
-    private Border BuildModeBar()
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
-        AddModeButton(row, CaptureEntryMode.Screenshot, "截图");
-        AddModeButton(row, CaptureEntryMode.ScrollCapture, "滚动截图");
-        AddModeButton(row, CaptureEntryMode.Ocr, "提取文字");
-        AddModeButton(row, CaptureEntryMode.Translation, "翻译");
-        return new Border
-        {
-            Background = FindResourceBrush("Brush.ChromeGradient"),
-            BorderBrush = FindResourceBrush("Brush.GlassRim"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(5),
-            Effect = FindResourceEffect("Shadow.Floating"),
-            Child = row
-        };
-    }
-
     private static Brush FindResourceBrush(string key) => (Brush)Application.Current.FindResource(key);
 
-    private static System.Windows.Media.Effects.DropShadowEffect FindResourceEffect(string key) =>
-        (System.Windows.Media.Effects.DropShadowEffect)Application.Current.FindResource(key);
-
-    private void AddModeButton(Panel row, CaptureEntryMode mode, string text)
+    private SquircleGlassBorder BuildModeBar()
     {
-        // Rounded text button: the default template paints square-corner
-        // backgrounds inside the rounded mode bar.
-        var template = new ControlTemplate(typeof(Button));
-        var chrome = new FrameworkElementFactory(typeof(Border));
-        chrome.Name = "Chrome";
-        chrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
-        chrome.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
-        var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
-        presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-        chrome.AppendChild(presenter);
-        template.VisualTree = chrome;
-        var hover = new Trigger
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        _modeTrack = new SpringTrack(row, 6.5);
+        foreach (var (mode, name) in new[]
         {
-            Property = UIElement.IsMouseOverProperty,
-            Value = true
-        };
-        hover.Setters.Add(new Setter(
-            Border.BackgroundProperty, FindResourceBrush("Brush.OverlayHover"), "Chrome"));
-        template.Triggers.Add(hover);
+            (CaptureEntryMode.Screenshot, "截图"), (CaptureEntryMode.ScrollCapture, "滚动截图"),
+            (CaptureEntryMode.Ocr, "提取文字"), (CaptureEntryMode.Translation, "翻译")
+        })
+        {
+            var button = new Button
+            {
+                Content = name,
+                Width = name.Length == 4 ? 80 : 62,
+                FontSize = 13,
+                Style = (Style)Application.Current.FindResource("ToolbarIconButtonDarkStyle")
+            };
+            button.Click += (_, _) =>
+            {
+                _entryMode = mode;
+                UpdateModeButtons();
+            };
+            _modeButtons.Add(mode, button);
+            row.Children.Add(button);
+        }
 
-        var button = new Button
+        var bar = new SquircleGlassBorder { Padding = new Thickness(4), Child = _modeTrack };
+        bar.IsVisibleChanged += (_, e) =>
         {
-            Content = text,
-            MinWidth = mode == CaptureEntryMode.ScrollCapture ? 86 : 70,
-            Height = 38,
-            Margin = new Thickness(1),
-            Padding = new Thickness(12, 0, 12, 0),
-            FontSize = 14,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = FindResourceBrush("Brush.TextPrimary"),
-            Background = Brushes.Transparent,
-            Template = template
+            if ((bool)e.NewValue && !_recordingMode)
+                GlassMotion.Enter(bar, -12, 0.94, 300);
         };
-        button.Click += (_, _) =>
-        {
-            _entryMode = mode;
-            UpdateModeButtons();
-        };
-        _modeButtons[mode] = button;
-        row.Children.Add(button);
+        return bar;
     }
 
     private void UpdateModeButtons()
     {
         foreach (var (mode, button) in _modeButtons)
         {
-            var selected = mode == _entryMode;
-            button.Background = selected ? FindResourceBrush("Brush.AccentSubtleDark") : Brushes.Transparent;
-            button.Foreground = selected
-                ? FindResourceBrush("Brush.AccentText")
-                : FindResourceBrush("Brush.OverlayTextDim");
+            bool selected = mode == _entryMode;
+            button.Foreground = FindResourceBrush(selected ? "Brush.Accent" : "Brush.OverlayTextDim");
+            button.FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal;
         }
+        _modeTrack.Select(_modeButtons.GetValueOrDefault(_entryMode));
     }
 
-    private Border BuildToolbar(out Button translationButton, out Button translationDropDownButton)
+    private SquircleGlassBorder BuildToolbar(out Button translationButton)
     {
-        var tools = new WrapPanel { Orientation = Orientation.Horizontal };
-
-        // Cluster 1: Annotation drawing tools
-        AddTool(tools, CaptureTool.Rectangle, LucideIconKind.Square, "矩形");
-        AddTool(tools, CaptureTool.Ellipse, LucideIconKind.Circle, "圆形");
-        AddTool(tools, CaptureTool.Line, LucideIconKind.Minus, "直线");
-        AddTool(tools, CaptureTool.Arrow, LucideIconKind.MoveUpRight, "箭头");
-        AddTool(tools, CaptureTool.Pen, LucideIconKind.PencilLine, "画笔");
-        AddTool(tools, CaptureTool.Text, LucideIconKind.Type, "文字");
-        AddTool(tools, CaptureTool.Number, LucideIconKind.ListOrdered, "序号");
-        var mosaicButton = ActionButton(
-            ToolbarIcons.MosaicFrame,
-            ToolbarIcons.MosaicBlocks,
-            1.4,
-            "马赛克",
-            (_, _) => SelectTool(CaptureTool.Mosaic));
-        _toolButtons[CaptureTool.Mosaic] = mosaicButton;
-        tools.Children.Add(mosaicButton);
-
-        // Divider: Drawing tools | Smart extensions
-        tools.Children.Add(Separator());
-
-        // Cluster 2: Smart / AI extensions
-        tools.Children.Add(ActionButton(LucideIconKind.Pin, "贴图到桌面", Pin));
-        var translationGroup = new StackPanel { Orientation = Orientation.Horizontal };
-        translationButton = ActionButton(LucideIconKind.Languages, "按当前语种翻译", TranslateWithCurrentLanguage);
-        translationGroup.Children.Add(translationButton);
-        translationDropDownButton = ActionButton(LucideIconKind.ChevronDown, "选择翻译语种", ToggleTranslationMenu);
-        translationDropDownButton.Width = 22;
-        translationDropDownButton.MinWidth = 22;
-        translationDropDownButton.Margin = new Thickness(-5, 1, 1, 1);
-        translationGroup.Children.Add(translationDropDownButton);
-        tools.Children.Add(translationGroup);
-        tools.Children.Add(ActionButton(LucideIconKind.ScanText, "提取文字", ShowOcr));
-        tools.Children.Add(ActionButton(LucideIconKind.ScissorsLineDashed, "长截图", StartLongCapture, rotationDegrees: 90));
-        tools.Children.Add(ActionButton(LucideIconKind.Video, "录制此区域", StartRegionRecording));
-
-        // Divider: Smart extensions | Output / Delivery
-        tools.Children.Add(Separator());
-
-        // Cluster 3: History & Delivery
-        tools.Children.Add(ActionButton(LucideIconKind.Undo2, "撤销 · Ctrl+Z", (_, _) => _surface.Undo()));
-        tools.Children.Add(ActionButton(LucideIconKind.Redo2, "重做 · Ctrl+Y", (_, _) => _surface.Redo()));
-        tools.Children.Add(ActionButton(LucideIconKind.Download, "另存为 PNG · Ctrl+S", Save));
-        tools.Children.Add(ActionButton(LucideIconKind.X, "取消截图 · Esc", (_, _) => Close(), FindResourceBrush("Brush.DangerOnDark")));
-
-        var finishContent = new StackPanel
+        var row = new WrapPanel();
+        var drawing = new WrapPanel();
+        _drawingTrack = new SpringTrack(drawing, 6.5);
+        row.Children.Add(_drawingTrack);
+        foreach (var (tool, icon, label) in new[]
         {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
+            (CaptureTool.Rectangle, "rect", "矩形"), (CaptureTool.Ellipse, "ellipse", "椭圆"),
+            (CaptureTool.Arrow, "arrow", "箭头 · 右键选直线"), (CaptureTool.Pen, "pen", "画笔"),
+            (CaptureTool.Text, "text", "文字 · 右键选序号"), (CaptureTool.Mosaic, "mosaic", "马赛克")
+        })
+        {
+            var button = ToolbarButton(drawing, icon, label + " · 再次点击可移动选区", (_, _) =>
+            {
+                if (_surface.Tool == tool)
+                {
+                    _surface.ClearAnnotationSelection();
+                    _surface.Tool = CaptureTool.Select;
+                    _stylePanel.Visibility = Visibility.Collapsed;
+                    UpdateDrawingSelection();
+                    PositionFloatingPanels();
+                }
+                else
+                    SelectTool(tool);
+            }, GlassMotion.Pulse);
+            _toolButtons.Add(tool, button);
+            if (tool == CaptureTool.Arrow)
+                AddMenuAction(button, "直线", () => SelectTool(CaptureTool.Line));
+            if (tool == CaptureTool.Text)
+                AddMenuAction(button, "序号", () => SelectTool(CaptureTool.Number));
+        }
+        row.Children.Add(Separator());
+        ToolbarButton(row, "pin", "贴图到桌面", Pin);
+        ToolbarButton(row, "ocr", "提取文字", ShowOcr);
+        translationButton = ToolbarButton(row, "translate", "按当前语种翻译 · 右键选择语种", TranslateWithCurrentLanguage);
+        translationButton.MouseRightButtonUp += (_, e) =>
+        {
+            ToggleTranslationMenu(this, new RoutedEventArgs());
+            e.Handled = true;
         };
-        finishContent.Children.Add(new LucideIconElement
+        translationButton.KeyDown += (_, e) =>
         {
-            Kind = LucideIconKind.Check,
-            Width = 14,
-            Height = 14,
-            Stroke = Brushes.White,
-            StrokeThickness = 2.4,
-            VerticalAlignment = VerticalAlignment.Center
-        });
-        finishContent.Children.Add(new TextBlock
-        {
-            Text = "完成",
-            FontSize = 13,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = Brushes.White,
-            Margin = new Thickness(5, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        });
-        var finishButton = new Button
+            if (e.Key == Key.Apps || (e.Key == Key.F10 && Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)))
+            {
+                ToggleTranslationMenu(this, new RoutedEventArgs());
+                e.Handled = true;
+            }
+        };
+        ToolbarButton(row, "scroll", "长截图", StartLongCapture, GlassMotion.Dip);
+        ToolbarButton(row, "video", "录制此区域", StartRegionRecording);
+        row.Children.Add(Separator());
+        var undo = ToolbarButton(row, "undo", "撤销 · Ctrl+Z · 右键重做", (_, _) => _surface.Undo(), GlassMotion.Rotate);
+        AddMenuAction(undo, "重做", () => _surface.Redo(), "Ctrl+Y");
+        ToolbarButton(row, "save", "另存为 PNG · Ctrl+S", Save, GlassMotion.Dip);
+        ToolbarButton(row, "close", "取消截图 · Esc", (_, _) => Close()).Foreground = FindResourceBrush("Brush.Danger");
+
+        var finishContent = new StackPanel { Orientation = Orientation.Horizontal };
+        finishContent.Children.Add(AppleVectorIcons.Create("check", 17));
+        finishContent.Children.Add(new TextBlock { Text = "完成", Margin = new Thickness(4, 0, 0, 0) });
+        var finish = new Button
         {
             Content = finishContent,
             ToolTip = "完成并复制 · Enter",
-            Height = 34,
-            MinWidth = 66,
-            Margin = new Thickness(4, 1, 2, 1),
-            Padding = new Thickness(10, 0, 12, 0)
+            Margin = new Thickness(4, 0, 0, 0),
+            Style = (Style)Application.Current.FindResource("CardPrimaryButtonStyle")
         };
-        finishButton.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
-        finishButton.Click += Finish;
-        tools.Children.Add(finishButton);
-
-        return new Border
-        {
-            Background = FindResourceBrush("Brush.ChromeGradient"),
-            BorderBrush = FindResourceBrush("Brush.GlassRim"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(7, 5, 7, 5),
-            Effect = FindResourceEffect("Shadow.Floating"),
-            Child = tools,
-            Visibility = Visibility.Collapsed
-        };
+        AutomationProperties.SetName(finish, "完成并复制");
+        finish.Click += Finish;
+        _toolbarButtons.Add(finish);
+        row.Children.Add(finish);
+        return new SquircleGlassBorder { Padding = new Thickness(4), Child = row, Visibility = Visibility.Collapsed };
     }
 
-    private Border BuildStylePanel()
+    private Button ToolbarButton(Panel group, string icon, string label, RoutedEventHandler action,
+        Action<FrameworkElement>? feedback = null)
     {
-        return new Border
+        var glyph = AppleVectorIcons.Create(icon);
+        var button = new Button { Content = glyph, ToolTip = label };
+        button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
+        AutomationProperties.SetName(button, label.Split('·')[0].Trim());
+        button.Click += (sender, e) =>
         {
-            Background = FindResourceBrush("Brush.ChromeGradient"),
-            BorderBrush = FindResourceBrush("Brush.GlassRim"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(8, 5, 8, 5),
-            Effect = FindResourceEffect("Shadow.Floating"),
-            Visibility = Visibility.Collapsed
+            feedback?.Invoke(glyph);
+            action(sender, e);
         };
+        group.Children.Add(button);
+        _toolbarButtons.Add(button);
+        return button;
     }
 
-    private void ConfigureStylePanel(CaptureTool tool, bool applyToSelection = false)
+    private static void AddMenuAction(Button button, string label, Action action, string shortcut = "")
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
-        if (tool == CaptureTool.Mosaic)
+        var item = new MenuItem { Header = label, InputGestureText = shortcut };
+        item.Click += (_, _) => action();
+        button.ContextMenu = new ContextMenu { Items = { item } };
+    }
+
+    private Button? ActiveDrawingButton() => _toolButtons.GetValueOrDefault(_surface.Tool switch
+    {
+        CaptureTool.Line => CaptureTool.Arrow,
+        CaptureTool.Number => CaptureTool.Text,
+        _ => _surface.Tool
+    });
+
+    private void UpdateDrawingSelection()
+    {
+        var active = ActiveDrawingButton();
+        foreach (var button in _toolButtons.Values)
+            button.Foreground = FindResourceBrush(button == active ? "Brush.Accent" : "Brush.OverlayIcon");
+        _drawingTrack.Select(active);
+    }
+
+    private void AnimateToolbarEntry()
+    {
+        _toolbarEntryTimestamp = Stopwatch.GetTimestamp();
+        GlassMotion.Enter(_toolbar, -10, 0.93, 320, overshootY: 1.5, overshootScale: 1.012);
+        for (int i = 0; i < _toolbarButtons.Count; i++)
         {
-            row.Children.Add(ToggleIcon(LucideIconKind.Grid2x2, "像素马赛克", _mosaicVariant == AnnotationVariants.MosaicPixelate, () =>
-            {
-                _mosaicVariant = AnnotationVariants.MosaicPixelate;
-                ConfigureStylePanel(tool, applyToSelection: true);
-            }));
-            row.Children.Add(ToggleIcon(LucideIconKind.Droplet, "模糊", _mosaicVariant == AnnotationVariants.MosaicBlur, () =>
-            {
-                _mosaicVariant = AnnotationVariants.MosaicBlur;
-                ConfigureStylePanel(tool, applyToSelection: true);
-            }));
-            row.Children.Add(Separator());
-            row.Children.Add(ToggleIcon(LucideIconKind.Paintbrush, "涂抹笔刷", _surface.MosaicMode == MosaicDrawMode.Brush, () =>
-            {
-                _surface.ClearAnnotationSelection();
-                _surface.MosaicMode = MosaicDrawMode.Brush;
-                ConfigureStylePanel(tool);
-            }));
-            row.Children.Add(ToggleIcon(LucideIconKind.SquareDashed, "矩形区域", _surface.MosaicMode == MosaicDrawMode.Rectangle, () =>
-            {
-                _surface.ClearAnnotationSelection();
-                _surface.MosaicMode = MosaicDrawMode.Rectangle;
-                ConfigureStylePanel(tool);
-            }));
-            row.Children.Add(Separator());
-            AddSizeDots(row, new[] { 20d, 32d, 48d }, _mosaicSize, 0.5, size =>
-            {
-                _mosaicSize = size;
-                ConfigureStylePanel(tool, applyToSelection: true);
-            });
-            row.Children.Add(new TextBlock
-            {
-                Text = "强度",
-                Margin = new Thickness(12, 0, 7, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                Foreground = FindResourceBrush("Brush.OverlayTextDim")
-            });
-            var slider = new Slider
-            {
-                Width = 112,
-                Minimum = 0.2,
-                Maximum = 1,
-                Value = _mosaicIntensity,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            slider.ValueChanged += (_, _) =>
-            {
-                _mosaicIntensity = slider.Value;
-                UpdateStyle(applyToSelection: true);
-            };
-            row.Children.Add(slider);
+            var button = _toolbarButtons[i];
+            button.ApplyTemplate();
+            if (VisualTreeHelper.GetChildrenCount(button) > 0 && VisualTreeHelper.GetChild(button, 0) is FrameworkElement chrome)
+                GlassMotion.Enter(chrome, 5, 0.84, 240, 14 * i, opacityTarget: button);
         }
-        else if (tool == CaptureTool.Text)
-        {
-            row.Children.Add(TextWeightButton("T", FontWeights.Normal, AnnotationVariants.TextRegular, tool));
-            row.Children.Add(TextWeightButton("T", FontWeights.SemiBold, AnnotationVariants.TextMedium, tool));
-            row.Children.Add(TextWeightButton("T", FontWeights.Bold, AnnotationVariants.TextBold, tool));
-            row.Children.Add(Separator());
-            var fontSize = new ComboBox { Width = 82, Height = 30, Margin = new Thickness(4, 0, 6, 0) };
-            foreach (var (label, size) in new[] { ("12pt", 16d), ("16pt", 21d), ("20pt", 27d), ("28pt", 37d) })
-            {
-                fontSize.Items.Add(new ComboBoxItem { Content = label, Tag = size });
-            }
-            // Select the current size, falling back to 20pt when the persisted
-            // value is not one of the presets — the fallback must not shadow a
-            // later preset (it would show 20pt while rendering 28pt text).
-            fontSize.SelectedItem = fontSize.Items.Cast<ComboBoxItem>()
-                .FirstOrDefault(item => (double)item.Tag == _fontSize)
-                ?? fontSize.Items.Cast<ComboBoxItem>().First(item => (double)item.Tag == 27d);
-            fontSize.SelectionChanged += (_, _) =>
-            {
-                if (fontSize.SelectedItem is ComboBoxItem item)
-                {
-                    _fontSize = (double)item.Tag;
-                    UpdateStyle(applyToSelection: true);
-                }
-            };
-            row.Children.Add(fontSize);
-            AddColorSwatches(row);
-        }
-        else if (tool == CaptureTool.Number)
-        {
-            AddSizeDots(row, new[] { 24d, 32d, 44d }, _numberSize, 0.55, size =>
-            {
-                _numberSize = size;
-                ConfigureStylePanel(tool, applyToSelection: true);
-            });
-            row.Children.Add(Separator());
-            AddColorSwatches(row);
-        }
-        else
-        {
-            AddSizeDots(row, new[] { 2d, 4d, 7d }, _thickness, 2, size =>
-            {
-                _thickness = size;
-                ConfigureStylePanel(tool, applyToSelection: true);
-            });
-            row.Children.Add(Separator());
-            AddColorSwatches(row);
-        }
-        _stylePanel.Child = row;
-        UpdateStyle(applyToSelection);
     }
 
     private Popup BuildTranslationPopup()
     {
         var list = new StackPanel();
-        foreach (var language in new[]
-                 {
-                     "简体中文", "English", "日本語", "한국어", "繁體中文",
-                     "Français", "Español", "Português", "Deutsch"
-                 })
+        foreach (string language in new[] { "简体中文", "English", "日本語", "한국어", "繁體中文", "Français", "Español", "Português", "Deutsch" })
         {
-            var button = new Button
-            {
-                Content = language,
-                Width = 190,
-                Height = 40,
-                Padding = new Thickness(14, 0, 14, 0),
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                FontSize = 14,
-                Foreground = FindResourceBrush("Brush.OverlayText"),
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0)
-            };
-            // Hover feedback must be a light wash, not the default dark one.
-            var template = new ControlTemplate(typeof(Button));
-            var chrome = new FrameworkElementFactory(typeof(Border));
-            chrome.Name = "Chrome";
-            chrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
-            chrome.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
-            var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
-            presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-            presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Left);
-            presenter.SetValue(ContentPresenter.MarginProperty, new Thickness(14, 0, 0, 0));
-            chrome.AppendChild(presenter);
-            template.VisualTree = chrome;
-            var hover = new Trigger
-            {
-                Property = UIElement.IsMouseOverProperty,
-                Value = true
-            };
-            hover.Setters.Add(new Setter(
-                Border.BackgroundProperty, FindResourceBrush("Brush.OverlayHover"), "Chrome"));
-            template.Triggers.Add(hover);
-            button.Template = template;
+            var button = new Button { Content = language, Width = 170, Height = 32, FontSize = 13 };
+            button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
             button.Click += async (_, _) =>
             {
                 _translationPopup.IsOpen = false;
-                _settingsStore.Update(latest =>
-                    latest.Translation = latest.Translation with { TargetLanguage = language });
-                await TranslateSelectionAsync(language);
+                try
+                {
+                    _settingsStore.Update(latest => latest.Translation = latest.Translation with { TargetLanguage = language });
+                    await TranslateSelectionAsync(language);
+                }
+                catch (Exception exception)
+                {
+                    _translationCard.SetError(exception.Message);
+                }
             };
             list.Children.Add(button);
         }
-        var scroll = new ScrollViewer
-        {
-            Content = list,
-            MaxHeight = 340,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-        };
-        // Scope the shared dark scrollbar to this menu — the overlay window's
-        // default (light) scrollbar would glare against the navy popup.
-        scroll.Resources[typeof(ScrollBar)] = Application.Current.FindResource("DarkScrollBarStyle");
         return new Popup
         {
-            PlacementTarget = _translationDropDownButton,
+            PlacementTarget = _translationButton,
             Placement = PlacementMode.Top,
-            VerticalOffset = -7,
+            HorizontalOffset = -SquircleGlassBorder.FloatingShadowMargin.Left,
+            VerticalOffset = SquircleGlassBorder.FloatingShadowMargin.Bottom - 6,
             AllowsTransparency = true,
             StaysOpen = false,
-            Child = new Border
+            Child = new SquircleGlassBorder
             {
-                Background = FindResourceBrush("Brush.OverlayElevated"),
-                BorderBrush = FindResourceBrush("Brush.OverlayBorder"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(12),
-                Padding = new Thickness(4, 8, 4, 8),
-                Effect = FindResourceEffect("Shadow.Floating"),
-                Child = scroll
+                Margin = SquircleGlassBorder.FloatingShadowMargin,
+                Padding = new Thickness(4),
+                Child = new ScrollViewer { Content = list, MaxHeight = 300, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
             }
         };
     }
 
-    private void AddTool(Panel panel, CaptureTool tool, LucideIconKind icon, string tooltip)
+    private SquircleGlassBorder BuildRecordingPanel()
     {
-        var button = ActionButton(icon, tooltip, (_, _) => SelectTool(tool));
-        _toolButtons[tool] = button;
-        panel.Children.Add(button);
-    }
+        var defaults = _settingsStore.Load().Recording;
+        _showCursorChoice = defaults.ShowCursor;
+        _showClickEffectsChoice = defaults.ShowClickEffects;
+        _recordSystemAudioChoice = defaults.RecordSystemAudio;
+        _recordMicrophoneChoice = defaults.RecordMicrophone;
 
-    private static Button ActionButton(
-        LucideIconKind icon,
-        string tooltip,
-        RoutedEventHandler handler,
-        Brush? foreground = null,
-        double rotationDegrees = 0)
-    {
-        var iconElement = new LucideIconElement
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var segments = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2) };
+        var track = new SpringTrack(segments, 4.5);
+        var mp4 = FormatButton("MP4");
+        var gif = FormatButton("GIF");
+        gif.ToolTip = $"停止录制后自动保存 GIF，{RecordingGifExporter.FramesPerSecond} 帧/秒，长边最多 {RecordingGifExporter.MaxLongEdge} 像素。";
+        segments.Children.Add(mp4);
+        segments.Children.Add(gif);
+        row.Children.Add(new SquircleGlassBorder
         {
-            Kind = icon,
-            Width = 20,
-            Height = 20,
-            StrokeThickness = 1.75,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            CornerRadiusRadius = 6.5,
+            GlassBackground = FindResourceBrush("Brush.SurfaceSunken"),
+            ShowRim = false,
+            ShadowLevel = 0,
+            Child = track,
             VerticalAlignment = VerticalAlignment.Center
-        };
-        if (rotationDegrees != 0)
-        {
-            iconElement.RenderTransformOrigin = new Point(0.5, 0.5);
-            iconElement.RenderTransform = new RotateTransform(rotationDegrees);
-        }
-        iconElement.SetBinding(
-            LucideIconElement.StrokeProperty,
-            new System.Windows.Data.Binding(nameof(Button.Foreground))
-            {
-                RelativeSource = new System.Windows.Data.RelativeSource(
-                    System.Windows.Data.RelativeSourceMode.FindAncestor,
-                    typeof(Button),
-                    1)
-            });
-        var button = new Button
-        {
-            Content = iconElement,
-            ToolTip = tooltip,
-            Style = (Style)Application.Current.FindResource("ToolbarIconButtonDarkStyle")
-        };
-        if (foreground is not null)
-        {
-            button.Foreground = foreground;
-        }
-        button.Click += handler;
-        return button;
-    }
-
-    private static Button ActionButton(
-        Geometry strokeGeometry,
-        Geometry fillGeometry,
-        double strokeThickness,
-        string tooltip,
-        RoutedEventHandler handler,
-        Brush? foreground = null)
-    {
-        var button = new Button
-        {
-            Content = ToolbarIcons.DualIcon(strokeGeometry, fillGeometry, strokeThickness),
-            ToolTip = tooltip,
-            Style = (Style)Application.Current.FindResource("ToolbarIconButtonDarkStyle")
-        };
-        if (foreground is not null)
-        {
-            button.Foreground = foreground;
-        }
-        button.Click += handler;
-        return button;
-    }
-
-    private Button TextWeightButton(string text, FontWeight weight, int variant, CaptureTool tool)
-    {
-        var selected = _textVariant == variant;
-        var button = new Button
-        {
-            Content = new TextBlock { Text = text, FontSize = 20, FontWeight = weight },
-            Width = 38,
-            MinWidth = 38,
-            Height = 34,
-            Background = selected ? FindResourceBrush("Brush.AccentSubtleDark") : Brushes.Transparent,
-            Foreground = selected ? FindResourceBrush("Brush.AccentOnDark") : FindResourceBrush("Brush.OverlayIcon")
-        };
-        button.Click += (_, _) =>
-        {
-            _textVariant = variant;
-            ConfigureStylePanel(tool, applyToSelection: true);
-        };
-        return button;
-    }
-
-    private Button ToggleIcon(LucideIconKind icon, string tooltip, bool selected, Action action)
-    {
-        var button = ActionButton(icon, tooltip, (_, _) => action());
-        button.Background = selected ? FindResourceBrush("Brush.AccentSubtleDark") : Brushes.Transparent;
-        button.Foreground = selected ? FindResourceBrush("Brush.AccentOnDark") : FindResourceBrush("Brush.OverlayIcon");
-        return button;
-    }
-
-    private static void AddSizeDots(
-        Panel row,
-        IReadOnlyList<double> sizes,
-        double selected,
-        double sampleScale,
-        Action<double> changed)
-    {
-        foreach (var size in sizes)
-        {
-            var diameter = Math.Clamp(size * sampleScale, 4, 28);
-            var isSelected = Math.Abs(size - selected) < 0.1;
-            var button = new Button
-            {
-                Content = new Grid
-                {
-                    Width = 30,
-                    Height = 30,
-                    Children =
-                    {
-                        new System.Windows.Shapes.Ellipse
-                        {
-                            Width = diameter,
-                            Height = diameter,
-                            Fill = isSelected
-                                ? FindResourceBrush("Brush.AccentOnDark")
-                                : FindResourceBrush("Brush.Neutral500"),
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            VerticalAlignment = VerticalAlignment.Center
-                        }
-                    }
-                },
-                Width = 38,
-                MinWidth = 38,
-                Height = 38,
-                Padding = new Thickness(0),
-                Background = isSelected ? FindResourceBrush("Brush.AccentSubtleDark") : Brushes.Transparent,
-                ToolTip = $"实际大小 {size:0}px"
-            };
-            button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
-            button.Click += (_, _) => changed(size);
-            row.Children.Add(button);
-        }
-    }
-
-    private void AddColorSwatches(Panel row)
-    {
-        foreach (var (color, name) in new[]
-                 {
-                     (0xFFFF4D4Fu, "红"), (0xFFFFB51Bu, "黄"), (0xFF31C56Au, "绿"),
-                     (0xFF2563EBu, "蓝"), (0xFF101216u, "黑"), (0xFF9299A6u, "灰"), (0xFFFFFFFFu, "白")
-                 })
-        {
-            var selected = color == _color;
-            var button = new Button { Width = 34, MinWidth = 34, Height = 34, ToolTip = name, Padding = new Thickness(0) };
-            button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
-            button.Content = new Border
-            {
-                Width = 22,
-                Height = 22,
-                CornerRadius = new CornerRadius(6),
-                Background = new SolidColorBrush(Color.FromArgb((byte)(color >> 24), (byte)(color >> 16), (byte)(color >> 8), (byte)color)),
-                BorderBrush = selected
-                    ? FindResourceBrush("Brush.AccentOnDark")
-                    : FindResourceBrush(color == 0xFFFFFFFFu ? "Brush.Neutral500" : "Brush.OverlayBorder"),
-                BorderThickness = new Thickness(selected ? 2 : 1)
-            };
-            button.Click += (_, _) =>
-            {
-                _color = color;
-                ConfigureStylePanel(_surface.Tool, applyToSelection: true);
-            };
-            row.Children.Add(button);
-        }
-    }
-
-    /// <summary>
-    /// Recording setup card uses the shared navy and moon-blue palette,
-    /// with a light primary action and quiet format and audio options.
-    /// </summary>
-    private Border BuildRecordingPanel()
-    {
-        var recordingDefaults = _settingsStore.Load().Recording;
-        _showCursorChoice = recordingDefaults.ShowCursor;
-        _recordSystemAudioChoice = recordingDefaults.RecordSystemAudio;
-        _recordMicrophoneChoice = recordingDefaults.RecordMicrophone;
-
-        var startButton = new Button
-        {
-            Content = "开始录制",
-            Height = 42,
-            FontSize = 15,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = FindResourceBrush("Brush.OnAccent"),
-            Padding = new Thickness(0)
-        };
-        startButton.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
-        startButton.Click += (_, _) => BeginRecordingFromPanel();
-
-        var formatRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 16, 0, 0)
-        };
-        formatRow.Children.Add(RecordingFormatChip("MP4", isSelected: true, isEnabled: true, "录制为 MP4 视频"));
-        formatRow.Children.Add(RecordingFormatChip("GIF", isSelected: false, isEnabled: false, "录后可在编辑窗导出 GIF"));
-
-        var iconRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 8, 0, 0)
-        };
-        _speakerToggleIcon = RecordingToggleIcon(
-            _recordSystemAudioChoice ? LucideIconKind.Volume2 : LucideIconKind.VolumeX,
-            _recordSystemAudioChoice);
-        var speakerButton = RecordingOptionButton(
-            _speakerToggleIcon,
-            "扬声器",
-            _recordSystemAudioChoice ? "已开启：录制系统声音" : "已关闭：不录制系统声音",
-            enabled: true);
-        StyleRecordingToggle(_speakerToggleIcon, _recordSystemAudioChoice, speakerButton);
-        speakerButton.Click += (_, _) =>
-        {
-            _recordSystemAudioChoice = !_recordSystemAudioChoice;
-            speakerButton.ToolTip = _recordSystemAudioChoice ? "已开启：录制系统声音" : "已关闭：不录制系统声音";
-            _speakerToggleIcon.Kind = _recordSystemAudioChoice ? LucideIconKind.Volume2 : LucideIconKind.VolumeX;
-            StyleRecordingToggle(_speakerToggleIcon, _recordSystemAudioChoice, speakerButton);
-        };
-        iconRow.Children.Add(speakerButton);
-
-        _micToggleIcon = RecordingToggleIcon(LucideIconKind.Mic, _recordMicrophoneChoice);
-        var micButton = RecordingOptionButton(
-            _micToggleIcon,
-            "麦克风",
-            _recordMicrophoneChoice ? "已开启：录制麦克风" : "已关闭：不录制麦克风",
-            enabled: true);
-        StyleRecordingToggle(_micToggleIcon, _recordMicrophoneChoice, micButton);
-        micButton.Click += (_, _) =>
-        {
-            _recordMicrophoneChoice = !_recordMicrophoneChoice;
-            micButton.ToolTip = _recordMicrophoneChoice ? "已开启：录制麦克风" : "已关闭：不录制麦克风";
-            StyleRecordingToggle(_micToggleIcon, _recordMicrophoneChoice, micButton);
-        };
-        iconRow.Children.Add(micButton);
-
-        iconRow.Children.Add(RecordingOptionButton(
-            RecordingToggleIcon(LucideIconKind.Video, enabled: false),
-            "摄像头",
-            "摄像头画中画即将推出",
-            enabled: false));
-
-        _cursorToggleIcon = RecordingToggleIcon(LucideIconKind.MousePointer2, _showCursorChoice);
-        var cursorButton = RecordingOptionButton(
-            _cursorToggleIcon,
-            "鼠标设置",
-            _showCursorChoice ? "已开启：录制鼠标光标与点击波纹" : "已关闭：不录制鼠标光标与点击波纹",
-            enabled: true);
-        StyleRecordingToggle(_cursorToggleIcon, _showCursorChoice, cursorButton);
-        cursorButton.Click += (_, _) =>
-        {
-            _showCursorChoice = !_showCursorChoice;
-            cursorButton.ToolTip = _showCursorChoice ? "已开启：录制鼠标光标与点击波纹" : "已关闭：不录制鼠标光标与点击波纹";
-            StyleRecordingToggle(_cursorToggleIcon, _showCursorChoice, cursorButton);
-        };
-        iconRow.Children.Add(cursorButton);
-
-        var content = new StackPanel { Width = 276, Margin = new Thickness(20, 18, 20, 14) };
-        content.Children.Add(startButton);
-        content.Children.Add(formatRow);
-        content.Children.Add(new Border
-        {
-            Height = 1,
-            Background = FindResourceBrush("Brush.Border"),
-            Margin = new Thickness(0, 14, 0, 2)
         });
-        content.Children.Add(iconRow);
+        row.Children.Add(Separator());
 
-        return new Border
+        var speaker = RecordingOption("speaker", "系统声音", out var speakerLabel);
+        var mic = RecordingOption("mic", "麦克风", out _);
+        var ripple = RecordingOption("cursor", "点击波纹", out _);
+        row.Children.Add(speaker);
+        row.Children.Add(mic);
+        row.Children.Add(ripple);
+        row.Children.Add(Separator());
+        var startLabel = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
+        var start = new Button
         {
-            Background = FindResourceBrush("Brush.AuroraCard"),
-            CornerRadius = new CornerRadius(14),
-            BorderBrush = FindResourceBrush("Brush.GlassRim"),
-            BorderThickness = new Thickness(1),
-            Effect = FindResourceEffect("Shadow.Floating"),
-            Child = content
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Children =
+                {
+                    new Ellipse { Width = 8, Height = 8, Fill = Brushes.White, Margin = new Thickness(0, 0, 6, 0) },
+                    startLabel
+                }
+            },
+            Height = 34,
+            Width = 88,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = Brushes.White,
+            Background = FindResourceBrush("Brush.RubySolid"),
+            Style = (Style)Application.Current.FindResource("ToolbarIconButtonDarkStyle")
         };
+        row.Children.Add(start);
+        start.Click += (_, _) => BeginRecordingFromPanel();
+
+        void Refresh(bool instant = false)
+        {
+            bool audioAvailable = _recordingFormat == RecordingExportFormat.Mp4;
+            track.Select(audioAvailable ? mp4 : gif, instant);
+            mp4.Foreground = FindResourceBrush(audioAvailable ? "Brush.Accent" : "Brush.TextSecondary");
+            gif.Foreground = FindResourceBrush(audioAvailable ? "Brush.TextSecondary" : "Brush.Accent");
+            AutomationProperties.SetItemStatus(mp4, audioAvailable ? "已选择" : string.Empty);
+            AutomationProperties.SetItemStatus(gif, audioAvailable ? string.Empty : "已选择");
+            speakerLabel.Text = audioAvailable ? "系统声音" : "无音轨";
+            startLabel.Text = audioAvailable ? "开始录制" : "录制 GIF";
+            AutomationProperties.SetName(start, startLabel.Text);
+            UpdateOption(speaker, audioAvailable && _recordSystemAudioChoice, audioAvailable, instant);
+            UpdateOption(mic, audioAvailable && _recordMicrophoneChoice, audioAvailable, instant);
+            UpdateOption(ripple, _showClickEffectsChoice, true, instant);
+            speaker.ToolTip = audioAvailable ? "录制系统声音" : "GIF 没有音轨";
+            mic.ToolTip = audioAvailable ? "录制麦克风声音" : "GIF 没有音轨";
+        }
+        mp4.Click += (_, _) => { _recordingFormat = RecordingExportFormat.Mp4; Refresh(); };
+        gif.Click += (_, _) => { _recordingFormat = RecordingExportFormat.Gif; Refresh(); };
+        segments.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key is not (Key.Left or Key.Right))
+                return;
+            _recordingFormat = e.Key == Key.Left ? RecordingExportFormat.Mp4 : RecordingExportFormat.Gif;
+            (_recordingFormat == RecordingExportFormat.Mp4 ? mp4 : gif).Focus();
+            Refresh();
+            e.Handled = true;
+        };
+        speaker.Click += (_, _) => { _recordSystemAudioChoice = !_recordSystemAudioChoice; Refresh(); };
+        mic.Click += (_, _) => { _recordMicrophoneChoice = !_recordMicrophoneChoice; Refresh(); };
+        ripple.Click += (_, _) => { _showClickEffectsChoice = !_showClickEffectsChoice; Refresh(); };
+        Refresh(instant: true);
+        // Very narrow displays keep the same single-row arrangement.
+        var fit = new Viewbox { Child = row, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly };
+        var panel = new SquircleGlassBorder { Child = fit, Padding = new Thickness(4), Visibility = Visibility.Collapsed };
+        panel.IsVisibleChanged += (_, e) =>
+        {
+            if ((bool)e.NewValue)
+                GlassMotion.Enter(panel, -10, 0.93, 320, overshootY: 1.5, overshootScale: 1.012);
+        };
+        return panel;
     }
 
-    private static void StyleRecordingToggle(LucideIconElement icon, bool enabled, Button button)
+    private static Button FormatButton(string label) => new()
     {
-        icon.Stroke = enabled
-            ? FindResourceBrush("Brush.Accent")
-            : FindResourceBrush("Brush.TextTertiary");
-        icon.Opacity = 1;
-        button.Background = enabled ? FindResourceBrush("Brush.AccentSubtleDark") : Brushes.Transparent;
-        button.BorderBrush = enabled ? FindResourceBrush("Brush.Accent") : Brushes.Transparent;
-        button.BorderThickness = new Thickness(1);
-    }
-
-    private static LucideIconElement RecordingToggleIcon(LucideIconKind kind, bool enabled) => new()
-    {
-        Kind = kind,
-        Width = 20,
-        Height = 20,
-        StrokeThickness = 1.7,
-        Stroke = enabled
-            ? FindResourceBrush("Brush.Accent")
-            : FindResourceBrush("Brush.TextTertiary"),
-        HorizontalAlignment = HorizontalAlignment.Center
+        Content = label,
+        Width = 46,
+        Height = 28,
+        FontSize = 12,
+        FontWeight = FontWeights.SemiBold,
+        Style = (Style)Application.Current.FindResource("ToolbarIconButtonDarkStyle")
     };
 
-    private static Button RecordingOptionButton(LucideIconElement icon, string label, string toolTip, bool enabled)
+    private static Button RecordingOption(string iconName, string label, out TextBlock text)
     {
-        var text = new TextBlock
-        {
-            Text = label,
-            FontSize = 11,
-            Foreground = FindResourceBrush("Brush.TextSecondary"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 3, 0, 0)
-        };
+        var glyph = AppleVectorIcons.Create(iconName, 17);
+        text = new TextBlock { Text = label, FontSize = 12, Margin = new Thickness(5, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Children = { glyph, text } };
         var button = new Button
         {
-            Content = new StackPanel { Children = { icon, text } },
-            Width = 61,
-            Height = 54,
-            Padding = new Thickness(0),
-            Background = Brushes.Transparent,
-            ToolTip = toolTip,
-            IsEnabled = enabled,
-            Opacity = enabled ? 1 : 0.55
+            Content = content,
+            Width = label.Length > 3 ? 82 : 72,
+            Margin = new Thickness(1, 0, 1, 0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            ToolTip = label,
+            Style = (Style)Application.Current.FindResource("ToolbarIconButtonDarkStyle")
         };
-        button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
+        button.Click += (_, _) => GlassMotion.Pulse(glyph);
+        AutomationProperties.SetName(button, label);
+        ToolTipService.SetShowOnDisabled(button, true);
         return button;
     }
 
-    private static Border RecordingFormatChip(string label, bool isSelected, bool isEnabled, string toolTip)
+    private static void UpdateOption(Button option, bool active, bool available, bool instant)
     {
-        var dot = new System.Windows.Shapes.Ellipse
-        {
-            Width = 8,
-            Height = 8,
-            Fill = isSelected
-                ? FindResourceBrush("Brush.Accent")
-                : Brushes.Transparent,
-            Stroke = isSelected
-                ? null
-                : FindResourceBrush("Brush.TextTertiary"),
-            StrokeThickness = 1.5,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 7, 0)
-        };
-        var text = new TextBlock
-        {
-            Text = label,
-            FontSize = 13,
-            Foreground = isSelected
-                ? FindResourceBrush("Brush.AccentText")
-                : FindResourceBrush("Brush.TextTertiary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        return new Border
-        {
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(12, 6, 14, 6),
-            Margin = new Thickness(0, 0, 10, 0),
-            Background = isSelected
-                ? FindResourceBrush("Brush.AccentSubtleDark")
-                : FindResourceBrush("Brush.SurfaceRaised"),
-            BorderBrush = isSelected
-                ? FindResourceBrush("Brush.Accent")
-                : FindResourceBrush("Brush.Border"),
-            BorderThickness = new Thickness(1),
-            ToolTip = toolTip,
-            Opacity = isEnabled ? 1 : 0.6,
-            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, text } }
-        };
+        var background = (SolidColorBrush)option.Background;
+        var color = active ? ((SolidColorBrush)FindResourceBrush("Brush.AccentSubtle")).Color : Colors.Transparent;
+        var duration = TimeSpan.FromMilliseconds(instant ? 0 : 180);
+        background.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(background.Color, color, duration));
+        option.Foreground = FindResourceBrush(active ? "Brush.Accent" : "Brush.OverlayTextDim");
+        option.IsEnabled = available;
+        AutomationProperties.SetItemStatus(option, available ? active ? "已开启" : "已关闭" : "无音轨");
     }
 
     private static Border Separator() => new()
     {
         Width = 1,
-        Height = 20,
-        Background = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)),
+        Height = 16,
+        Background = FindResourceBrush("Brush.BorderSubtle"),
         Margin = new Thickness(6, 4, 6, 4),
         VerticalAlignment = VerticalAlignment.Center
     };

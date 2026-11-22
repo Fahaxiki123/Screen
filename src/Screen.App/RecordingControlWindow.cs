@@ -1,10 +1,12 @@
+using System;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using Lucide.NET;
@@ -12,357 +14,188 @@ using Screen.Core;
 
 namespace Screen.App;
 
-/// <summary>
-/// Liquid Sapphire Dynamic-Island recording HUD: pulsing ruby beacon, tabular
-/// elapsed timer, live 5-band ice-cyan audio meter, circular pause toggle, and
-/// a translucent ruby glass stop pill that illuminates on hover.
-/// Carries WDA_EXCLUDEFROMCAPTURE so the HUD never leaks into the video.
-/// </summary>
 internal sealed class RecordingControlWindow : Window
 {
     private readonly TextBlock _timer;
     private readonly LucideIconElement _pauseIcon;
+    private readonly Button _pauseButton;
+    private readonly Button _stopButton;
     private readonly Ellipse _beacon;
-    private readonly Ellipse _beaconHalo;
+    private readonly Ellipse _halo;
     private readonly Border[] _meterBars = new Border[5];
-    private readonly StackPanel _meterHost;
     private readonly DispatcherTimer _meterTimer;
-    private Func<float>? _levelProvider;
+    private readonly Func<float>? _levelProvider;
+    private readonly bool _hasAudio;
     private double _smoothedLevel;
-    private int _phaseTick;
+    private int _phase;
     private bool _paused;
 
     public event EventHandler? PauseToggled;
     public event EventHandler? StopRequested;
 
-    public RecordingControlWindow(bool hasAudio = false, Func<float>? levelProvider = null)
+    public RecordingControlWindow(bool hasAudio = false, Func<float>? levelProvider = null,
+        RecordingExportFormat format = RecordingExportFormat.Mp4)
     {
         _levelProvider = levelProvider;
-        Title = "Screen 录屏";
+        _hasAudio = hasAudio && format != RecordingExportFormat.Gif;
+        Title = "Flick 录屏";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
         ShowInTaskbar = false;
+        ShowActivated = false;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
         SizeToContent = SizeToContent.WidthAndHeight;
         UseLayoutRounding = true;
 
-        // Pulsing ruby recording beacon + soft halo ring
-        var beaconHost = new Grid
+        var panel = new StackPanel { Orientation = Orientation.Horizontal };
+        _halo = new Ellipse { Width = 16, Height = 16, Fill = new SolidColorBrush(Color.FromArgb(48, 255, 59, 48)) };
+        _beacon = new Ellipse { Width = 8, Height = 8, Fill = RecordingTheme.Brush("Brush.Danger", "#FF3B30") };
+        panel.Children.Add(new Grid { Width = 20, Margin = new Thickness(3, 0, 4, 0), Children = { _halo, _beacon } });
+        panel.Children.Add(new SquircleGlassBorder
         {
-            Width = 16,
-            Height = 16,
+            CornerRadiusRadius = 4.5,
+            ShadowLevel = 0,
+            ShowRim = false,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(4, 0, 8, 0)
-        };
-        _beaconHalo = new Ellipse
-        {
-            Width = 15,
-            Height = 15,
-            Fill = new SolidColorBrush(Color.FromArgb(0x42, 0xF4, 0x3F, 0x5E)),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        _beacon = new Ellipse
-        {
-            Width = 8.5,
-            Height = 8.5,
-            Fill = RecordingTheme.Brush("Brush.Danger", "#F43F5E"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Effect = new DropShadowEffect
+            GlassBackground = RecordingTheme.Brush("Brush.SurfaceSunken", "#0E0F172A"),
+            Padding = new Thickness(5, 2, 5, 2),
+            Child = new TextBlock
             {
-                Color = Color.FromRgb(0xF4, 0x3F, 0x5E),
-                BlurRadius = 8,
-                ShadowDepth = 0,
-                Opacity = 0.85
+                Text = format == RecordingExportFormat.Gif ? "GIF" : "MP4",
+                FontWeight = FontWeights.SemiBold,
+                FontSize = 10,
+                Foreground = RecordingTheme.Brush("Brush.TextSecondary", "#9E1D1D1F")
             }
-        };
-        beaconHost.Children.Add(_beaconHalo);
-        beaconHost.Children.Add(_beacon);
-        StartBeaconPulse();
-
-        // Tabular elapsed readout (clean MM:SS under 1h, HH:MM:SS beyond)
+        });
         _timer = new TextBlock
         {
             Text = "00:00",
-            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#F4F8FF"),
-            FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI Variable Text"),
-            FontSize = 13.5,
+            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+            FontSize = 13,
             FontWeight = FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0)
+            Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#1D1D1F"),
+            Margin = new Thickness(8, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center
         };
-
-        // 5-band ice-cyan audio meter (visible when system or mic audio is active)
-        _meterHost = new StackPanel
+        Typography.SetNumeralAlignment(_timer, FontNumeralAlignment.Tabular);
+        panel.Children.Add(_timer);
+        var meter = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center,
             Height = 16,
-            Margin = new Thickness(2, 0, 10, 0),
-            Visibility = hasAudio ? Visibility.Visible : Visibility.Collapsed,
-            ToolTip = "实时音频电平"
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+            ToolTip = _hasAudio ? "音频电平" : "无音轨",
+            Visibility = format == RecordingExportFormat.Gif ? Visibility.Collapsed : Visibility.Visible
         };
-        var barBrush = new LinearGradientBrush(
-            Color.FromRgb(0x7D, 0xD3, 0xFC),
-            Color.FromRgb(0x0E, 0xA5, 0xE9),
-            new Point(0, 0),
-            new Point(0, 1));
-        barBrush.Freeze();
-        for (var i = 0; i < _meterBars.Length; i++)
+        for (int i = 0; i < _meterBars.Length; i++)
         {
             var bar = new Border
             {
-                Width = 2.6,
-                Height = 4,
-                CornerRadius = new CornerRadius(1.3),
-                Background = barBrush,
+                Width = 3,
+                Height = 3,
+                Margin = new Thickness(1),
+                CornerRadius = new CornerRadius(1.5),
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(i == 0 ? 0 : 2.4, 0, 0, 0)
+                Background = RecordingTheme.Brush("Brush.Accent", "#007AFF")
             };
             _meterBars[i] = bar;
-            _meterHost.Children.Add(bar);
+            meter.Children.Add(bar);
         }
-
-        // Subtle vertical specular divider
-        var divider = new Border
-        {
-            Width = 1,
-            Height = 16,
-            Margin = new Thickness(0, 0, 8, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new Point(0, 0),
-                EndPoint = new Point(0, 1),
-                GradientStops = new GradientStopCollection
-                {
-                    new(Color.FromArgb(0x05, 0xBA, 0xE6, 0xFD), 0),
-                    new(Color.FromArgb(0x42, 0xBA, 0xE6, 0xFD), 0.5),
-                    new(Color.FromArgb(0x05, 0xBA, 0xE6, 0xFD), 1)
-                }
-            }
-        };
-
-        // Circular pause/resume icon button
+        panel.Children.Add(meter);
         _pauseIcon = new LucideIconElement
         {
             Kind = LucideIconKind.Pause,
-            Width = 14,
-            Height = 14,
-            StrokeThickness = 2,
-            Stroke = RecordingTheme.Brush("Brush.TextPrimary", "#F4F8FF")
+            Width = 16,
+            Height = 16
         };
-        var pauseButton = BuildCircleButton(_pauseIcon, "暂停 / 继续", () => PauseToggled?.Invoke(this, EventArgs.Empty));
-        pauseButton.Margin = new Thickness(0, 0, 6, 0);
+        _pauseButton = new Button { Content = _pauseIcon, Width = 30, Height = 30, ToolTip = "暂停", MinWidth = 30 };
+        _pauseButton.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
+        AutomationProperties.SetName(_pauseButton, "暂停");
+        _pauseButton.Click += (_, _) => PauseToggled?.Invoke(this, EventArgs.Empty);
+        panel.Children.Add(_pauseButton);
 
-        // Translucent ruby glass stop pill (glows crisp crimson on hover, zero muddy pink)
-        var stopSquare = new Border
+        var stopFill = RecordingTheme.Brush("Brush.RubyGlass", "#24FF3B30");
+        _stopButton = new Button
         {
-            Width = 8,
-            Height = 8,
-            CornerRadius = new CornerRadius(2),
-            Background = new SolidColorBrush(Color.FromRgb(0xFB, 0x71, 0x85)),
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 6, 0)
-        };
-        var stopLabel = new TextBlock
-        {
-            Text = "结束录制",
-            Foreground = RecordingTheme.Brush("Brush.RubyText", "#FFE4E8"),
-            FontSize = 12.5,
-            FontWeight = FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var stopRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        stopRow.Children.Add(stopSquare);
-        stopRow.Children.Add(stopLabel);
-
-        var rubyRestFill = RecordingTheme.Brush("Brush.RubyGlass", "#38F43F5E");
-        var rubyHoverFill = RecordingTheme.Brush("Brush.RubySolid", "#F43F5E");
-        var rubyRestBorder = RecordingTheme.Brush("Brush.RubyBorder", "#6BF43F5E");
-        var rubyHoverBorder = new SolidColorBrush(Color.FromRgb(0xFB, 0x71, 0x85));
-        rubyHoverBorder.Freeze();
-
-        var stopButton = new Border
-        {
+            Content = "结束录制",
+            FontSize = 12,
             Height = 30,
-            CornerRadius = new CornerRadius(15),
-            Background = rubyRestFill,
-            BorderBrush = rubyRestBorder,
+            Width = 70,
+            Margin = new Thickness(4, 0, 0, 0),
+            Foreground = RecordingTheme.Brush("Brush.Danger", "#FF3B30"),
+            Background = stopFill,
+            BorderBrush = RecordingTheme.Brush("Brush.RubyBorder", "#57FF3B30"),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(11, 0, 13, 0),
-            Cursor = Cursors.Hand,
-            VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = "结束录制并打开预览 (Esc)",
-            Child = stopRow
+            ToolTip = "结束并打开预览"
         };
-        var stopHoverGlow = new DropShadowEffect
-        {
-            Color = Color.FromRgb(0xF4, 0x3F, 0x5E),
-            BlurRadius = 14,
-            ShadowDepth = 0,
-            Opacity = 0.55
-        };
-        stopButton.MouseEnter += (_, _) =>
-        {
-            stopButton.Background = rubyHoverFill;
-            stopButton.BorderBrush = rubyHoverBorder;
-            stopButton.Effect = stopHoverGlow;
-            stopSquare.Background = Brushes.White;
-            stopLabel.Foreground = Brushes.White;
-        };
-        stopButton.MouseLeave += (_, _) =>
-        {
-            stopButton.Background = rubyRestFill;
-            stopButton.BorderBrush = rubyRestBorder;
-            stopButton.Effect = null;
-            stopSquare.Background = new SolidColorBrush(Color.FromRgb(0xFB, 0x71, 0x85));
-            stopLabel.Foreground = RecordingTheme.Brush("Brush.RubyText", "#FFE4E8");
-        };
-        stopButton.MouseLeftButtonUp += (_, _) => StopRequested?.Invoke(this, EventArgs.Empty);
+        _stopButton.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
+        _stopButton.Click += (_, _) => StopRequested?.Invoke(this, EventArgs.Empty);
+        panel.Children.Add(_stopButton);
 
-        var panel = new StackPanel
+        Content = new SquircleGlassBorder
         {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        panel.Children.Add(beaconHost);
-        panel.Children.Add(_timer);
-        panel.Children.Add(_meterHost);
-        panel.Children.Add(divider);
-        panel.Children.Add(pauseButton);
-        panel.Children.Add(stopButton);
-
-        // Outer Liquid Sapphire capsule with top specular rim
-        var innerSheen = new Border
-        {
-            CornerRadius = new CornerRadius(21),
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            BorderBrush = new LinearGradientBrush(
-                Color.FromArgb(0x50, 0xE0, 0xF2, 0xFE),
-                Color.FromArgb(0x00, 0xE0, 0xF2, 0xFE),
-                new Point(0, 0),
-                new Point(1, 0)),
-            Padding = new Thickness(10, 5, 6, 5),
+            CornerRadiusRadius = 10.5,
+            Margin = new Thickness(12),
+            Padding = new Thickness(4),
+            GlassBackground = RecordingTheme.Brush("Brush.ChromeGradient", "#D9FFFFFF"),
             Child = panel
         };
-
-        Content = new Border
+        _meterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
+        _meterTimer.Tick += (_, _) => TickMeter();
+        Loaded += (_, _) =>
         {
-            CornerRadius = new CornerRadius(22),
-            Background = RecordingTheme.Brush("Brush.ChromeGradient", "#EB111F38"),
-            BorderBrush = RecordingTheme.Brush("Brush.GlassRim", "#4594C5FF"),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(18, 12, 18, 22),
-            Effect = new DropShadowEffect
-            {
-                BlurRadius = 28,
-                Color = Color.FromRgb(0x02, 0x06, 0x10),
-                Opacity = 0.62,
-                ShadowDepth = 8
-            },
-            Child = innerSheen
+            SetPaused(_paused);
         };
-
-        _meterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(65) };
-        _meterTimer.Tick += (_, _) => TickAudioMeter();
-        if (hasAudio)
+        Closed += (_, _) =>
         {
-            _meterTimer.Start();
-        }
-        Closed += (_, _) => _meterTimer.Stop();
-
+            _meterTimer.Stop();
+            _halo.BeginAnimation(OpacityProperty, null);
+            _beacon.BeginAnimation(OpacityProperty, null);
+        };
         SourceInitialized += (_, _) =>
         {
             var handle = new WindowInteropHelper(this).Handle;
             var style = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlExStyle).ToInt64();
-            NativeMethods.SetWindowLongPtr(
-                handle,
-                NativeMethods.GwlExStyle,
-                (nint)(style | NativeMethods.WsExNoActivate));
+            NativeMethods.SetWindowLongPtr(handle, NativeMethods.GwlExStyle, (nint)(style | NativeMethods.WsExNoActivate));
             NativeMethods.SetWindowDisplayAffinity(handle, NativeMethods.WdaExcludeFromCapture);
         };
     }
 
-    private static Border BuildCircleButton(FrameworkElement icon, string toolTip, Action onClick)
+    private void TickMeter()
     {
-        var restBg = new SolidColorBrush(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF));
-        var hoverBg = new SolidColorBrush(Color.FromArgb(0x30, 0x7D, 0xD3, 0xFC));
-        restBg.Freeze();
-        hoverBg.Freeze();
-
-        var pill = new Border
+        double level = Math.Clamp(Math.Sqrt(Math.Max(0f, _levelProvider?.Invoke() ?? 0f)) * 1.45, 0, 1);
+        _smoothedLevel += (level - _smoothedLevel) * (level > _smoothedLevel ? 0.65 : 0.38);
+        _phase++;
+        for (int i = 0; i < _meterBars.Length; i++)
         {
-            Width = 30,
-            Height = 30,
-            CornerRadius = new CornerRadius(15),
-            Background = restBg,
-            Cursor = Cursors.Hand,
-            VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = toolTip,
-            Child = new Grid { Children = { icon } }
-        };
-        icon.HorizontalAlignment = HorizontalAlignment.Center;
-        icon.VerticalAlignment = VerticalAlignment.Center;
-        pill.MouseEnter += (_, _) => pill.Background = hoverBg;
-        pill.MouseLeave += (_, _) => pill.Background = restBg;
-        pill.MouseLeftButtonUp += (_, _) => onClick();
-        return pill;
+            double band = 0.70 + 0.30 * Math.Sin(_phase * 0.9 + i * 1.3);
+            AnimateBar(_meterBars[i], 3 + 12 * _smoothedLevel * band);
+        }
     }
 
-    private void StartBeaconPulse()
+    private static void AnimateBar(Border bar, double height) =>
+        bar.BeginAnimation(HeightProperty, new DoubleAnimation(height, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseOut }
+        });
+
+    public void ShowSavingGif()
     {
-        var pulse = new DoubleAnimation(1.0, 0.32, TimeSpan.FromMilliseconds(900))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-        };
-        _beaconHalo.BeginAnimation(OpacityProperty, pulse);
-    }
-
-    private void TickAudioMeter()
-    {
-        if (_paused)
-        {
-            for (var i = 0; i < _meterBars.Length; i++)
-            {
-                _meterBars[i].Height = 3;
-                _meterBars[i].Opacity = 0.35;
-            }
-            return;
-        }
-
-        _phaseTick++;
-        var raw = _levelProvider?.Invoke() ?? 0f;
-        // Perceptual boost so ordinary speech/system audio visibly dances
-        var target = Math.Clamp(Math.Sqrt(raw) * 1.45, 0.0, 1.0);
-        _smoothedLevel = target > _smoothedLevel
-            ? _smoothedLevel * 0.35 + target * 0.65
-            : _smoothedLevel * 0.72 + target * 0.28;
-
-        double[] weights = [0.58, 0.92, 0.74, 1.0, 0.64];
-        for (var i = 0; i < _meterBars.Length; i++)
-        {
-            var ripple = 0.85 + 0.15 * Math.Sin(_phaseTick * 0.65 + i * 1.15);
-            var normalized = _smoothedLevel * weights[i] * ripple;
-            _meterBars[i].Height = Math.Clamp(3.2 + normalized * 12.5, 3.2, 15.5);
-            _meterBars[i].Opacity = _smoothedLevel > 0.02 ? 0.95 : 0.45;
-        }
+        SetPaused(true);
+        _pauseButton.Visibility = Visibility.Collapsed;
+        _stopButton.Content = "正在保存 GIF…";
+        _stopButton.Width = 88;
+        _stopButton.IsEnabled = false;
     }
 
     public void UpdateTimer(double elapsedSeconds)
     {
         var elapsed = TimeSpan.FromSeconds(Math.Max(0, elapsedSeconds));
         _timer.Text = elapsed.TotalHours >= 1
-            ? elapsed.ToString(@"hh\:mm\:ss")
+            ? $"{(long)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}"
             : elapsed.ToString(@"mm\:ss");
     }
 
@@ -370,26 +203,31 @@ internal sealed class RecordingControlWindow : Window
     {
         _paused = paused;
         _pauseIcon.Kind = paused ? LucideIconKind.Play : LucideIconKind.Pause;
+        var label = paused ? "继续" : "暂停";
+        _pauseButton.ToolTip = label;
+        AutomationProperties.SetName(_pauseButton, label);
+        _beacon.Fill = paused ? RecordingTheme.Brush("Brush.Warning", "#FF9F0A") : RecordingTheme.Brush("Brush.Danger", "#FF3B30");
+        _halo.Visibility = paused ? Visibility.Hidden : Visibility.Visible;
+        _halo.BeginAnimation(OpacityProperty, paused ? null : new DoubleAnimation(0.35, 1, TimeSpan.FromMilliseconds(900))
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        });
+        _beacon.BeginAnimation(OpacityProperty, paused ? null : new DoubleAnimation(0.72, 1, TimeSpan.FromMilliseconds(900))
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever
+        });
         if (paused)
         {
-            _beaconHalo.BeginAnimation(OpacityProperty, null);
-            _beaconHalo.Fill = new SolidColorBrush(Color.FromArgb(0x38, 0xFB, 0xBF, 0x24));
-            _beacon.Fill = RecordingTheme.Brush("Brush.Warning", "#FBBF24");
-            _beacon.Effect = null;
+            _smoothedLevel = 0;
+            _meterTimer.Stop();
+            foreach (var bar in _meterBars)
+                AnimateBar(bar, 3);
         }
-        else
-        {
-            _beaconHalo.Fill = new SolidColorBrush(Color.FromArgb(0x42, 0xF4, 0x3F, 0x5E));
-            _beacon.Fill = RecordingTheme.Brush("Brush.Danger", "#F43F5E");
-            _beacon.Effect = new DropShadowEffect
-            {
-                Color = Color.FromRgb(0xF4, 0x3F, 0x5E),
-                BlurRadius = 8,
-                ShadowDepth = 0,
-                Opacity = 0.85
-            };
-            StartBeaconPulse();
-        }
+        else if (_hasAudio && IsLoaded)
+            _meterTimer.Start();
     }
 
     /// <summary>Centers the capsule above or below the recording region (DPI-aware).</summary>

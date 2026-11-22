@@ -4,7 +4,7 @@
   <Style TargetType="Window">
     <Setter Property="Background" Value="{DynamicResource Brush.WindowBackdrop}" />
     <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
-    <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI" />
+    <Setter Property="FontFamily" Value="{DynamicResource Font.UI}" />
     <Setter Property="FontSize" Value="14" />
   </Style>
   <Style TargetType="TextBox">
@@ -17,6 +17,7 @@
     <Setter Property="Padding" Value="10,7" />
   </Style>
   <Style TargetType="ToolTip">
+    <Setter Property="FontFamily" Value="{DynamicResource Font.UI}" />
     <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
     <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
@@ -25,15 +26,15 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ToolTip">
-          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="10,7">
+          <local:SquircleGlassBorder GlassBackground="{DynamicResource Brush.ChromeGradient}" CornerRadiusRadius="8" Padding="10,7" ShadowLevel="0">
             <ContentPresenter />
-          </Border>
+          </local:SquircleGlassBorder>
         </ControlTemplate>
       </Setter.Value>
     </Setter>
   </Style>
   <Style TargetType="ContextMenu">
-    <Setter Property="FontFamily" Value="Segoe UI Variable Text, Microsoft YaHei UI" />
+    <Setter Property="FontFamily" Value="{DynamicResource Font.UI}" />
     <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
     <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
@@ -41,11 +42,11 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ContextMenu">
-          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="5" MinWidth="190">
+          <local:SquircleGlassBorder GlassBackground="{DynamicResource Brush.ChromeGradient}" CornerRadiusRadius="10.5" Padding="4" MinWidth="190" ShadowLevel="0">
             <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="560" CanContentScroll="True">
               <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
             </ScrollViewer>
-          </Border>
+          </local:SquircleGlassBorder>
         </ControlTemplate>
       </Setter.Value>
     </Setter>
@@ -58,7 +59,7 @@
       <Setter.Value>
         <ControlTemplate TargetType="MenuItem">
           <Grid>
-            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+            <local:SquircleGlassBorder x:Name="Chrome" GlassBackground="{TemplateBinding Background}" CornerRadiusRadius="6.5" ShowRim="False" ShadowLevel="0" Padding="{TemplateBinding Padding}">
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="24" />
@@ -67,23 +68,25 @@
                   <ColumnDefinition Width="16" />
                 </Grid.ColumnDefinitions>
                 <ContentPresenter x:Name="IconHost" ContentSource="Icon" VerticalAlignment="Center" Width="16" Height="16" />
-                <local:LucideIconElement x:Name="CheckMark" Kind="Check" Stroke="{DynamicResource Brush.AccentText}" Width="16" Height="16" Visibility="Collapsed" />
+                <Viewbox x:Name="CheckMark" Width="16" Height="16" Visibility="Collapsed">
+                  <Canvas Width="24" Height="24"><Path Data="m4.5 12.75 6 6 9-13.5" Stroke="{DynamicResource Brush.Accent}" StrokeThickness="2.1" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Canvas>
+                </Viewbox>
                 <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="12" Margin="20,0,0,0" VerticalAlignment="Center" />
-                <local:LucideIconElement x:Name="SubmenuArrow" Grid.Column="3" Kind="ChevronRight" Stroke="{DynamicResource Brush.TextSecondary}" Width="14" Height="14" Visibility="Collapsed" />
+                <local:LucideIconElement x:Name="SubmenuArrow" Grid.Column="3" Kind="ChevronRight" Width="14" Height="14" Visibility="Collapsed" />
               </Grid>
-            </Border>
+            </local:SquircleGlassBorder>
             <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="3" IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}" AllowsTransparency="True" Focusable="False">
-              <Border Background="{DynamicResource Brush.SurfaceRaised}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="10" Padding="5" MinWidth="180">
+              <local:SquircleGlassBorder GlassBackground="{DynamicResource Brush.ChromeGradient}" CornerRadiusRadius="10.5" Padding="4" MinWidth="180" ShadowLevel="0">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="560" CanContentScroll="True">
                   <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
                 </ScrollViewer>
-              </Border>
+              </local:SquircleGlassBorder>
             </Popup>
           </Grid>
           <ControlTemplate.Triggers>
-            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
-            <Trigger Property="IsSubmenuOpen" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
+            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="GlassBackground" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
+            <Trigger Property="IsSubmenuOpen" Value="True"><Setter TargetName="Chrome" Property="GlassBackground" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
             <Trigger Property="HasItems" Value="True"><Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible" /></Trigger>
             <Trigger Property="IsChecked" Value="True">
               <Setter TargetName="IconHost" Property="Visibility" Value="Collapsed" />
@@ -98,7 +101,7 @@
   <Style TargetType="Separator">
     <Setter Property="Margin" Value="8,4" />
     <Setter Property="Template">
-      <Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="{DynamicResource Brush.Border}" /></ControlTemplate></Setter.Value>
+      <Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="{DynamicResource Brush.BorderSubtle}" /></ControlTemplate></Setter.Value>
     </Setter>
   </Style>
   <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator" BasedOn="{StaticResource {x:Type Separator}}" />
@@ -108,10 +111,10 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ComboBoxItem">
-          <Border x:Name="Chrome" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}"><ContentPresenter /></Border>
+          <local:SquircleGlassBorder x:Name="Chrome" GlassBackground="Transparent" CornerRadiusRadius="6.5" ShowRim="False" ShadowLevel="0" Padding="{TemplateBinding Padding}"><ContentPresenter /></local:SquircleGlassBorder>
           <ControlTemplate.Triggers>
-            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
-            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.AccentSubtle}" /><Setter Property="Foreground" Value="{DynamicResource Brush.AccentText}" /></Trigger>
+            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="GlassBackground" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger>
+            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Chrome" Property="GlassBackground" Value="{DynamicResource Brush.AccentSubtle}" /><Setter Property="Foreground" Value="{DynamicResource Brush.AccentText}" /></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
@@ -119,36 +122,181 @@
   </Style>
   <Style TargetType="ComboBox">
     <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
-    <Setter Property="Background" Value="{DynamicResource Brush.SurfaceRaised}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-    <Setter Property="FontSize" Value="14" />
-    <Setter Property="Padding" Value="10,5" />
-    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Background" Value="#F3F5F8" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="10,4,28,4" />
+    <Setter Property="MinHeight" Value="30" />
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ComboBox">
           <Grid>
-            <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}">
+            <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" Background="{TemplateBinding Background}">
               <ToggleButton.Template>
                 <ControlTemplate TargetType="ToggleButton">
-                  <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" />
-                  <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" /></Trigger></ControlTemplate.Triggers>
+                  <local:SquircleGlassBorder x:Name="Chrome" GlassBackground="{TemplateBinding Background}" CornerRadiusRadius="8.5" ShowRim="False" ShadowLevel="0" RenderTransformOrigin="0.5,0.5">
+                    <local:SquircleGlassBorder.RenderTransform><ScaleTransform /></local:SquircleGlassBorder.RenderTransform>
+                  </local:SquircleGlassBorder>
+                  <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="GlassBackground" Value="#EAEFF5" /></Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                      <Setter TargetName="Chrome" Property="GlassBackground" Value="#E4EAF2" />
+                      <Setter TargetName="Chrome" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.988" ScaleY="0.988" /></Setter.Value></Setter>
+                    </Trigger>
+                  </ControlTemplate.Triggers>
                 </ControlTemplate>
               </ToggleButton.Template>
             </ToggleButton>
-            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="10,4,28,4" VerticalAlignment="Center" IsHitTestVisible="False" />
-            <local:LucideIconElement Kind="ChevronDown" Stroke="{DynamicResource Brush.TextSecondary}" Width="14" Height="14" HorizontalAlignment="Right" Margin="0,0,9,0" IsHitTestVisible="False" />
+            <ContentPresenter x:Name="Selection" Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource TemplatedParent}, NotifyOnTargetUpdated=True}"
+                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                              Margin="{TemplateBinding Padding}" VerticalAlignment="Center" IsHitTestVisible="False">
+              <ContentPresenter.RenderTransform><TranslateTransform /></ContentPresenter.RenderTransform>
+              <ContentPresenter.Triggers>
+                <EventTrigger RoutedEvent="Binding.TargetUpdated">
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.38" To="1" Duration="0:0:0.17" />
+                      <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" From="2" To="0" Duration="0:0:0.17">
+                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </EventTrigger>
+              </ContentPresenter.Triggers>
+            </ContentPresenter>
+            <TextBox x:Name="PART_EditableTextBox" Background="Transparent" BorderThickness="0" Margin="{TemplateBinding Padding}" Padding="0"
+                     VerticalContentAlignment="Center" Foreground="{TemplateBinding Foreground}" IsReadOnly="{TemplateBinding IsReadOnly}" Visibility="Collapsed" />
+            <local:LucideIconElement Width="16" Height="16" Kind="ChevronsUpDown" Foreground="{DynamicResource Brush.TextSecondary}"
+                  HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" IsHitTestVisible="False" />
             <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False">
-              <Border Background="{DynamicResource Brush.SurfaceRaised}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="7" Padding="4" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
-                <ScrollViewer MaxHeight="320" CanContentScroll="True" VerticalScrollBarVisibility="Auto"><ItemsPresenter /></ScrollViewer>
-              </Border>
+              <local:SquircleGlassBorder GlassBackground="{DynamicResource Brush.AuroraCard}" CornerRadiusRadius="10.5" ShadowLevel="0" Padding="4" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+                <ScrollViewer MaxHeight="{TemplateBinding MaxDropDownHeight}" CanContentScroll="True" VerticalScrollBarVisibility="Auto"><ItemsPresenter /></ScrollViewer>
+              </local:SquircleGlassBorder>
             </Popup>
           </Grid>
-          <ControlTemplate.Triggers><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger></ControlTemplate.Triggers>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsEditable" Value="True">
+              <Setter TargetName="Selection" Property="Visibility" Value="Collapsed" />
+              <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+          </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
     </Setter>
   </Style>
+  <Style x:Key="AppleSwitchStyle" TargetType="ToggleButton">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="22" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToggleButton">
+          <Grid Width="40" Height="22">
+            <Border Background="#1F0F172A" CornerRadius="11" />
+            <Border x:Name="ActiveTrack" Background="{DynamicResource Brush.Accent}" CornerRadius="11" Opacity="0" />
+            <Grid x:Name="KnobTravel" UseLayoutRounding="False">
+              <Grid.RenderTransform><TranslateTransform /></Grid.RenderTransform>
+              <Border x:Name="Knob" Width="18" Height="18" Margin="2,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center" Background="White" CornerRadius="9">
+                <Border.RenderTransform><TranslateTransform /></Border.RenderTransform>
+                <Border.Effect><DropShadowEffect BlurRadius="3" ShadowDepth="1" Direction="270" Opacity="0.18" Color="#0F172A" /></Border.Effect>
+              </Border>
+            </Grid>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard><Storyboard>
+                  <DoubleAnimationUsingKeyFrames Storyboard.TargetName="KnobTravel" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)">
+                    <SplineDoubleKeyFrame KeyTime="0:0:0.2" Value="18" KeySpline="0.22,1.04 0.36,1" />
+                  </DoubleAnimationUsingKeyFrames>
+                  <DoubleAnimation Storyboard.TargetName="ActiveTrack" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2" />
+                </Storyboard></BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard><Storyboard>
+                  <DoubleAnimationUsingKeyFrames Storyboard.TargetName="KnobTravel" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)">
+                    <SplineDoubleKeyFrame KeyTime="0:0:0.2" Value="0" KeySpline="0.22,1.04 0.36,1" />
+                  </DoubleAnimationUsingKeyFrames>
+                  <DoubleAnimation Storyboard.TargetName="ActiveTrack" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2" />
+                </Storyboard></BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="Width" To="19.5" Duration="0:0:0.09" /></Storyboard></BeginStoryboard></Trigger.EnterActions>
+              <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="Width" To="18" Duration="0:0:0.12" /></Storyboard></BeginStoryboard></Trigger.ExitActions>
+            </Trigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="IsChecked" Value="True" />
+                <Condition Property="IsPressed" Value="True" />
+              </MultiTrigger.Conditions>
+              <MultiTrigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="-1.5" Duration="0:0:0.09" /></Storyboard></BeginStoryboard></MultiTrigger.EnterActions>
+              <MultiTrigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="Knob" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="0" Duration="0:0:0.12" /></Storyboard></BeginStoryboard></MultiTrigger.ExitActions>
+            </MultiTrigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="SliderRailButton" TargetType="RepeatButton">
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="IsTabStop" Value="False" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RepeatButton">
+          <Grid Background="Transparent">
+            <Border x:Name="Rail" Height="4" CornerRadius="2" Background="{TemplateBinding Background}" VerticalAlignment="Center" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <DataTrigger Binding="{Binding Orientation, RelativeSource={RelativeSource AncestorType=Slider}}" Value="Vertical">
+              <Setter TargetName="Rail" Property="Width" Value="4" />
+              <Setter TargetName="Rail" Property="Height" Value="Auto" />
+              <Setter TargetName="Rail" Property="HorizontalAlignment" Value="Center" />
+              <Setter TargetName="Rail" Property="VerticalAlignment" Value="Stretch" />
+            </DataTrigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType="Slider">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+    <Setter Property="Background" Value="{DynamicResource Brush.SurfaceSunken}" />
+    <Setter Property="MinHeight" Value="20" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Slider">
+          <Grid Background="Transparent">
+            <Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}" IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
+              <Track.DecreaseRepeatButton>
+                <RepeatButton Style="{StaticResource SliderRailButton}" Background="{TemplateBinding Foreground}" Command="Slider.DecreaseLarge" />
+              </Track.DecreaseRepeatButton>
+              <Track.IncreaseRepeatButton>
+                <RepeatButton Style="{StaticResource SliderRailButton}" Background="{TemplateBinding Background}" Command="Slider.IncreaseLarge" />
+              </Track.IncreaseRepeatButton>
+              <Track.Thumb>
+                <Thumb Width="14" Height="14" Cursor="Hand" Focusable="False">
+                  <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                      <Ellipse Fill="White" Width="14" Height="14">
+                        <Ellipse.Effect><DropShadowEffect BlurRadius="4" ShadowDepth="1" Direction="270" Opacity="0.25" Color="#0F172A" /></Ellipse.Effect>
+                      </Ellipse>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+            </Track>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style TargetType="ScrollBar">
     <Setter Property="Width" Value="6" />
     <Setter Property="Background" Value="Transparent" />
@@ -163,7 +311,20 @@
               <RepeatButton x:Name="Increase" Command="ScrollBar.PageDownCommand" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template></RepeatButton>
             </Track.IncreaseRepeatButton>
             <Track.Thumb>
-              <Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border x:Name="Thumb" Background="#4594C5FF" CornerRadius="3" Margin="1,2" /><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Thumb" Property="Background" Value="#7594C5FF" /></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb>
+              <Thumb>
+                <Thumb.Template>
+                  <ControlTemplate TargetType="Thumb">
+                    <Border x:Name="Grip" Background="#381D1D1F" CornerRadius="3" Margin="1,2" />
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="#661D1D1F" /></Trigger>
+                      <Trigger Property="IsDragging" Value="True"><Setter TargetName="Grip" Property="Background" Value="{DynamicResource Brush.Accent}" /></Trigger>
+                      <DataTrigger Binding="{Binding Orientation, RelativeSource={RelativeSource AncestorType=ScrollBar}}" Value="Horizontal">
+                        <Setter TargetName="Grip" Property="Margin" Value="2,1" />
+                      </DataTrigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </Thumb.Template>
+              </Thumb>
             </Track.Thumb>
           </Track>
           <ControlTemplate.Triggers>

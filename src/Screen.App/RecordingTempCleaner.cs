@@ -26,7 +26,8 @@ internal static class RecordingTempCleaner
             var name = Path.GetFileName(file);
             var scratch = name.Equals("preview-audio.log", StringComparison.OrdinalIgnoreCase)
                           || (name.StartsWith("trim-", StringComparison.OrdinalIgnoreCase)
-                              && name.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase));
+                              && (name.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)
+                                  || name.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)));
             if (scratch && utcNow - File.GetLastWriteTimeUtc(file) > ScratchRetention && TryDelete(() => File.Delete(file)))
             {
                 removed++;

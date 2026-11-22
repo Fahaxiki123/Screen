@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Xml.Linq;
 using Lucide.NET;
@@ -21,17 +22,9 @@ internal sealed class LucideIconElement : FrameworkElement
         typeof(LucideIconElement),
         new FrameworkPropertyMetadata(LucideIconKind.Square, FrameworkPropertyMetadataOptions.AffectsRender));
 
-    public static readonly DependencyProperty StrokeProperty = DependencyProperty.Register(
-        nameof(Stroke),
-        typeof(Brush),
+    public static readonly DependencyProperty ForegroundProperty = TextElement.ForegroundProperty.AddOwner(
         typeof(LucideIconElement),
-        new FrameworkPropertyMetadata(Brushes.Black, FrameworkPropertyMetadataOptions.AffectsRender));
-
-    public static readonly DependencyProperty StrokeThicknessProperty = DependencyProperty.Register(
-        nameof(StrokeThickness),
-        typeof(double),
-        typeof(LucideIconElement),
-        new FrameworkPropertyMetadata(1.75d, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(Brushes.Black, FrameworkPropertyMetadataOptions.Inherits | FrameworkPropertyMetadataOptions.AffectsRender));
 
     public LucideIconKind Kind
     {
@@ -39,16 +32,10 @@ internal sealed class LucideIconElement : FrameworkElement
         set => SetValue(KindProperty, value);
     }
 
-    public Brush Stroke
+    public Brush Foreground
     {
-        get => (Brush)GetValue(StrokeProperty);
-        set => SetValue(StrokeProperty, value);
-    }
-
-    public double StrokeThickness
-    {
-        get => (double)GetValue(StrokeThicknessProperty);
-        set => SetValue(StrokeThicknessProperty, value);
+        get => (Brush)GetValue(ForegroundProperty);
+        set => SetValue(ForegroundProperty, value);
     }
 
     protected override Size MeasureOverride(Size availableSize) => new(
@@ -66,7 +53,7 @@ internal sealed class LucideIconElement : FrameworkElement
         var scale = Math.Min(ActualWidth, ActualHeight) / 24.0;
         var offsetX = (ActualWidth - 24 * scale) / 2;
         var offsetY = (ActualHeight - 24 * scale) / 2;
-        var pen = new Pen(Stroke, StrokeThickness / scale)
+        var pen = new Pen(Foreground, Kind == LucideIconKind.Check ? AppleVectorIcons.CheckStrokeWidth : AppleVectorIcons.StrokeWidth)
         {
             StartLineCap = PenLineCap.Round,
             EndLineCap = PenLineCap.Round,
@@ -84,6 +71,27 @@ internal sealed class LucideIconElement : FrameworkElement
 
     private static IReadOnlyList<IconPrimitive> ParseIcon(LucideIconKind kind)
     {
+        var shared = kind switch
+        {
+            LucideIconKind.Settings2 => "settings",
+            LucideIconKind.ScanLine or LucideIconKind.ScanText => "ocr",
+            LucideIconKind.Pin => "pin",
+            LucideIconKind.Video => "video",
+            LucideIconKind.MousePointer2 => "cursor",
+            LucideIconKind.Copy => "copy",
+            LucideIconKind.Pencil => "pen",
+            LucideIconKind.Languages => "translate",
+            LucideIconKind.Download => "save",
+            LucideIconKind.Check => "check",
+            LucideIconKind.Volume2 => "speaker",
+            LucideIconKind.Mic => "mic",
+            LucideIconKind.Minus => "minus",
+            LucideIconKind.X => "close",
+            _ => null
+        };
+        if (shared is not null)
+            return [new GeometryPrimitive(AppleVectorIcons.Outline(shared))];
+
         var svg = Lucide.NET.Lucide.GetSvg(kind, new LucideOptions { IncludeXmlns = false });
         var document = XDocument.Parse(svg);
         var primitives = new List<IconPrimitive>();

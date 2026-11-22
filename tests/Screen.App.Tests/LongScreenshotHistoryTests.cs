@@ -14,6 +14,37 @@ namespace Screen.App.Tests;
 public sealed class LongScreenshotHistoryTests
 {
     [TestMethod]
+    public void OneToOneZoomUsesOriginalPixelsAfterWorkingImageDownsampling() => OnSta(() =>
+    {
+        const int width = 33, height = 16001;
+        var editor = CreateEditor(width, height);
+        try
+        {
+            Invoke(editor, "SetZoom", 1d, false);
+            var surface = Surface(editor);
+            var dpi = VisualTreeHelper.GetDpi(editor);
+            Assert.AreEqual(2, Field<int>(editor, "_currentFactor"));
+            Assert.AreEqual(width, surface.Width * dpi.DpiScaleX, 0.000001);
+            Assert.AreEqual(height, surface.Height * dpi.DpiScaleY, 0.000001);
+        }
+        finally { editor.Close(); }
+    });
+
+    [TestMethod]
+    public void CancellingCropRestoresTheSelectionTool() => OnSta(() =>
+    {
+        var editor = CreateEditor();
+        try
+        {
+            Invoke(editor, "SelectTool", CaptureTool.Select);
+            Invoke(editor, "BeginCrop");
+            Invoke(editor, "CancelCrop");
+            Assert.AreEqual(CaptureTool.Select, Surface(editor).Tool);
+        }
+        finally { editor.Close(); }
+    });
+
+    [TestMethod]
     public void CropAndAnnotationsUndoAndRedoInTheirOriginalOrder() => OnSta(() =>
     {
         var editor = CreateEditor();
@@ -171,17 +202,17 @@ public sealed class LongScreenshotHistoryTests
         new AnnotationEditingState(new AnnotationSnapshot([], 1), AnnotationHistoryState.Empty, null),
         CaptureTool.Rectangle, 0xFFFF0000, 4, 1, false, 0, 0);
 
-    private static LongScreenshotEditorWindow CreateEditor()
+    private static LongScreenshotEditorWindow CreateEditor(int width = 160, int height = 120)
     {
         var resources = new ResourceDictionary();
         foreach (var key in new[] { "Brush.Accent", "Brush.OverlayBase", "Brush.OverlayBorder", "Brush.OverlayText", "Brush.OverlayTextDim", "Brush.OverlayIcon", "Brush.Neutral500" })
         {
             resources[key] = Brushes.Black;
         }
-        var pixels = new byte[160 * 120 * 4];
+        var pixels = new byte[width * height * 4];
         for (var index = 3; index < pixels.Length; index += 4)
             pixels[index] = 255;
-        return new LongScreenshotEditorWindow(new PixelBuffer(pixels, 160, 120, 160 * 4), resources);
+        return new LongScreenshotEditorWindow(new PixelBuffer(pixels, width, height, width * 4), resources);
     }
 
     private static void Crop(LongScreenshotEditorWindow editor, PixelRect region)

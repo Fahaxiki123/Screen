@@ -17,13 +17,16 @@ internal enum CaptureEntryMode
     Recording
 }
 
+internal enum RecordingExportFormat { Mp4, Gif }
+
 /// <summary>Region + options confirmed on the recording setup panel.</summary>
 internal sealed record RecordingSelection(
     PixelRect Region,
     bool ShowCursor,
     bool ShowClickEffects,
     bool RecordSystemAudio,
-    bool RecordMicrophone);
+    bool RecordMicrophone,
+    RecordingExportFormat Format = RecordingExportFormat.Mp4);
 
 /// <summary>
 /// Main structure for CaptureOverlayWindow (fields, constructor, initialization).
@@ -37,30 +40,31 @@ internal sealed partial class CaptureOverlayWindow : Window
     private readonly CredentialService _credentialService;
     private readonly CaptureSurface _surface;
     private readonly Canvas _root;
-    private readonly Border _modeBar;
-    private readonly Border _toolbar;
-    private readonly Border _stylePanel;
+    private readonly SquircleGlassBorder _modeBar;
+    private readonly SquircleGlassBorder _toolbar;
+    private readonly SquircleGlassBorder _stylePanel;
     private readonly PinWindowManager _pinManager;
     private readonly JsonSettingsStore _settingsStore;
     private readonly OcrCard _ocrCard;
     private readonly TranslationCard _translationCard;
     private readonly Popup _translationPopup;
     private readonly Button _translationButton;
-    private readonly Button _translationDropDownButton;
+    private SpringTrack _modeTrack = null!;
+    private SpringTrack _drawingTrack = null!;
+    private readonly List<Button> _toolbarButtons = [];
     private readonly Dictionary<CaptureTool, Button> _toolButtons = [];
     private readonly Dictionary<CaptureEntryMode, Button> _modeButtons = [];
-    private readonly bool _recordingMode;
-    private Border? _recordingPanel;
-    private LucideIconElement? _cursorToggleIcon;
-    private LucideIconElement? _speakerToggleIcon;
-    private LucideIconElement? _micToggleIcon;
+    private bool _recordingMode;
+    private SquircleGlassBorder? _recordingPanel;
+    private RecordingExportFormat _recordingFormat;
     private bool _showCursorChoice = true;
+    private bool _showClickEffectsChoice;
     private bool _recordSystemAudioChoice;
     private bool _recordMicrophoneChoice;
     private CaptureEntryMode _entryMode = CaptureEntryMode.Screenshot;
     private CancellationTokenSource? _translationOperation;
     private ScrollCaptureController? _scrollCapture;
-    private uint _color = 0xFFFF4D4F;
+    private uint _color = 0xFFFF3B30;
     private double _thickness = 4;
     private double _fontSize = 16;
     private double _numberSize = 24;
@@ -96,7 +100,7 @@ internal sealed partial class CaptureOverlayWindow : Window
         {
             _entryMode = CaptureEntryMode.Recording;
         }
-        Title = recordingMode ? "Screen 录屏" : "Screen 截图";
+        Title = recordingMode ? "Flick 录屏" : "Flick 截图";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
@@ -126,10 +130,12 @@ internal sealed partial class CaptureOverlayWindow : Window
             _recordingPanel.Visibility = Visibility.Collapsed;
             _root.Children.Add(_recordingPanel);
         }
-        _toolbar = BuildToolbar(out _translationButton, out _translationDropDownButton);
+        _toolbar = BuildToolbar(out _translationButton);
         _root.Children.Add(_toolbar);
         _stylePanel = BuildStylePanel();
         _root.Children.Add(_stylePanel);
+        // Switching tools can change the second row's measured height after the click handler.
+        _stylePanel.SizeChanged += (_, _) => PositionFloatingPanels();
         Panel.SetZIndex(_toolbar, 20);
         Panel.SetZIndex(_stylePanel, 21);
 
@@ -157,6 +163,8 @@ internal sealed partial class CaptureOverlayWindow : Window
         _ocrCard.IsVisibleChanged += (_, _) => PositionFloatingPanels();
         _translationPopup = BuildTranslationPopup();
         InitializeInPlaceTranslation();
+        _ocrCard.SizeChanged += (_, _) => PositionFloatingPanels();
+        _translationCard.SizeChanged += (_, _) => PositionFloatingPanels();
         _surface.SelectedAnnotationChanged += (_, _) => SyncSelectedStyle();
         _ocrCard.RecognitionStateChanged += (_, _) => UpdateProcessingIndicator();
         _ocrCard.IsVisibleChanged += (_, _) =>

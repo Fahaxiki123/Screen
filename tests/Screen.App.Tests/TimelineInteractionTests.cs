@@ -13,6 +13,29 @@ public sealed class TimelineInteractionTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
+    public void TrimmingPastThePlayheadRequestsThePreviewFrameAtThatBoundary(bool endHandle)
+    {
+        OnSta(() =>
+        {
+            var timeline = CreateTimeline(10);
+            timeline.Value = endHandle ? 9 : 1;
+            var moves = new List<double>();
+            timeline.ValueChanged += (_, _) => moves.Add(timeline.Value);
+
+            var handle = Handle(timeline, endHandle);
+            var point = new Point(handle.Left + handle.Width / 2, handle.Height / 2);
+            Invoke(timeline, "BeginDrag", point);
+            Invoke(timeline, "ApplyDrag", new Point(point.X + (endHandle ? -200 : 200), point.Y));
+
+            double boundary = endHandle ? timeline.TrimEnd : timeline.TrimStart;
+            Assert.AreEqual(boundary, timeline.Value);
+            CollectionAssert.AreEqual(new[] { boundary }, moves);
+        });
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public void PressingEitherTrimHandlePreservesItsExistingBoundary(bool endHandle)
     {
         OnSta(() =>

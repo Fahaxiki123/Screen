@@ -158,6 +158,9 @@ internal static partial class NativeMethods
     [LibraryImport("dwmapi.dll")]
     internal static partial int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
 
+    [LibraryImport("dwmapi.dll")]
+    internal static partial int DwmFlush();
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool PostMessageW(nint hWnd, uint message, nuint wParam, nint lParam);

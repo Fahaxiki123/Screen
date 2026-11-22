@@ -5,7 +5,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using Lucide.NET;
+using System.Windows.Documents;
 using Screen.Core;
 
 namespace Screen.App;
@@ -136,7 +136,7 @@ internal sealed class ScrollCaptureController : IDisposable
         {
             _ended = true;
             Cleanup();
-            MessageBox.Show($"无法开始长截图：{exception.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"无法开始长截图：{exception.Message}", "Flick", MessageBoxButton.OK, MessageBoxImage.Error);
             Cancelled?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -375,7 +375,7 @@ internal sealed class ScrollCaptureController : IDisposable
                 if (_control is { } owner)
                 {
                     MessageBox.Show(owner, $"长截图输出失败：{exception.Message}\n已保留拼接结果，可重试复制、保存或编辑。\n回到控制条后，Enter 重试，Esc 取消。",
-                        "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+                        "Flick", MessageBoxButton.OK, MessageBoxImage.Error);
                     if (!_ended)
                     {
                         owner.FocusOutputAction(action);
@@ -550,6 +550,7 @@ internal sealed class ScrollCaptureController : IDisposable
 
 internal sealed class ScrollCapturePreviewWindow : Window
 {
+    private const double CardWidth = 212;
     private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
 
     private readonly Image _image;
@@ -560,26 +561,32 @@ internal sealed class ScrollCapturePreviewWindow : Window
     public ScrollCapturePreviewWindow(PixelRect region)
     {
         _region = region;
-        Title = "Screen 长截图预览";
+        Title = "Flick 长截图预览";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
         ShowInTaskbar = false;
         ShowActivated = false;
-        Width = 220;
-        Height = 150;
-        Background = Token("Brush.Surface");
+        var shadow = SquircleGlassBorder.FloatingShadowMargin;
+        Width = CardWidth + shadow.Left + shadow.Right;
+        Height = 142 + shadow.Top + shadow.Bottom;
+        AllowsTransparency = true;
+        Background = Brushes.Transparent;
 
         var root = new DockPanel();
         _status = new TextBlock
         {
             Text = "总览 · 1 帧",
-            Height = 38,
-            Padding = new Thickness(12, 9, 12, 0),
+            MinHeight = 34,
+            MaxHeight = 72,
+            Padding = new Thickness(12, 8, 12, 2),
             FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
             Foreground = Token("Brush.TextPrimary"),
             FontWeight = FontWeights.SemiBold
         };
+        _status.FontFamily = new FontFamily("Cascadia Mono, Consolas, Microsoft YaHei UI");
+        Typography.SetNumeralAlignment(_status, FontNumeralAlignment.Tabular);
         DockPanel.SetDock(_status, Dock.Top);
         root.Children.Add(_status);
         _image = new Image
@@ -591,12 +598,11 @@ internal sealed class ScrollCapturePreviewWindow : Window
         };
         RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.HighQuality);
         root.Children.Add(_image);
-        Content = new Border
+        Content = new SquircleGlassBorder
         {
-            BorderBrush = Token("Brush.Accent"),
-            BorderThickness = new Thickness(1.5),
-            CornerRadius = new CornerRadius(12),
-            Background = Background,
+            CornerRadiusRadius = 13,
+            GlassBackground = Token("Brush.AuroraCard"),
+            Margin = shadow,
             Child = root
         };
 
@@ -617,7 +623,8 @@ internal sealed class ScrollCapturePreviewWindow : Window
     {
         _image.Source = preview;
         _status.Text = $"总览 · {frames} 帧 · {originalWidth} × {originalHeight}";
-        Height = Math.Clamp(54 + Width * originalHeight / Math.Max(1.0, originalWidth), 138, 520);
+        var shadow = SquircleGlassBorder.FloatingShadowMargin;
+        Height = Math.Clamp(46 + CardWidth * originalHeight / Math.Max(1.0, originalWidth), 130, 512) + shadow.Top + shadow.Bottom;
         Reposition();
     }
 
@@ -629,18 +636,18 @@ internal sealed class ScrollCapturePreviewWindow : Window
         {
             return;
         }
-        var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
-            _region.X + _region.Width / 2,
-            _region.Y + _region.Height / 2));
-        var width = (int)Math.Round(Width * dpi / 96.0);
-        var height = (int)Math.Round(Height * dpi / 96.0);
-        var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
-        var rightX = _region.Right + 14;
-        var leftX = _region.X - width - 14;
+        var center = new NativeMethods.NativePoint(_region.X + _region.Width / 2, _region.Y + _region.Height / 2);
+        var scale = NativeMethods.GetDpiAtPoint(center) / 96.0;
+        var width = (int)Math.Round(Width * scale);
+        var height = (int)Math.Round(Height * scale);
+        var shadow = SquircleGlassBorder.FloatingShadowMargin;
+        var screen = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point(center.X, center.Y)).Bounds;
+        var rightX = _region.Right + (int)Math.Round((14 - shadow.Left) * scale);
+        var leftX = _region.X - width + (int)Math.Round((shadow.Right - 14) * scale);
         var x = rightX + width <= screen.Right
-            ? rightX
-            : leftX >= screen.Left ? leftX : Math.Max(screen.Left + 8, _region.Right - width - 8);
-        var y = Math.Clamp(_region.Y, screen.Top + 8, Math.Max(screen.Top + 8, screen.Bottom - height - 8));
+            ? rightX : leftX >= screen.Left ? leftX : _region.Right - width;
+        x = Math.Clamp(x, screen.Left, Math.Max(screen.Left, screen.Right - width));
+        var y = Math.Clamp(_region.Y - (int)Math.Round(shadow.Top * scale), screen.Top, Math.Max(screen.Top, screen.Bottom - height));
         NativeMethods.SetWindowPos(
             _handle,
             new nint(-1),
@@ -653,7 +660,7 @@ internal sealed class ScrollCapturePreviewWindow : Window
 }
 
 /// <summary>
-/// Single navy control capsule shown during scroll capture: inline status,
+/// Floating scroll capture controls: inline status,
 /// auto-scroll toggle, and the finish/edit/save/cancel actions. Replaces the
 /// previous trio of unrelated white floating windows.
 /// </summary>
@@ -671,7 +678,7 @@ internal sealed class ScrollCaptureControlWindow : Window
 
     public ScrollCaptureControlWindow(PixelRect region)
     {
-        Title = "Screen 长截图";
+        Title = "Flick 长截图";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
@@ -679,12 +686,10 @@ internal sealed class ScrollCaptureControlWindow : Window
         ShowActivated = false;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
-        // Fit the capsule to its content: a fixed width clipped the action
-        // buttons whenever the status line grew. Height stays fixed.
-        SizeToContent = SizeToContent.Width;
-        MinWidth = 260;
-        MaxWidth = 580;
-        Height = 48;
+        var shadow = SquircleGlassBorder.FloatingShadowMargin;
+        SizeToContent = SizeToContent.WidthAndHeight;
+        MinWidth = 254 + shadow.Left + shadow.Right;
+        MaxWidth = 574 + shadow.Left + shadow.Right;
         Opacity = 0;
 
         _autoLabel = new TextBlock
@@ -694,51 +699,14 @@ internal sealed class ScrollCaptureControlWindow : Window
             FontSize = 13,
             FontWeight = FontWeights.SemiBold
         };
-        // Text toggle with auto width — the shared icon-button style is fixed
-        // at 36px and would clip the label.
-        var autoTemplate = new ControlTemplate(typeof(Button));
-        var autoChrome = new FrameworkElementFactory(typeof(Border));
-        autoChrome.Name = "Chrome";
-        autoChrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
-        autoChrome.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
-        autoChrome.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
-        autoChrome.SetValue(Border.BorderThicknessProperty, new Thickness(1));
-        var autoPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
-        autoPresenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        autoPresenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-        autoChrome.AppendChild(autoPresenter);
-        autoTemplate.VisualTree = autoChrome;
-        var autoHover = new Trigger
-        {
-            Property = UIElement.IsMouseOverProperty,
-            Value = true
-        };
-        autoHover.Setters.Add(new Setter(
-            Border.BackgroundProperty, Token("Brush.OverlayHover"), "Chrome"));
-        autoTemplate.Triggers.Add(autoHover);
-        var autoPressed = new Trigger
-        {
-            Property = Button.IsPressedProperty,
-            Value = true
-        };
-        autoPressed.Setters.Add(new Setter(
-            Border.BackgroundProperty, Token("Brush.OverlayPressed"), "Chrome"));
-        autoTemplate.Triggers.Add(autoPressed);
-        var autoFocus = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
-        autoFocus.Setters.Add(new Setter(Border.BorderBrushProperty, Token("Brush.AccentText"), "Chrome"));
-        autoTemplate.Triggers.Add(autoFocus);
-
         _autoButton = new Button
         {
             Content = _autoLabel,
+            Width = 84,
             Height = 34,
-            Padding = new Thickness(14, 0, 14, 0),
-            Margin = new Thickness(1),
             Background = Brushes.Transparent,
-            BorderBrush = Brushes.Transparent,
             Foreground = Token("Brush.OverlayIcon"),
-            Cursor = System.Windows.Input.Cursors.Hand,
-            Template = autoTemplate
+            Style = (Style)Application.Current.FindResource("ToolbarIconButtonDarkStyle")
         };
         _autoButton.Click += (_, _) =>
         {
@@ -750,32 +718,28 @@ internal sealed class ScrollCaptureControlWindow : Window
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(_autoButton);
         row.Children.Add(ControlSeparator());
-        _editButton = IconAction(LucideIconKind.Pencil, "完成并编辑", () => EditRequested?.Invoke(this, EventArgs.Empty));
-        _saveButton = IconAction(LucideIconKind.Download, "完成并保存", () => SaveRequested?.Invoke(this, EventArgs.Empty));
+        _editButton = IconAction("pen", "完成并编辑", () => EditRequested?.Invoke(this, EventArgs.Empty));
+        _saveButton = IconAction("save", "完成并保存", () => SaveRequested?.Invoke(this, EventArgs.Empty));
         row.Children.Add(_editButton);
         row.Children.Add(_saveButton);
         row.Children.Add(IconAction(
-            LucideIconKind.X, "取消长截图",
+            "close", "取消长截图",
             () => CancelRequested?.Invoke(this, EventArgs.Empty),
             "Brush.DangerOnDark"));
         _finishButton = IconAction(
-            LucideIconKind.Check, "完成并复制",
+            "check", "完成并复制",
             () => FinishRequested?.Invoke(this, EventArgs.Empty));
         _finishButton.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
-        _finishButton.Width = _finishButton.MinWidth = 36;
-        _finishButton.Height = 36;
+        _finishButton.Width = _finishButton.MinWidth = 34;
+        _finishButton.Height = 34;
         _finishButton.Margin = new Thickness(3, 1, 1, 1);
         _finishButton.Padding = new Thickness(0);
         row.Children.Add(_finishButton);
 
-        Content = new Border
+        Content = new SquircleGlassBorder
         {
-            Background = Token("Brush.ChromeGradient"),
-            BorderBrush = Token("Brush.OverlayBorder"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(5, 4, 5, 4),
-            Effect = (System.Windows.Media.Effects.DropShadowEffect)Application.Current.FindResource("Shadow.Floating"),
+            Padding = new Thickness(4),
+            Margin = shadow,
             Child = row
         };
 
@@ -796,16 +760,16 @@ internal sealed class ScrollCaptureControlWindow : Window
                 return;
             }
             _positioned = true;
-            var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
-                region.X + region.Width / 2,
-                region.Y + region.Height / 2));
-            var width = (int)Math.Round(ActualWidth * dpi / 96.0);
-            var height = (int)Math.Round(ActualHeight * dpi / 96.0);
-            var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
-            var x = Math.Clamp(region.X + (region.Width - width) / 2, screen.Left + 8, Math.Max(screen.Left + 8, screen.Right - width - 8));
-            var y = region.Bottom + height + 10 <= screen.Bottom
-                ? region.Bottom + 8
-                : Math.Max(screen.Top + 8, region.Bottom - height - 8);
+            var center = new NativeMethods.NativePoint(region.X + region.Width / 2, region.Y + region.Height / 2);
+            var scale = NativeMethods.GetDpiAtPoint(center) / 96.0;
+            var width = (int)Math.Round(ActualWidth * scale);
+            var height = (int)Math.Round(ActualHeight * scale);
+            var screen = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point(center.X, center.Y)).Bounds;
+            var x = Math.Clamp(region.X + (region.Width - width) / 2, screen.Left, Math.Max(screen.Left, screen.Right - width));
+            var y = region.Bottom + (int)Math.Round((8 - shadow.Top) * scale);
+            if (y + height > screen.Bottom)
+                y = region.Bottom - height + (int)Math.Round((shadow.Bottom - 8) * scale);
+            y = Math.Clamp(y, screen.Top, Math.Max(screen.Top, screen.Bottom - height));
             NativeMethods.SetWindowPos(
                 _handle,
                 new nint(-1),
@@ -820,21 +784,6 @@ internal sealed class ScrollCaptureControlWindow : Window
 
     private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
 
-    /// <summary>
-    /// Lucide icons do not inherit the button foreground by default; without
-    /// this binding they render with the default black stroke on dark chrome.
-    /// </summary>
-    private static void BindIconStrokeToForeground(LucideIconElement icon) =>
-        icon.SetBinding(
-            LucideIconElement.StrokeProperty,
-            new System.Windows.Data.Binding(nameof(Button.Foreground))
-            {
-                RelativeSource = new System.Windows.Data.RelativeSource(
-                    System.Windows.Data.RelativeSourceMode.FindAncestor,
-                    typeof(Button),
-                    1)
-            });
-
     private static Border ControlSeparator() => new()
     {
         Width = 1,
@@ -844,21 +793,14 @@ internal sealed class ScrollCaptureControlWindow : Window
         VerticalAlignment = VerticalAlignment.Center
     };
 
-    private static Button IconAction(LucideIconKind icon, string tooltip, Action action, string? foregroundKey = null)
+    private static Button IconAction(string icon, string tooltip, Action action, string? foregroundKey = null)
     {
-        var iconElement = new LucideIconElement
-        {
-            Kind = icon,
-            Width = 19,
-            Height = 19,
-            StrokeThickness = 1.75
-        };
-        BindIconStrokeToForeground(iconElement);
         var button = new Button
         {
-            Content = iconElement,
+            Content = AppleVectorIcons.Create(icon, 19),
             ToolTip = tooltip
         };
+        System.Windows.Automation.AutomationProperties.SetName(button, tooltip);
         button.SetResourceReference(StyleProperty, "ToolbarIconButtonDarkStyle");
         if (foregroundKey is not null)
         {
@@ -1007,7 +949,7 @@ internal sealed class RegionBorderWindow : Window
             root.Children.Add(new System.Windows.Shapes.Path
             {
                 Data = maskGeometry,
-                Fill = new SolidColorBrush(Color.FromArgb(112, 0, 0, 0))
+                Fill = (Brush)Application.Current.FindResource("Brush.SelectionMask")
             });
             root.Children.Add(new Border
             {

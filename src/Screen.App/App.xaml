@@ -1,5 +1,6 @@
 <Application x:Class="Screen.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:ui="clr-namespace:Screen.App"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
   <Application.Resources>
@@ -28,6 +29,42 @@
         </Setter>
       </Style>
 
+      <ControlTemplate x:Key="GlassButtonTemplate" TargetType="Button">
+        <ui:SquircleGlassBorder x:Name="ButtonChrome" CornerRadiusRadius="6.5" ShowRim="False"
+                               OutlineBrush="{TemplateBinding BorderBrush}"
+                               OutlineThickness="{Binding BorderThickness.Left, RelativeSource={RelativeSource TemplatedParent}}"
+                               ShadowLevel="0" GlassBackground="{TemplateBinding Background}">
+          <Grid>
+            <Border x:Name="Hover" />
+            <Border Padding="{TemplateBinding Padding}" BorderThickness="{TemplateBinding BorderThickness}">
+              <ContentPresenter RecognizesAccessKey="True"
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+            </Border>
+          </Grid>
+        </ui:SquircleGlassBorder>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter TargetName="Hover" Property="Background" Value="{DynamicResource Brush.SurfaceHover}" />
+          </Trigger>
+          <Trigger Property="IsPressed" Value="True">
+            <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.72" />
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False">
+            <Trigger.EnterActions>
+              <BeginStoryboard><Storyboard>
+                <DoubleAnimation Storyboard.TargetName="ButtonChrome" Storyboard.TargetProperty="Opacity" To="0.36" Duration="0:0:0.18" />
+              </Storyboard></BeginStoryboard>
+            </Trigger.EnterActions>
+            <Trigger.ExitActions>
+              <BeginStoryboard><Storyboard>
+                <DoubleAnimation Storyboard.TargetName="ButtonChrome" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.18" FillBehavior="Stop" />
+              </Storyboard></BeginStoryboard>
+            </Trigger.ExitActions>
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+
       <Style TargetType="Button">
         <Setter Property="FontSize" Value="{StaticResource Font.Subtitle}" />
         <Setter Property="MinWidth" Value="34" />
@@ -39,15 +76,14 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisualStyle}" />
-        <Style.Triggers>
-          <Trigger Property="IsMouseOver" Value="True">
-            <Setter Property="Background" Value="{DynamicResource Brush.SurfaceHover}" />
-          </Trigger>
-        </Style.Triggers>
+        <Setter Property="FontFamily" Value="{StaticResource Font.UI}" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template" Value="{StaticResource GlassButtonTemplate}" />
       </Style>
 
-      <!-- Shared night-blue icon button. -->
-      <Style x:Key="ToolbarIconButtonStyle" TargetType="Button">
+      <!-- Shared icon button. -->
+      <Style x:Key="ToolbarIconButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
         <Setter Property="Width" Value="36" />
         <Setter Property="MinWidth" Value="36" />
         <Setter Property="Height" Value="36" />
@@ -58,130 +94,20 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Neutral700}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisualStyle}" />
-        <Setter Property="Template">
-          <Setter.Value>
-            <ControlTemplate TargetType="Button">
-              <Border x:Name="ButtonChrome"
-                      Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                      CornerRadius="{StaticResource Radius.Medium}"
-                      SnapsToDevicePixels="True">
-                <ContentPresenter HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  SnapsToDevicePixels="True" />
-              </Border>
-              <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource Brush.Neutral100}" />
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.72" />
-                </Trigger>
-                <Trigger Property="IsEnabled" Value="False">
-                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.35" />
-                </Trigger>
-              </ControlTemplate.Triggers>
-            </ControlTemplate>
-          </Setter.Value>
-        </Setter>
       </Style>
 
-      <!-- Icon button for the night-blue capture chrome (overlay toolbar,
-           style panel). Selection state is set in code via Background /
-           Foreground using Brush.AccentSubtleDark / Brush.AccentOnDark. -->
+      <!-- Capture toolbar controls. -->
       <Style x:Key="ToolbarIconButtonDarkStyle" TargetType="Button" BasedOn="{StaticResource ToolbarIconButtonStyle}">
         <Setter Property="Width" Value="34" />
+        <Setter Property="MinWidth" Value="34" />
         <Setter Property="Height" Value="34" />
+        <Setter Property="Margin" Value="0" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.OverlayIcon}" />
-        <Setter Property="Template">
-          <Setter.Value>
-            <ControlTemplate TargetType="Button">
-              <Border x:Name="ButtonChrome"
-                      Background="{TemplateBinding Background}"
-                      BorderBrush="{TemplateBinding BorderBrush}"
-                      BorderThickness="{TemplateBinding BorderThickness}"
-                      CornerRadius="8"
-                      SnapsToDevicePixels="True">
-                <ContentPresenter HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  SnapsToDevicePixels="True" />
-              </Border>
-              <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource Brush.OverlayHover}" />
-                  <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#40FFFFFF" />
-                  <Setter TargetName="ButtonChrome" Property="BorderThickness" Value="1" />
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource Brush.OverlayPressed}" />
-                  <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#60FFFFFF" />
-                  <Setter TargetName="ButtonChrome" Property="BorderThickness" Value="1" />
-                </Trigger>
-                <Trigger Property="IsEnabled" Value="False">
-                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.35" />
-                </Trigger>
-              </ControlTemplate.Triggers>
-            </ControlTemplate>
-          </Setter.Value>
-        </Setter>
       </Style>
 
-      <!-- Slim sapphire scrollbar for navy surfaces (overlay menus, settings).
-           Scoped by reference: light surfaces keep the system scrollbar. -->
-      <Style x:Key="DarkScrollBarStyle" TargetType="ScrollBar">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Neutral300}" />
-        <Setter Property="Width" Value="6" />
-        <Setter Property="MinWidth" Value="6" />
-        <Setter Property="Template">
-          <Setter.Value>
-            <ControlTemplate TargetType="ScrollBar">
-              <Grid Background="Transparent">
-                <Track x:Name="PART_Track"
-                       IsDirectionReversed="True"
-                       IsEnabled="{TemplateBinding IsEnabled}">
-                  <Track.DecreaseRepeatButton>
-                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False" />
-                  </Track.DecreaseRepeatButton>
-                  <Track.IncreaseRepeatButton>
-                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False" />
-                  </Track.IncreaseRepeatButton>
-                  <Track.Thumb>
-                    <Thumb>
-                      <Thumb.Template>
-                        <ControlTemplate TargetType="Thumb">
-                          <Border x:Name="ThumbChrome"
-                                  Background="#4594C5FF"
-                                  CornerRadius="3"
-                                  Margin="1,2" />
-                          <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                              <Setter TargetName="ThumbChrome" Property="Background" Value="#7594C5FF" />
-                            </Trigger>
-                            <Trigger Property="IsDragging" Value="True">
-                              <Setter TargetName="ThumbChrome" Property="Background" Value="{DynamicResource Brush.Accent}" />
-                            </Trigger>
-                          </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                      </Thumb.Template>
-                    </Thumb>
-                  </Track.Thumb>
-                </Track>
-              </Grid>
-              <ControlTemplate.Triggers>
-                <Trigger Property="Orientation" Value="Horizontal">
-                  <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False" />
-                  <Setter Property="Width" Value="Auto" />
-                  <Setter Property="MinWidth" Value="0" />
-                  <Setter Property="Height" Value="6" />
-                  <Setter Property="MinHeight" Value="6" />
-                </Trigger>
-              </ControlTemplate.Triggers>
-            </ControlTemplate>
-          </Setter.Value>
-        </Setter>
-      </Style>
+      <Style x:Key="DarkScrollBarStyle" TargetType="ScrollBar" BasedOn="{StaticResource {x:Type ScrollBar}}" />
 
-      <Style x:Key="CardIconButtonStyle" TargetType="Button">
+      <Style x:Key="CardIconButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
         <Setter Property="Width" Value="30" />
         <Setter Property="MinWidth" Value="30" />
         <Setter Property="Height" Value="30" />
@@ -192,29 +118,9 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Neutral600}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisualStyle}" />
-        <Setter Property="Template">
-          <Setter.Value>
-            <ControlTemplate TargetType="Button">
-              <Border x:Name="ButtonChrome"
-                      Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                      CornerRadius="{StaticResource Radius.Medium}">
-                <ContentPresenter HorizontalAlignment="Center"
-                                  VerticalAlignment="Center" />
-              </Border>
-              <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource Brush.Neutral100}" />
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.7" />
-                </Trigger>
-              </ControlTemplate.Triggers>
-            </ControlTemplate>
-          </Setter.Value>
-        </Setter>
       </Style>
 
-      <Style x:Key="CardPrimaryButtonStyle" TargetType="Button">
+      <Style x:Key="CardPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
         <Setter Property="FontSize" Value="13" />
         <Setter Property="Height" Value="34" />
         <Setter Property="MinWidth" Value="66" />
@@ -229,40 +135,20 @@
         <Setter Property="Template">
           <Setter.Value>
             <ControlTemplate TargetType="Button">
-              <Border x:Name="ButtonChrome"
-                      CornerRadius="8"
-                      Background="{TemplateBinding Background}"
-                      BorderThickness="1"
-                      SnapsToDevicePixels="True">
-                <Border.BorderBrush>
-                  <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                    <GradientStop Color="#90FFFFFF" Offset="0" />
-                    <GradientStop Color="#30FFFFFF" Offset="1" />
-                  </LinearGradientBrush>
-                </Border.BorderBrush>
-                <Border CornerRadius="7" BorderThickness="1,1,0,0">
-                  <Border.BorderBrush>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                      <GradientStop Color="#60FFFFFF" Offset="0" />
-                      <GradientStop Color="#00FFFFFF" Offset="0.75" />
-                    </LinearGradientBrush>
-                  </Border.BorderBrush>
-                  <ContentPresenter HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Margin="{TemplateBinding Padding}" />
-                </Border>
-              </Border>
+              <ui:SquircleGlassBorder x:Name="ButtonChrome" CornerRadiusRadius="6.5" ShowRim="False"
+                                     ShadowLevel="0" GlassBackground="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </ui:SquircleGlassBorder>
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Effect">
-                    <Setter.Value>
-                      <DropShadowEffect Color="#0EA5E9" BlurRadius="12" Opacity="0.55" ShadowDepth="0" />
-                    </Setter.Value>
-                  </Setter>
+                  <Setter TargetName="ButtonChrome" Property="GlassBackground" Value="{DynamicResource Brush.PrimaryActionHover}" />
                   <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.95" />
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
                   <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.80" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.4" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
@@ -270,7 +156,7 @@
         </Setter>
       </Style>
 
-      <Style x:Key="CardSecondaryButtonStyle" TargetType="Button">
+      <Style x:Key="CardSecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
         <Setter Property="FontSize" Value="14" />
         <Setter Property="Height" Value="34" />
         <Setter Property="MinWidth" Value="68" />
@@ -282,23 +168,18 @@
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisualStyle}" />
+      </Style>
+
+      <Style x:Key="TrayMenuItemStyle" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemeFocusVisualStyle}" />
+        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
           <Setter.Value>
             <ControlTemplate TargetType="Button">
-              <Border x:Name="ButtonChrome"
-                      Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                      CornerRadius="{StaticResource Radius.Medium}">
-                <ContentPresenter HorizontalAlignment="Center"
-                                  VerticalAlignment="Center" />
+              <Border Background="Transparent" Padding="11,0">
+                <ContentPresenter VerticalAlignment="Center" />
               </Border>
-              <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Background" Value="{DynamicResource Brush.Neutral150}" />
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="ButtonChrome" Property="Opacity" Value="0.72" />
-                </Trigger>
-              </ControlTemplate.Triggers>
             </ControlTemplate>
           </Setter.Value>
         </Setter>

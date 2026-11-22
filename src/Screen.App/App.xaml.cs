@@ -62,8 +62,8 @@ public partial class App : Application
             try
             {
                 MessageBox.Show(
-                    $"Screen 启动失败，即将退出：{exception.Message}",
-                    "Screen",
+                    $"Flick 启动失败，即将退出：{exception.Message}",
+                    "Flick",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -90,7 +90,7 @@ public partial class App : Application
         _lastErrorTime = now;
         MessageBox.Show(
             $"发生未处理的错误，程序将继续运行：{exception.Message}\n\n详细日志已保存到 %LocalAppData%\\Screen\\logs\\",
-            "Screen",
+            "Flick",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }

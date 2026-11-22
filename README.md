@@ -1,20 +1,27 @@
-# Screen
+# Flick
 
-个人使用的 Windows 截图、录屏、OCR 与翻译工具，使用 .NET 10 / WPF。
+> 原项目 `Screen` 全面焕新为 **Flick**，全新浅色磨砂 × 液态玻璃界面与高定品牌图标正式发布。
 
-程序、托盘与安装器使用统一的蓝色截图图标，界面采用深蓝与青色渐变主题，提供横向快捷栏、翻译卡片和录屏预览。
+个人使用的 Windows 截图、贴图、录屏、文字识别与翻译工具，使用 .NET 10 / WPF。
+
+程序、托盘、设置窗与安装器使用统一的 Flick 晴空蓝虚线选区图标；全应用采用浅色磨砂 × 液态玻璃主题、Apple G2 连续曲率卡片与物理弹簧微动效，提供顶部模式条、智能跟随工具栏、翻译卡片、原位覆盖翻译和录屏灵动岛。
 
 ## 下载
 
 **[获取最新稳定版](https://github.com/Fahaxiki123/Screen/releases/latest)** · [全部版本](https://github.com/Fahaxiki123/Screen/releases)
 
-截至 **2026-11-18** 已核对发布版本：**1.0.15**。以下安装包、校验文件和源码均对应 `v1.0.15`；后续升级使用上方最新稳定版入口。
+截至 **2026-11-23** 最新发布版本：**2.0.0**。以下程序包、校验文件和源码均对应 `v2.0.0`；后续升级使用上方最新稳定版入口。
 
-**[下载 1.0.15 Windows x64 安装包](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.15/Screen-1.0.15-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v1.0.15) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v1.0.15/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v1.0.15)
+**[下载 2.0.0 Windows x64 绿色便携版（.zip）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/Flick-2.0.0-win-x64-Portable.zip)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.0) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v2.0.0)
 
-安装器允许在 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64 上安装，包含 .NET Desktop Runtime、OCR 模型、FFmpeg 和 Visual C++ 运行库。Windows 10 实机安装与运行待验收。更新前请完成截图或录屏并退出 Screen。
+绿色便携版支持 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64，已自包含 .NET Desktop Runtime、本地 PaddleOCR 模型与 FFmpeg，解压后运行 `Screen.exe` 即可使用，无需管理员权限。原有 `%LOCALAPPDATA%\Screen` 设置与 Windows 凭据管理器中的 API 密钥完全保留兼容。更新前请完成截图或录屏并从托盘退出旧版程序。
 
-1.0.15 修复贴图周围的粗边和截图带入系统光标的问题。贴图内容按原图尺寸铺到边缘，保留悬停时的细描边。DXGI 帧可能已经合成系统光标时，截图改用 GDI 取图。
+### 2.0.0 主要更新
+
+- **全新品牌名称与高定图标**：正式定名 **Flick**，启用全新 Apple Liquid Glass 质感虚线选区 + 立体十字准星图标，覆盖窗口、任务栏、16px 系统托盘、设置窗头部与安装器。
+- **全面重构浅色磨砂 × 液态玻璃 UI**：引入 Apple G2 连续曲率（Squircle）容器、纯净矢量图标、圆形光学放大镜、顶部模式切换条、编排弹出主工具栏与跟随样式栏、完成对勾轻提示与录屏灵动岛。
+- **设置界面重塑（无缝分栏 + 融合动效）**：移除冗余悬浮托板与多层重阴影，改为左右无缝分栏与极细发丝边纯白卡片；实现同分组内白卡平滑平移、跨分组原地淡入淡出及同组鼠标悬停淡灰磁吸追踪；通用页新增「运行状态与版本」概览。
+- **支持 MP4 / GIF 双格式录屏导出**：录屏准备栏一键切换 MP4 与 GIF，GIF 模式自动禁用音轨并联动录后预览与裁切导出。
 
 ## 已实现的功能
 
@@ -40,11 +47,11 @@
 - Git 和 Git LFS，FFmpeg 二进制通过 Git LFS 保存。
 - 构建安装包时另需 PowerShell 7 和 NSIS 3.12。
 
-复现上方 1.0.15 安装包时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
+复现上方 2.0.0 版本时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
 
 ```powershell
 git lfs install
-git clone --branch v1.0.15 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
+git clone --branch v2.0.0 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
 Set-Location 开发工程
 git lfs pull
 ```
@@ -125,7 +132,7 @@ dotnet run --project src/Screen.App/Screen.App.csproj -c Release
 
 OCR/翻译文本获得焦点时，复制、换行和撤销交给文本框处理。
 
-截图、录屏和恢复贴图均可直接设置 F1–F24。快捷键页可启用「快捷键优先交给 Screen」。此选项会优先处理已设置的组合，系统保留的操作和其他应用的键盘钩子仍可能先收到按键。
+截图、录屏和恢复贴图均可直接设置 F1–F24。快捷键页可启用「快捷键优先交给 Flick」。此选项会优先处理已设置的组合，系统保留的操作和其他应用的键盘钩子仍可能先收到按键。
 
 ## 配置和失败恢复
 

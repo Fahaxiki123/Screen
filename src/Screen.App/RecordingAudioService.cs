@@ -14,14 +14,16 @@ internal sealed class RecordingAudioTrack : IDisposable
 {
     private static readonly byte[] ZeroChunk = new byte[16384];
 
-    private readonly IWaveIn _capture;
+    private readonly IDisposable _capture;
+    private readonly Action _stopCapture;
+    private readonly MMDevice? _endpoint;
     private readonly Stream _stream;
     private readonly object _gate = new();
     private readonly RecordingStopSignal _stopSignal;
     private readonly RecordingTimeline? _timeline;
     private readonly int _blockAlign;
     private volatile bool _paused;
-    private volatile float _peakLevel;
+    private float _peakLevel;
     private long _bytesWritten;
     private long _framesWritten;
     private bool _stopped;
@@ -36,8 +38,18 @@ internal sealed class RecordingAudioTrack : IDisposable
         RecordingStopSignal stopSignal,
         Stream? output = null,
         RecordingTimeline? timeline = null)
+        : this(capture, capture.StopRecording, null, rawPath, ffmpegFormat, sampleRate, channels, stopSignal, output, timeline)
+    {
+        capture.DataAvailable += (_, e) => WritePacket(e.Buffer.AsSpan(0, e.BytesRecorded));
+    }
+
+    private RecordingAudioTrack(IDisposable capture, Action stopCapture, MMDevice? endpoint,
+        string rawPath, string ffmpegFormat, int sampleRate, int channels,
+        RecordingStopSignal stopSignal, Stream? output, RecordingTimeline? timeline)
     {
         _capture = capture;
+        _stopCapture = stopCapture;
+        _endpoint = endpoint;
         _stopSignal = stopSignal;
         _timeline = timeline;
         _stream = output ?? new FileStream(rawPath, FileMode.Create, FileAccess.Write, FileShare.Read);
@@ -47,39 +59,33 @@ internal sealed class RecordingAudioTrack : IDisposable
         Channels = channels;
         var bytesPerSample = ffmpegFormat == "f32le" ? 4 : 2;
         _blockAlign = Math.Max(1, channels * bytesPerSample);
-        _capture.DataAvailable += (_, e) =>
+    }
+
+    private void WritePacket(ReadOnlySpan<byte> buffer)
+    {
+        if (_paused || buffer.IsEmpty || (_timeline is not null && !_timeline.IsStarted))
         {
-            if (_paused || e.BytesRecorded <= 0 || (_timeline is not null && !_timeline.IsStarted))
-            {
-                _peakLevel = 0;
+            return;
+        }
+        lock (_gate)
+        {
+            if (_stopped || _stopSignal.IsRequested)
                 return;
-            }
-            lock (_gate)
+
+            if (_timeline is { IsStarted: true } activeTimeline && SampleRate > 0)
             {
-                if (_stopped || _stopSignal.IsRequested)
-                {
-                    return;
-                }
-                if (_timeline is { IsStarted: true } activeTimeline && SampleRate > 0)
-                {
-                    var callbackFrames = e.BytesRecorded / _blockAlign;
-                    var expectedStartFrames = (long)Math.Round(activeTimeline.ElapsedSeconds * SampleRate) - callbackFrames;
-                    var deficitFrames = expectedStartFrames - _framesWritten;
-                    // WASAPI loopback emits no callbacks while the render endpoint
-                    // is silent. Backfill missing silent intervals (> 50 ms) with
-                    // zeros so resumed system audio stays aligned with video.
-                    if (deficitFrames > SampleRate / 20)
-                    {
-                        var padFrames = Math.Min(deficitFrames, SampleRate * 3600L);
-                        WriteSilenceFramesCore(padFrames);
-                    }
-                }
-                _stream.Write(e.Buffer, 0, e.BytesRecorded);
-                _bytesWritten += e.BytesRecorded;
-                _framesWritten += e.BytesRecorded / _blockAlign;
+                var callbackFrames = buffer.Length / _blockAlign;
+                var expectedStartFrames = (long)Math.Round(activeTimeline.ElapsedSeconds * SampleRate) - callbackFrames;
+                var deficitFrames = expectedStartFrames - _framesWritten;
+                // A silent render endpoint can skip callbacks. Preserve that gap in the video timeline.
+                if (deficitFrames > SampleRate / 20)
+                    WriteSilenceFramesCore(Math.Min(deficitFrames, SampleRate * 3600L));
             }
-            _peakLevel = MeasurePeak(e.Buffer, e.BytesRecorded, ffmpegFormat);
-        };
+            _stream.Write(buffer);
+            _bytesWritten += buffer.Length;
+            _framesWritten += buffer.Length / _blockAlign;
+        }
+        Volatile.Write(ref _peakLevel, MeasurePeak(buffer, FfmpegFormat));
     }
 
     private void WriteSilenceFramesCore(long frames)
@@ -100,18 +106,27 @@ internal sealed class RecordingAudioTrack : IDisposable
     public int SampleRate { get; }
     public int Channels { get; }
     public long BytesWritten => Interlocked.Read(ref _bytesWritten);
-    public float PeakLevel => _paused ? 0 : _peakLevel;
-    public bool Paused { set => _paused = value; }
+    // WASAPI loopback may stop sending packets altogether while the endpoint is silent.
+    public float TakeMeterSample() => Interlocked.Exchange(ref _peakLevel, 0);
 
-    private static float MeasurePeak(byte[] buffer, int bytesRecorded, string format)
+    public bool Paused
+    {
+        set
+        {
+            _paused = value;
+            Interlocked.Exchange(ref _peakLevel, 0);
+        }
+    }
+
+    private static float MeasurePeak(ReadOnlySpan<byte> buffer, string format)
     {
         var peak = 0f;
         if (format == "f32le")
         {
-            var step = Math.Max(4, (bytesRecorded / 4 / 64) * 4);
-            for (var i = 0; i + 3 < bytesRecorded; i += step)
+            var step = Math.Max(4, (buffer.Length / 4 / 64) * 4);
+            for (var i = 0; i + 3 < buffer.Length; i += step)
             {
-                var sample = Math.Abs(BitConverter.ToSingle(buffer, i));
+                var sample = Math.Abs(BitConverter.ToSingle(buffer.Slice(i, 4)));
                 if (sample > peak)
                 {
                     peak = sample;
@@ -120,10 +135,10 @@ internal sealed class RecordingAudioTrack : IDisposable
         }
         else if (format == "s16le")
         {
-            var step = Math.Max(2, (bytesRecorded / 2 / 64) * 2);
-            for (var i = 0; i + 1 < bytesRecorded; i += step)
+            var step = Math.Max(2, (buffer.Length / 2 / 64) * 2);
+            for (var i = 0; i + 1 < buffer.Length; i += step)
             {
-                var sample = Math.Abs(BitConverter.ToInt16(buffer, i) / 32768f);
+                var sample = Math.Abs(BitConverter.ToInt16(buffer.Slice(i, 2)) / 32768f);
                 if (sample > peak)
                 {
                     peak = sample;
@@ -133,67 +148,74 @@ internal sealed class RecordingAudioTrack : IDisposable
         return Math.Clamp(peak, 0f, 1f);
     }
 
-    /// <summary>Attempts to capture the default render device (system audio loopback).</summary>
-    public static RecordingAudioTrack? TryCreateSystemLoopback(
-        string tempDir,
-        RecordingStopSignal stopSignal,
-        RecordingTimeline? timeline = null)
+    public static RecordingAudioTrack? TryCreateSystemLoopback(string tempDir, RecordingStopSignal stopSignal,
+        RecordingTimeline? timeline = null) => TryCreate(tempDir, stopSignal, timeline, loopback: true);
+
+    public static RecordingAudioTrack? TryCreateMicrophone(string tempDir, RecordingStopSignal stopSignal,
+        RecordingTimeline? timeline = null) => TryCreate(tempDir, stopSignal, timeline, loopback: false);
+
+    private static RecordingAudioTrack? TryCreate(string tempDir, RecordingStopSignal stopSignal, RecordingTimeline? timeline, bool loopback)
     {
+        MMDevice? endpoint = null;
+        WasapiRecorder? capture = null;
+        RecordingAudioTrack? track = null;
         try
         {
-            var capture = new WasapiLoopbackCapture();
+            using var devices = new MMDeviceEnumerator();
+            endpoint = devices.GetDefaultAudioEndpoint(loopback ? DataFlow.Render : DataFlow.Capture,
+                loopback ? Role.Multimedia : Role.Console);
+            var builder = new WasapiRecorderBuilder().WithDevice(endpoint).WithPollingSync();
+            if (loopback)
+                builder.WithLoopbackCapture();
+            capture = builder.Build();
             if (RawFormatFor(capture.WaveFormat) is not { } format)
-            {
-                capture.Dispose();
                 return null;
-            }
-            var track = new RecordingAudioTrack(
-                capture,
-                Path.Combine(tempDir, "system-audio.raw"),
-                format,
-                capture.WaveFormat.SampleRate,
-                capture.WaveFormat.Channels,
-                stopSignal,
-                timeline: timeline);
-            capture.StartRecording();
-            return track;
+
+            var rawPath = Path.Combine(tempDir, loopback ? "system-audio.raw" : "microphone.raw");
+            track = new RecordingAudioTrack(capture, capture.StopRecording, endpoint, rawPath, format,
+                capture.WaveFormat.SampleRate, capture.WaveFormat.Channels, stopSignal, null, timeline);
+            var recorder = capture;
+            capture = null;
+            endpoint = null;
+            var owner = track;
+            recorder.DataAvailable += (buffer, _, _, _) => owner.WritePacket(buffer);
+            recorder.StartRecording();
+            track = null;
+            return owner;
         }
-        catch
+        catch (Exception ex)
         {
-            // No render device / format we can persist — recording simply
-            // proceeds without this track.
+            SimpleLogger.LogError(loopback ? "System audio capture unavailable" : "Microphone capture unavailable", ex);
             return null;
+        }
+        finally
+        {
+            Release(track);
+            Release(capture);
+            Release(endpoint);
+            if (track is not null)
+            {
+                try
+                {
+                    File.Delete(track.RawPath);
+                }
+                catch (Exception ex)
+                {
+                    SimpleLogger.LogError("Failed to remove an unstarted audio track", ex);
+                }
+            }
         }
     }
 
-    /// <summary>Attempts to capture the default microphone.</summary>
-    public static RecordingAudioTrack? TryCreateMicrophone(
-        string tempDir,
-        RecordingStopSignal stopSignal,
-        RecordingTimeline? timeline = null)
+    private static void Release(IDisposable? resource)
     {
         try
         {
-            var capture = new WasapiCapture();
-            if (RawFormatFor(capture.WaveFormat) is not { } format)
-            {
-                capture.Dispose();
-                return null;
-            }
-            var track = new RecordingAudioTrack(
-                capture,
-                Path.Combine(tempDir, "microphone.raw"),
-                format,
-                capture.WaveFormat.SampleRate,
-                capture.WaveFormat.Channels,
-                stopSignal,
-                timeline: timeline);
-            capture.StartRecording();
-            return track;
+            resource?.Dispose();
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            SimpleLogger.LogError("Audio device cleanup failed", ex);
         }
     }
 
@@ -229,7 +251,7 @@ internal sealed class RecordingAudioTrack : IDisposable
         }
         try
         {
-            _capture.StopRecording();
+            _stopCapture();
         }
         catch
         {
@@ -271,6 +293,10 @@ internal sealed class RecordingAudioTrack : IDisposable
         {
             SimpleLogger.LogError("Audio capture disposal failed", exception);
         }
+        finally
+        {
+            Release(_endpoint);
+        }
     }
 }
 
@@ -293,21 +319,12 @@ internal sealed class RecordingAudioService : IDisposable
 
     public IReadOnlyList<RecordingAudioTrack> Tracks => _tracks;
 
-    public float CurrentPeakLevel
+    public float TakeMeterSample()
     {
-        get
-        {
-            var max = 0f;
-            foreach (var track in _tracks)
-            {
-                var level = track.PeakLevel;
-                if (level > max)
-                {
-                    max = level;
-                }
-            }
-            return max;
-        }
+        var peak = 0f;
+        foreach (var track in _tracks)
+            peak = Math.Max(peak, track.TakeMeterSample());
+        return peak;
     }
 
     public bool Paused

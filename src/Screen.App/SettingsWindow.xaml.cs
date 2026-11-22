@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
-using Lucide.NET;
 using Screen.Core;
 
 namespace Screen.App;
@@ -15,24 +18,29 @@ public partial class SettingsWindow : Window
     private readonly SettingsViewModel _viewModel;
     private readonly HttpClient _translationTestClient = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Dictionary<string, Button> _navigation = [];
+    private readonly Dictionary<string, string> _itemGroups = [];
+    private readonly Dictionary<string, SettingsNavGroup> _navGroups = [];
     private readonly Dictionary<string, FrameworkElement> _pages = [];
 
     private CancellationTokenSource? _translationTestOperation;
     private TextBlock? _translationTestStatus;
     private string _activeNavId = string.Empty;
+    private string _activeGroupId = string.Empty;
+    private readonly bool _localOcrReady;
+    private readonly string _versionLabel;
 
-    // Optional live registration: when provided, a newly captured hotkey is
-    // registered immediately instead of waiting for this window to close.
+    // 热键实时注册回调：捕获新快捷键后立即生效，无需等到关闭窗口。
     private readonly Func<string, bool>? _registerCaptureHotKey;
     private readonly Func<string, bool>? _registerRecoveryHotKey;
     private readonly Func<string, bool>? _registerRecordHotKey;
 
-    // Hot-key input controls.
+    // 快捷键输入按钮。
     private Button? _captureHotKeyButton;
     private Button? _clickThroughRecoveryHotKeyButton;
     private Button? _recordHotKeyButton;
+    private (Button Button, string PropertyName)? _hotKeyEditor;
 
-    // Translation page sections that show/hide with the selected provider.
+    // 翻译页按服务商动态显隐的配置分区。
     private StackPanel? _tencentSection;
     private StackPanel? _aiSection;
     private StackPanel? _memorySection;
@@ -49,29 +57,39 @@ public partial class SettingsWindow : Window
         Func<bool, bool>? setHotKeyPriority = null)
     {
         InitializeComponent();
-        Background = (Brush)FindResource("Brush.WindowBackdrop");
+        Deactivated += (_, _) => EndHotKeyCapture();
         _registerCaptureHotKey = registerCaptureHotKey;
         _registerRecoveryHotKey = registerRecoveryHotKey;
         _registerRecordHotKey = registerRecordHotKey;
-        var version = typeof(SettingsWindow).Assembly.GetName().Version;
-        NavVersion.Text = version is null ? "本地构建" : $"v{version.ToString(3)} · 本地构建";
-        SourceInitialized += (_, _) =>
-        {
-            // Match the system title bar to the navy content.
-            var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-            var dark = 1;
-            _ = NativeMethods.DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
-            ApplyTitleBarColor(35, "Brush.WindowBackground"); // DWMWA_CAPTION_COLOR
-            ApplyTitleBarColor(36, "Brush.TextPrimary");      // DWMWA_TEXT_COLOR
-            ApplyTitleBarColor(34, "Brush.Border");           // DWMWA_BORDER_COLOR
 
-            void ApplyTitleBarColor(int attribute, string resourceKey)
-            {
-                var color = ((SolidColorBrush)FindResource(resourceKey)).Color;
-                // DWM expects a COLORREF (0x00BBGGRR), not WPF's ARGB value.
-                var colorRef = color.R | (color.G << 8) | (color.B << 16);
-                _ = NativeMethods.DwmSetWindowAttribute(handle, attribute, ref colorRef, sizeof(int));
-            }
+        var version = typeof(SettingsWindow).Assembly.GetName().Version;
+        _versionLabel = version is null ? "本地构建" : $"v{version.ToString(3)}";
+        NavVersion.Text = _versionLabel;
+
+        string modelRoot = Path.Combine(AppContext.BaseDirectory, "models");
+        string[] required =
+        [
+            "v6/PP-OCRv6_det_small.onnx",
+            "v6/PP-OCRv6_rec_small.onnx",
+            "v6/ppocrv6_small_dict.txt",
+            "v5/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx"
+        ];
+        _localOcrReady = required.All(file => File.Exists(Path.Combine(modelRoot, file)));
+        EngineStatus.Text = _localOcrReady ? "引擎就绪" : "模型缺失";
+        EngineStatus.ToolTip = _localOcrReady
+            ? "本地 PaddleOCR 模型已安装就绪，首次识别时自动载入。"
+            : "本地 OCR 模型不完整，可重新安装 Flick 恢复。";
+        if (!_localOcrReady)
+            EngineDot.Fill = (Brush)FindResource("Brush.Warning");
+
+        DesktopWindowChrome.Attach(this);
+        StateChanged += (_, _) =>
+        {
+            bool maximized = WindowState == WindowState.Maximized;
+            WindowFrame.CornerRadiusRadius = maximized ? 0 : 13;
+            WindowFrame.Margin = maximized ? new Thickness(0) : new Thickness(16, 12, 16, 20);
+            WindowFrame.ShadowLevel = maximized ? 0 : 3;
+            WindowFrame.OutlineThickness = maximized ? 0 : 1;
         };
 
         _viewModel = new SettingsViewModel(store, credentials, setStartupEnabled, setHotKeyPriority);
@@ -82,131 +100,106 @@ public partial class SettingsWindow : Window
         ShowPage("general");
     }
 
+    private void MinimizeWindow(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+    private void CloseWindow(object sender, RoutedEventArgs e) => Close();
+
+    private void DragTitleBar(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left)
+            return;
+        if (e.ClickCount == 2)
+        {
+            if (WindowState == WindowState.Maximized)
+                SystemCommands.RestoreWindow(this);
+            else
+                SystemCommands.MaximizeWindow(this);
+        }
+        else if (e.LeftButton == MouseButtonState.Pressed)
+            DragMove();
+    }
+
     private void BuildNavigation()
     {
-        NavHost.Children.Clear();
-        _navigation.Clear();
+        var basicGroup = AddNavigationGroup("basic", "基础偏好");
+        AddNavigationItem("basic", basicGroup, "general", AppleVectorIcons.Create("settings", 16), "通用");
+        AddNavigationItem("basic", basicGroup, "shortcuts", AppleVectorIcons.Create("keyboard", 16), "快捷键");
 
-        AddNavigationSection("基础设置");
-        AddNavigationItem("general", LucideIconKind.Settings2, "通用");
-        AddNavigationItem("shortcuts", LucideIconKind.Keyboard, "快捷键");
-        AddNavigationItem("recording", LucideIconKind.Video, "录屏");
-        AddNavigationSection("文字与翻译");
-        AddNavigationItem("ocr", LucideIconKind.ScanText, "文字识别");
-        AddNavigationItem("translation", LucideIconKind.Languages, "翻译接口");
+        var modulesGroup = AddNavigationGroup("modules", "功能模块");
+        AddNavigationItem("modules", modulesGroup, "recording", AppleVectorIcons.Create("video", 16), "录屏");
+        AddNavigationItem("modules", modulesGroup, "ocr", AppleVectorIcons.Create("ocr", 16), "文字识别");
+        AddNavigationItem("modules", modulesGroup, "translation", AppleVectorIcons.Create("translate", 16), "翻译接口");
     }
 
-    private void AddNavigationSection(string title)
+    private SettingsNavGroup AddNavigationGroup(string groupId, string title)
     {
-        NavHost.Children.Add(new TextBlock
+        NavGroupsHost.Children.Add(new TextBlock
         {
             Text = title,
-            Margin = new Thickness(12, 14, 0, 9),
-            FontSize = (double)FindResource("Settings.FontSize.Section"),
-            FontWeight = GetFontWeight("Settings.FontWeight.Section"),
-            Foreground = GetResource<Brush>("Settings.Brush.TextTertiary")
+            FontSize = 11,
+            Foreground = GetResource<Brush>("Settings.Brush.TextTertiary"),
+            Margin = new Thickness(10, _navGroups.Count == 0 ? 2 : 16, 0, 6)
         });
+
+        var group = new SettingsNavGroup();
+        group.HoverEntered += activeGroup =>
+        {
+            foreach (var other in _navGroups.Values)
+            {
+                if (!ReferenceEquals(other, activeGroup))
+                    other.ClearHover();
+            }
+        };
+
+        _navGroups.Add(groupId, group);
+        NavGroupsHost.Children.Add(group);
+        return group;
     }
 
-    private void AddNavigationItem(string id, LucideIconKind icon, string text)
+    private void AddNavigationItem(string groupId, SettingsNavGroup group, string id, FrameworkElement icon, string text)
     {
-        var iconElement = new LucideIconElement
-        {
-            Kind = icon,
-            Width = 18,
-            Height = 18,
-            StrokeThickness = 1.8,
-            Stroke = (Brush)FindResource("Settings.Brush.TextSecondary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        var label = new TextBlock
-        {
-            Text = text,
-            FontSize = (double)FindResource("Settings.FontSize.Nav"),
-            FontWeight = GetFontWeight("Settings.FontWeight.Nav"),
-            Foreground = (Brush)FindResource("Settings.Brush.TextPrimary"),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        var indicator = new Border
-        {
-            Width = 3,
-            Height = 18,
-            CornerRadius = new CornerRadius(1.5),
-            Margin = new Thickness(-8, 0, 8, 0),
-            Background = Brushes.Transparent,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        var content = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        content.Children.Add(indicator);
-        content.Children.Add(iconElement);
-        content.Children.Add(new Border { Width = 11 });
-        content.Children.Add(label);
-
+        var label = new TextBlock { Text = text, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var button = new Button
         {
-            Tag = id,
-            Content = content,
-            Style = (Style)FindResource("SettingsNavButtonStyle"),
-            ToolTip = text
+            Content = new StackPanel { Orientation = Orientation.Horizontal, Children = { icon, label } },
+            Style = (Style)FindResource("SettingsNavButtonStyle")
         };
-        // Hover lives in code (not the template) so the ACTIVE page can opt
-        // out and keep its selection pill steady.
-        button.MouseEnter += (_, _) =>
-        {
-            if (id != _activeNavId)
-            {
-                button.Background = (Brush)FindResource("Settings.Brush.NavHover");
-            }
-        };
-        button.MouseLeave += (_, _) =>
-        {
-            if (id != _activeNavId)
-            {
-                button.Background = Brushes.Transparent;
-            }
-        };
+        AutomationProperties.SetName(button, text);
         button.Click += (_, _) => ShowPage(id);
-        _navigation[id] = button;
-        NavHost.Children.Add(button);
+        _navigation.Add(id, button);
+        _itemGroups.Add(id, groupId);
+        group.AddItem(button);
     }
 
     private void ShowPage(string id)
     {
+        if (_activeNavId == id)
+            return;
+        EndHotKeyCapture();
+
+        string previousGroupId = _activeGroupId;
+        string nextGroupId = _itemGroups[id];
+        bool isInitial = string.IsNullOrEmpty(previousGroupId);
+        bool crossGroup = !isInitial && !string.Equals(previousGroupId, nextGroupId, StringComparison.Ordinal);
+
         _activeNavId = id;
+        _activeGroupId = nextGroupId;
+
         foreach (var (key, button) in _navigation)
         {
-            var isActive = key == id;
-            button.Background = isActive
-                ? new SolidColorBrush(Color.FromArgb(0x22, 0x38, 0xBD, 0xF8))
-                : Brushes.Transparent;
-            button.BorderBrush = isActive
-                ? new SolidColorBrush(Color.FromArgb(0x40, 0x7D, 0xD3, 0xFC))
-                : Brushes.Transparent;
-
-            if (button.Content is StackPanel content
-                && content.Children.Count == 4
-                && content.Children[0] is Border indicator
-                && content.Children[1] is LucideIconElement icon
-                && content.Children[3] is TextBlock label)
-            {
-                indicator.Background = isActive
-                    ? (Brush)FindResource("Settings.Brush.AccentText")
-                    : Brushes.Transparent;
-                icon.Stroke = isActive
-                    ? (Brush)FindResource("Settings.Brush.AccentText")
-                    : (Brush)FindResource("Settings.Brush.TextSecondary");
-                label.Foreground = (Brush)FindResource(isActive
-                    ? "Settings.Brush.TextPrimary"
-                    : "Settings.Brush.TextSecondary");
-            }
+            bool active = key == id;
+            System.Windows.Controls.Primitives.Selector.SetIsSelected(button, active);
+            button.Foreground = GetResource<Brush>(active ? "Settings.Brush.TextPrimary" : "Settings.Brush.NavText");
+            button.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
+            var content = (StackPanel)button.Content;
+            var icon = (FrameworkElement)content.Children[0];
+            var iconBrush = GetResource<Brush>(active ? "Settings.Brush.Accent" : "Settings.Brush.NavIcon");
+            System.Windows.Documents.TextElement.SetForeground(icon, iconBrush);
         }
+
+        if (crossGroup && _navGroups.TryGetValue(previousGroupId, out var oldGroup))
+            oldGroup.Deselect();
+        _navGroups[nextGroupId].Select(_navigation[id], crossGroup: crossGroup, instant: isInitial);
 
         if (!_pages.TryGetValue(id, out var page))
         {
@@ -223,7 +216,9 @@ public partial class SettingsWindow : Window
 
         PageHost.Content = page;
         ApplyPageHeader(id);
+        PageScroll.ScrollToTop();
         UpdateTranslationSections();
+        AnimatePageGroups(page);
     }
 
     private void ApplyPageHeader(string id)
@@ -248,7 +243,7 @@ public partial class SettingsWindow : Window
                 break;
             default:
                 PageTitle.Text = "通用";
-                PageDescription.Text = "控制 Screen 的启动方式与基础行为。";
+                PageDescription.Text = "控制 Flick 的启动方式与运行状态。";
                 break;
         }
     }
@@ -297,9 +292,10 @@ public partial class SettingsWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
-        // Cancel without disposing: an in-flight test may still be linking
-        // this token (CreateLinkedTokenSource registers on it), and disposing
-        // surfaces ObjectDisposedException instead of cancellation.
+        EndHotKeyCapture();
+        foreach (var group in _navGroups.Values)
+            group.Dispose();
+        // 仅取消不释放，避免在途连接测试仍链接该令牌时抛出 ObjectDisposedException。
         _translationTestOperation?.Cancel();
         _translationTestClient.Dispose();
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;

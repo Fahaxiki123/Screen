@@ -23,6 +23,8 @@ internal sealed class AppHost : IDisposable
     private AppSettings _settings;
     private Icon? _trayIcon;
     private SettingsWindow? _settingsWindow;
+    private TrayMenuWindow? _trayMenu;
+    private readonly Forms.ContextMenuStrip _trayAnchor = new();
     private RecordingController? _recordingController;
     private bool _recordingFlowActive;
     private bool _settingsLoadFailed;
@@ -78,7 +80,7 @@ internal sealed class AppHost : IDisposable
         });
         _trayIcon = ScreenIconFactory.CreateTrayIcon();
         _notifyIcon.Icon = _trayIcon;
-        _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
+        _notifyIcon.Text = $"Flick — {_settings.HotKey} 截图";
         _notifyIcon.Visible = true;
         _notifyIcon.DoubleClick += async (_, _) =>
         {
@@ -103,14 +105,20 @@ internal sealed class AppHost : IDisposable
         _hotKeyWindow.ClickThroughRecoveryRequested += (_, _) => RecoverClickThrough(showConfirmation: true);
         _hotKeyWindow.RecordRequested += async (_, _) => await StartRecordingSelectionAsync();
         RegisterConfiguredShortcuts();
-        _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
-        _notifyIcon.ContextMenuStrip = BuildMenu();
+        _notifyIcon.Text = $"Flick — {_settings.HotKey} 截图";
+        // WinForms delivers shell menu requests (including keyboard activation) through Opening.
+        _trayAnchor.Opening += (_, e) =>
+        {
+            e.Cancel = true;
+            Application.Current.Dispatcher.BeginInvoke(new Action(ShowTrayMenu));
+        };
+        _notifyIcon.ContextMenuStrip = _trayAnchor;
 
         if (_settingsLoadFailed)
         {
             _notifyIcon.ShowBalloonTip(
                 6000,
-                "Screen 设置加载失败",
+                "Flick 设置加载失败",
                 "无法读取配置文件，已使用默认设置。您的更改将正常保存。",
                 Forms.ToolTipIcon.Warning);
         }
@@ -119,7 +127,7 @@ internal sealed class AppHost : IDisposable
         {
             _notifyIcon.ShowBalloonTip(
                 4000,
-                "Screen 已更新",
+                "Flick 已更新",
                 "新版本已启动，快捷键即可使用。",
                 Forms.ToolTipIcon.Info);
         }
@@ -150,10 +158,10 @@ internal sealed class AppHost : IDisposable
 
     public Task StartRecordingSelectionAsync() => RunRecordingAsync(null);
 
-    public Task StartRecordingWithRegionAsync(PixelRect region, RecordingBorderWindow persistentBorder) =>
-        RunRecordingAsync(region, persistentBorder);
+    public Task StartRecordingWithRegionAsync(RecordingSelection selection, RecordingBorderWindow persistentBorder) =>
+        RunRecordingAsync(selection, persistentBorder);
 
-    private async Task RunRecordingAsync(PixelRect? region, RecordingBorderWindow? persistentBorder = null)
+    private async Task RunRecordingAsync(RecordingSelection? selection, RecordingBorderWindow? persistentBorder = null)
     {
         if (_exiting)
         {
@@ -166,7 +174,7 @@ internal sealed class AppHost : IDisposable
             HintToastWindow.Show("已有录制正在进行");
             return;
         }
-        if (region is null && _coordinator.IsCapturing)
+        if (selection is null && _coordinator.IsCapturing)
         {
             HintToastWindow.Show("截图进行中，请先完成或取消截图再录屏");
             return;
@@ -179,8 +187,7 @@ internal sealed class AppHost : IDisposable
         string filePath;
         try
         {
-            RecordingSelection? selection = null;
-            if (region is null)
+            if (selection is null)
             {
                 NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
                 var frame = DesktopRegionCapture.GetMonitorBounds().Length > 1
@@ -210,15 +217,14 @@ internal sealed class AppHost : IDisposable
                 {
                     return;
                 }
-                region = selection.Region;
-                persistentBorder = new RecordingBorderWindow(region.Value);
+                persistentBorder = new RecordingBorderWindow(selection.Region);
                 persistentBorder.Show();
                 overlay.Close();
             }
 
             // Let the selection overlay disappear while the border stays visible.
             await Task.Delay(200);
-            var countdown = new RecordingCountdownWindow(region.Value);
+            var countdown = new RecordingCountdownWindow(selection.Region);
             countdown.Show();
             if (!await countdown.Completion)
             {
@@ -227,7 +233,7 @@ internal sealed class AppHost : IDisposable
 
             // Release the DXGI session used for selection before recording.
             _captureService.ReleaseSessions();
-            using var controller = RecordingController.Create(_settingsStore, region.Value, selection, persistentBorder);
+            using var controller = RecordingController.Create(_settingsStore, selection.Region, selection, persistentBorder);
             persistentBorder = null; // The controller now owns the border.
             _recordingController = controller;
             controller.ShowControls();
@@ -237,7 +243,7 @@ internal sealed class AppHost : IDisposable
         catch (Exception exception)
         {
             SimpleLogger.LogError("Unable to start recording", exception);
-            MessageBox.Show($"无法开始录屏：{exception.Message}", "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"无法开始录屏：{exception.Message}", "Flick", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
         finally
@@ -250,24 +256,28 @@ internal sealed class AppHost : IDisposable
 
         if (_exiting)
         {
+            result.ReleasePreviewSource();
             return;
         }
         if (GetRecordingSaveNotice(result) is { } notice)
         {
             if (!result.Saved)
             {
-                MessageBox.Show(notice, "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(notice, "Flick", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
             HintToastWindow.Show(notice);
         }
         try
         {
-            WindowActivation.ShowTopmost(new RecordingPreviewWindow(filePath));
+            var preview = new RecordingPreviewWindow(result.TemporaryPreviewSource ?? filePath, selection.Format, filePath);
+            preview.Closed += (_, _) => result.ReleasePreviewSource();
+            WindowActivation.ShowTopmost(preview);
         }
         catch
         {
             // A preview failure must never swallow the finished file.
+            result.ReleasePreviewSource();
             try
             {
                 System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{filePath}\"");
@@ -279,30 +289,44 @@ internal sealed class AppHost : IDisposable
         var interrupted = result.Warning?.Contains("提前中断", StringComparison.Ordinal) == true;
         _notifyIcon.ShowBalloonTip(
             5000,
-            interrupted ? "Screen 录制提前中断（已保存片段）" : "Screen 录制已保存",
+            interrupted ? "Flick 录制提前中断（已保存片段）" : "Flick 录制已保存",
             Path.GetFileName(filePath),
             interrupted ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
     }
 
-    private Forms.ContextMenuStrip BuildMenu()
+    private void ShowTrayMenu()
     {
-        var menu = new Forms.ContextMenuStrip();
-        GraphiteToolStripRenderer.ApplyTo(menu);
-        menu.Items.Add($"截图  {_settings.HotKey}", null, async (_, _) =>
+        if (_exiting || _trayMenu is { IsVisible: true })
+            return;
+        var menu = new TrayMenuWindow();
+        menu.AddItem("截图", _settings.HotKey, "rect", async () =>
         {
             if (!RecordingActive())
-            {
                 await _coordinator.StartCaptureAsync();
-            }
+        }, capturesDesktop: true);
+        menu.AddItem("录屏", _settings.RecordHotKey, "video", StartRecordingSelectionAsync, capturesDesktop: true);
+        menu.AddItem("解除全部贴图穿透", _settings.ClickThroughRecoveryHotKey, "cursor", () =>
+        {
+            RecoverClickThrough(showConfirmation: false);
+            return Task.CompletedTask;
         });
-        menu.Items.Add($"录屏  {_settings.RecordHotKey}", null, async (_, _) => await StartRecordingSelectionAsync());
-        menu.Items.Add($"解除全部贴图穿透  {_settings.ClickThroughRecoveryHotKey}", null, (_, _) => RecoverClickThrough(showConfirmation: false));
-        menu.Items.Add("关闭全部贴图", null, (_, _) => _pinWindowManager.CloseAll());
-        menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("设置", null, (_, _) => OpenSettings());
-        menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("退出", null, async (_, _) => await ExitAsync());
-        return menu;
+        menu.AddItem("关闭全部贴图", "", "pin", () =>
+        {
+            _pinWindowManager.CloseAll();
+            return Task.CompletedTask;
+        });
+        menu.AddSeparator();
+        menu.AddItem("设置", "", "settings", () =>
+        {
+            OpenSettings();
+            return Task.CompletedTask;
+        });
+        menu.AddSeparator();
+        menu.AddItem("退出", "", "close", ExitAsync);
+        _trayMenu = menu;
+        menu.Closed += (_, _) => _trayMenu = null;
+        NativeMethods.TryGetPhysicalCursorPosition(out var anchor);
+        menu.OpenAt(anchor);
     }
 
     private async Task ExitAsync()
@@ -327,7 +351,7 @@ internal sealed class AppHost : IDisposable
                 var result = await active.StopAsync();
                 if (GetRecordingSaveNotice(result) is { } notice)
                 {
-                    MessageBox.Show(notice, "Screen", MessageBoxButton.OK,
+                    MessageBox.Show(notice, "Flick", MessageBoxButton.OK,
                         result.Saved ? MessageBoxImage.Warning : MessageBoxImage.Error);
                 }
             }
@@ -335,7 +359,7 @@ internal sealed class AppHost : IDisposable
             {
                 SimpleLogger.LogError("Failed to finalize recording during exit", exception);
                 MessageBox.Show($"退出时无法完成录屏保存：{exception.Message}",
-                    "Screen", MessageBoxButton.OK, MessageBoxImage.Error);
+                    "Flick", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         Application.Current?.Shutdown();
@@ -372,15 +396,14 @@ internal sealed class AppHost : IDisposable
             hotKey => _hotKeyWindow.RegisterRecordHotKey(hotKey),
             _hotKeyWindow.TrySetPriority);
         _settingsWindow = window;
-        window.SourceInitialized += (_, _) =>
-            _hotKeyWindow.SettingsWindowHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        _hotKeyWindow.TryCaptureInEditor = window.TryCaptureRegisteredHotKey;
         try
         {
             window.ShowDialog();
         }
         finally
         {
-            _hotKeyWindow.SettingsWindowHandle = 0;
+            _hotKeyWindow.TryCaptureInEditor = null;
             _settingsWindow = null;
         }
         if (_exiting)
@@ -392,22 +415,20 @@ internal sealed class AppHost : IDisposable
         // re-register hot keys after the window closes.
         _settings = _settingsStore.Load();
         RegisterConfiguredShortcuts();
-        _notifyIcon.ContextMenuStrip?.Dispose();
-        _notifyIcon.ContextMenuStrip = BuildMenu();
-        _notifyIcon.Text = $"Screen — {_settings.HotKey} 截图";
+        _notifyIcon.Text = $"Flick — {_settings.HotKey} 截图";
     }
 
     private void RegisterConfiguredShortcuts()
     {
         if (!_hotKeyWindow.TrySetPriority(_settings.PreferScreenHotKeys))
         {
-            _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键", "无法启用优先模式，已使用普通快捷键注册。", Forms.ToolTipIcon.Warning);
+            _notifyIcon.ShowBalloonTip(5000, "Flick 快捷键", "无法启用优先模式，已使用普通快捷键注册。", Forms.ToolTipIcon.Warning);
         }
         void RefreshShortcut(string description, string key, Func<string, bool> register)
         {
             if (!register(key))
             {
-                _notifyIcon.ShowBalloonTip(5000, "Screen 快捷键冲突",
+                _notifyIcon.ShowBalloonTip(5000, "Flick 快捷键冲突",
                     $"{description}快捷键 {key} 无法注册，仍可使用托盘菜单。", Forms.ToolTipIcon.Warning);
                 SimpleLogger.LogWarning($"{description} shortcut could not be registered: {key}");
             }
@@ -428,7 +449,7 @@ internal sealed class AppHost : IDisposable
         _notifyIcon.ShowBalloonTip(
             7000,
             "贴图已开启鼠标穿透",
-            $"按 {_settings.ClickThroughRecoveryHotKey} 可立即恢复贴图操作；也可以双击或右键 Screen 托盘图标恢复。此提示只显示一次。",
+            $"按 {_settings.ClickThroughRecoveryHotKey} 可立即恢复贴图操作；也可以双击或右键 Flick 托盘图标恢复。此提示只显示一次。",
             Forms.ToolTipIcon.Info);
     }
 
@@ -441,7 +462,7 @@ internal sealed class AppHost : IDisposable
         _pinWindowManager.DisableClickThroughForAll();
         if (showConfirmation)
         {
-            _notifyIcon.ShowBalloonTip(2200, "Screen", "已恢复全部贴图的鼠标操作。", Forms.ToolTipIcon.Info);
+            _notifyIcon.ShowBalloonTip(2200, "Flick", "已恢复全部贴图的鼠标操作。", Forms.ToolTipIcon.Info);
         }
     }
 
@@ -449,6 +470,9 @@ internal sealed class AppHost : IDisposable
     {
         _recordingController?.Dispose();
         _recordingController = null;
+        _trayMenu?.Close();
+        _notifyIcon.ContextMenuStrip = null;
+        _trayAnchor.Dispose();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _trayIcon?.Dispose();

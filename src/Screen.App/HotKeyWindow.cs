@@ -12,6 +12,7 @@ internal sealed class HotKeyWindow : IDisposable
     private readonly Binding[] _bindings;
     private readonly NativeMethods.KeyboardHookProc _callback;
     private readonly HashSet<uint> _consumedKeys = [];
+    private readonly HashSet<uint> _heldWhenRegistered = [];
     private nint _hook;
     private bool _preferScreen;
 
@@ -39,7 +40,7 @@ internal sealed class HotKeyWindow : IDisposable
     public event EventHandler? ClickThroughRecoveryRequested;
     public event EventHandler? RecordRequested;
 
-    public nint SettingsWindowHandle { get; set; }
+    public Func<Key, ModifierKeys, bool>? TryCaptureInEditor { get; set; }
 
     public bool RegisterCaptureHotKey(string hotKey) => Register(_bindings[0], hotKey);
     public bool RegisterClickThroughRecoveryHotKey(string hotKey) => Register(_bindings[1], hotKey);
@@ -95,6 +96,10 @@ internal sealed class HotKeyWindow : IDisposable
                 return false;
             }
             binding.Native.Dispose();
+            // The keycap can install a new chord during its own KeyDown. That press
+            // belongs to the editor until release, including any hardware repeats.
+            if (binding.Chord != chord && NativeMethods.GetAsyncKeyState((int)chord.Key) < 0)
+                _heldWhenRegistered.Add(chord.Key);
         }
         else if (!binding.Native.TryRegister(modifiers | NativeMethods.ModNoRepeat, chord.Key))
         {
@@ -137,6 +142,7 @@ internal sealed class HotKeyWindow : IDisposable
         var key = (uint)Marshal.ReadInt32(lParam);
         if (message is NativeMethods.WmKeyUp or NativeMethods.WmSysKeyUp)
         {
+            _heldWhenRegistered.Remove(key);
             if (_consumedKeys.Remove(key))
             {
                 return 1;
@@ -148,11 +154,12 @@ internal sealed class HotKeyWindow : IDisposable
             {
                 return 1;
             }
+            if (_heldWhenRegistered.Contains(key))
+                return NativeMethods.CallNextHookEx(_hook, code, wParam, lParam);
             foreach (var binding in _bindings)
             {
                 if (binding.Chord is not { } chord || chord.Key != key || !UsesHook(chord)
-                    || chord.Modifiers != CurrentModifiers()
-                    || (SettingsWindowHandle != 0 && NativeMethods.GetForegroundWindow() == SettingsWindowHandle))
+                    || chord.Modifiers != CurrentModifiers())
                 {
                     continue;
                 }
@@ -205,23 +212,26 @@ internal sealed class HotKeyWindow : IDisposable
         }
         foreach (var binding in _bindings)
         {
-            if ((message == NativeMethods.WmHotKey && binding.Native.IsActiveId(wParam.ToInt32()))
-                || (message == WmPriorityHotKey && binding.Id == wParam.ToInt32()
-                    && binding.Chord is { } chord && chord.Key == (uint)lParam && UsesHook(chord)))
-            {
-                handled = true;
-                if (SettingsWindowHandle == 0 || NativeMethods.GetForegroundWindow() != SettingsWindowHandle)
-                {
-                    binding.Action();
-                }
-                break;
-            }
+            if (binding.Chord is not { } chord)
+                continue;
+            bool matches = message == NativeMethods.WmHotKey
+                ? binding.Native.IsActiveId(wParam.ToInt32())
+                : binding.Id == wParam.ToInt32() && chord.Key == (uint)lParam && UsesHook(chord);
+            if (!matches)
+                continue;
+
+            // Windows can consume a registered combination before the focused keycap gets KeyDown.
+            handled = true;
+            if (TryCaptureInEditor?.Invoke(KeyInterop.KeyFromVirtualKey((int)chord.Key), (ModifierKeys)chord.Modifiers) != true)
+                binding.Action();
+            break;
         }
         return 0;
     }
 
     private void RemoveHook()
     {
+        _heldWhenRegistered.Clear();
         if (_hook != 0)
         {
             NativeMethods.UnhookWindowsHookEx(_hook);

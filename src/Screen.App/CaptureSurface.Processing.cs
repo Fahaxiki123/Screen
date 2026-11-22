@@ -17,11 +17,14 @@ internal sealed partial class CaptureSurface
 
     public bool IsProcessing { get; private set; }
 
-    protected override int VisualChildrenCount => 1;
+    protected override int VisualChildrenCount => 2;
 
-    protected override Visual GetVisualChild(int index) => index == 0
-        ? _processingVisual
-        : throw new ArgumentOutOfRangeException(nameof(index));
+    protected override Visual GetVisualChild(int index) => index switch
+    {
+        0 => _processingVisual,
+        1 => _captureHud,
+        _ => throw new ArgumentOutOfRangeException(nameof(index))
+    };
 
     private void InitializeProcessingVisual()
     {

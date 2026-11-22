@@ -80,6 +80,7 @@ internal sealed partial class RecordingPreviewWindow
         _videoHeight = info.Height;
         _fps = info.FramesPerSecond;
         _timeline.Maximum = Math.Max(0.1, _durationSeconds);
+        UpdateTrimReadout();
         _loaded = true;
         UpdateTimeText();
         // Feishu-style: playback starts immediately after recording ends.
@@ -193,7 +194,7 @@ internal sealed partial class RecordingPreviewWindow
             _fps,
             _speed);
         _decodeTask = Task.Run(() => DecodeLoopAsync(request, cts.Token));
-        if (autoPlay)
+        if (autoPlay && _exportFormat == RecordingExportFormat.Mp4)
         {
             StartAudioFrom(startSeconds, generation, cts.Token);
         }

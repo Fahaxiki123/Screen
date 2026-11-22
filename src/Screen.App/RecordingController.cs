@@ -24,6 +24,7 @@ internal sealed class RecordingController : IDisposable
     private readonly DispatcherTimer _timer;
     private readonly PixelRect _region;
     private readonly string _filePath;
+    private readonly RecordingExportFormat _format;
     private readonly string _tempDir;
     private readonly string _videoTempPath;
     private readonly RecordingStopSignal _stopSignal;
@@ -41,11 +42,13 @@ internal sealed class RecordingController : IDisposable
         RecordingAudioService? audio,
         RecordingBorderWindow? border,
         RecordingStopSignal stopSignal,
-        bool showClickEffects = false)
+        bool showClickEffects = false,
+        RecordingExportFormat format = RecordingExportFormat.Mp4)
     {
         _recorder = recorder;
         _region = region;
         _filePath = filePath;
+        _format = format;
         _tempDir = tempDir;
         _videoTempPath = Path.Combine(tempDir, "video.mp4");
         _audio = audio;
@@ -55,7 +58,8 @@ internal sealed class RecordingController : IDisposable
 
         _control = new RecordingControlWindow(
             hasAudio: audio is not null,
-            levelProvider: audio is null ? null : () => audio.CurrentPeakLevel);
+            levelProvider: audio is null ? null : audio.TakeMeterSample,
+            format: format);
         _control.PauseToggled += (_, _) => TogglePause();
         _control.StopRequested += (_, _) => _ = StopAsync();
 
@@ -84,14 +88,15 @@ internal sealed class RecordingController : IDisposable
     {
         var appSettings = settings.Load();
         var profile = appSettings.Recording;
+        var format = selection?.Format ?? RecordingExportFormat.Mp4;
         if (selection is not null)
         {
             profile = profile with
             {
                 ShowCursor = selection.ShowCursor,
                 ShowClickEffects = selection.ShowClickEffects,
-                RecordSystemAudio = selection.RecordSystemAudio,
-                RecordMicrophone = selection.RecordMicrophone
+                RecordSystemAudio = format != RecordingExportFormat.Gif && selection.RecordSystemAudio,
+                RecordMicrophone = format != RecordingExportFormat.Gif && selection.RecordMicrophone
             };
         }
         // Encoders need even dimensions; the crop keeps the top-left.
@@ -102,7 +107,11 @@ internal sealed class RecordingController : IDisposable
         }
         FfmpegLocator.Resolve();
         Directory.CreateDirectory(appSettings.SaveDirectory);
-        var filePath = Path.Combine(appSettings.SaveDirectory, $"Recording-{DateTime.Now:yyyyMMdd-HHmmss}.mp4");
+        var extension = format == RecordingExportFormat.Gif ? ".gif" : ".mp4";
+        var stem = Path.Combine(appSettings.SaveDirectory, $"Recording-{DateTime.Now:yyyyMMdd-HHmmss}");
+        var filePath = stem + extension;
+        for (int copy = 2; File.Exists(filePath); copy++)
+            filePath = $"{stem}-{copy}{extension}";
         var tempDir = Path.Combine(Path.GetTempPath(), "Screen.Recording", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
 
@@ -128,7 +137,7 @@ internal sealed class RecordingController : IDisposable
                 }
             }
             return new RecordingController(recorder, target, filePath, tempDir, audio, persistentBorder, stopSignal,
-                profile.ShowClickEffects);
+                profile.ShowClickEffects, format);
         }
         catch
         {
@@ -214,6 +223,11 @@ internal sealed class RecordingController : IDisposable
         // Both capture paths observe the same stop boundary immediately. In
         // particular, audio must not keep recording while ffmpeg finalizes.
         _stopSignal.Request();
+        if (_format == RecordingExportFormat.Gif && _control.IsVisible)
+        {
+            _border?.Hide();
+            _control.ShowSavingGif();
+        }
         _finishTask = Task.Run(() =>
         {
             try
@@ -224,6 +238,12 @@ internal sealed class RecordingController : IDisposable
                 var interruptionWarning = _recorder.Fault is { } fault
                     ? $"录屏因异常提前中断（{fault.Message}），已保存中断前内容"
                     : null;
+                if (_format == RecordingExportFormat.Gif)
+                {
+                    RecordingGifExporter.Export(_videoTempPath, _filePath, _region.Width, _region.Height,
+                        new RecordingTrimRange(0, _recorder.EncodedDurationSeconds), CancellationToken.None);
+                    return new RecordingSaveResult(true, interruptionWarning, null, null) { TemporaryPreviewSource = _videoTempPath };
+                }
                 if (audioError is not null)
                 {
                     SimpleLogger.LogError($"Recording audio finalization failed; recovery directory: {_tempDir}", audioError);
@@ -231,7 +251,7 @@ internal sealed class RecordingController : IDisposable
                         interruptionWarning,
                         $"声音处理失败，已保存无声视频（{audioError.Message}）");
                     return RecordingFileStore.Save(_videoTempPath, _filePath, _tempDir,
-                        warning, preserveRecovery: true);
+                        warning, preserveRecovery: true, overwrite: false);
                 }
                 return MuxAudioAndFinish(interruptionWarning);
             }
@@ -260,7 +280,7 @@ internal sealed class RecordingController : IDisposable
         var tracks = _audio?.Tracks.Where(track => track.BytesWritten > 0).ToList() ?? [];
         if (tracks.Count == 0)
         {
-            return RecordingFileStore.Save(_videoTempPath, _filePath, _tempDir, warning: interruptionWarning);
+            return RecordingFileStore.Save(_videoTempPath, _filePath, _tempDir, warning: interruptionWarning, overwrite: false);
         }
         var muxPath = Path.Combine(_tempDir, "muxed.mp4");
         string? muxError = null;
@@ -330,7 +350,7 @@ internal sealed class RecordingController : IDisposable
             interruptionWarning,
             muxError is null ? null : $"声音处理失败，已保存无声视频（{muxError}）");
         return RecordingFileStore.Save(muxError is null ? muxPath : _videoTempPath,
-            _filePath, _tempDir, warning, preserveRecovery: muxError is not null);
+            _filePath, _tempDir, warning, preserveRecovery: muxError is not null, overwrite: false);
     }
 
     internal static ProcessStartInfo BuildMuxStartInfo(

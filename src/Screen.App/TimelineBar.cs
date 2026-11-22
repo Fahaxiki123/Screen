@@ -17,24 +17,18 @@ internal sealed class TimelineBar : FrameworkElement
     private const double HandleHitPadding = 5;
     private const double PlayheadWidth = 2.4;
 
-    private static readonly Brush SurfaceBrush = CreateFrozenBrush(Color.FromRgb(0x07, 0x0E, 0x1B));
-    private static readonly Brush ExcludedDimBrush = CreateFrozenBrush(Color.FromArgb(0xA8, 0x03, 0x06, 0x0E));
+    private static readonly Brush SurfaceBrush = CreateFrozenBrush(Color.FromRgb(0xF5, 0xF7, 0xFA));
+    private static readonly Brush ExcludedDimBrush = CreateFrozenBrush(Color.FromArgb(0x18, 0x0F, 0x17, 0x2A));
     private static readonly Brush ActiveZoneBrush = CreateFrozenGradient(
-        Color.FromArgb(0x2E, 0x38, 0xBD, 0xF8),
-        Color.FromArgb(0x16, 0x0E, 0xA5, 0xE9),
-        horizontal: true);
-    private static readonly Pen TickPen = CreateFrozenPen(Color.FromArgb(0x16, 0x94, 0xC5, 0xFF), 1);
-    private static readonly Pen ActiveEdgePen = CreateFrozenPen(Color.FromRgb(0x38, 0xBD, 0xF8), 1.6);
+        Color.FromArgb(0x24, 0, 0x7A, 0xFF), Color.FromArgb(0x13, 0, 0x7A, 0xFF), horizontal: true);
+    private static readonly Pen TickPen = CreateFrozenPen(Color.FromArgb(0x26, 0x0F, 0x17, 0x2A), 1);
+    private static readonly Pen ActiveEdgePen = CreateFrozenPen(Color.FromRgb(0, 0x7A, 0xFF), 1.6);
     private static readonly Brush AccentBrush = CreateFrozenGradient(
-        Color.FromRgb(0x7D, 0xD3, 0xFC),
-        Color.FromRgb(0x0E, 0xA5, 0xE9),
-        horizontal: false);
+        Color.FromRgb(0x18, 0x88, 0xFF), Color.FromRgb(0, 0x7A, 0xFF), horizontal: false);
     private static readonly Brush AccentHoverBrush = CreateFrozenGradient(
-        Color.FromRgb(0xBA, 0xE6, 0xFD),
-        Color.FromRgb(0x38, 0xBD, 0xF8),
-        horizontal: false);
-    private static readonly Brush GripBrush = CreateFrozenBrush(Color.FromRgb(0x06, 0x13, 0x26));
-    private static readonly Brush PlayheadBrush = Brushes.White;
+        Color.FromRgb(0x50, 0xA4, 0xFF), Color.FromRgb(0x18, 0x88, 0xFF), horizontal: false);
+    private static readonly Brush GripBrush = Brushes.White;
+    private static readonly Brush PlayheadBrush = CreateFrozenBrush(Color.FromRgb(0x1D, 0x1D, 0x1F));
 
     private static SolidColorBrush CreateFrozenBrush(Color color)
     {
@@ -122,6 +116,7 @@ internal sealed class TimelineBar : FrameworkElement
         if (_value < _trimStart)
         {
             _value = _trimStart;
+            ValueChanged?.Invoke(this, EventArgs.Empty);
         }
         InvalidateVisual();
         TrimChanged?.Invoke(this, EventArgs.Empty);
@@ -138,6 +133,7 @@ internal sealed class TimelineBar : FrameworkElement
         if (_value > _trimEnd)
         {
             _value = _trimEnd;
+            ValueChanged?.Invoke(this, EventArgs.Empty);
         }
         InvalidateVisual();
         TrimChanged?.Invoke(this, EventArgs.Empty);
@@ -191,7 +187,7 @@ internal sealed class TimelineBar : FrameworkElement
             dc.DrawRectangle(ExcludedDimBrush, null, new Rect(endHandle.Right, 0, width - endHandle.Right, height));
         }
 
-        // Luminous ice-cyan active interval highlight & top/bottom rails
+        // Outline the interval that will be exported.
         if (xe > xs)
         {
             dc.DrawRectangle(ActiveZoneBrush, null, new Rect(xs, 1, xe - xs, Math.Max(0, height - 2)));
@@ -214,6 +210,11 @@ internal sealed class TimelineBar : FrameworkElement
 
     private void DrawHandle(DrawingContext dc, Rect rect, DragMode mode)
     {
+        if (_dragMode == mode)
+        {
+            // Grow visually without shifting the boundary or changing the drag hit target.
+            rect.Inflate(1.5, 0);
+        }
         var brush = _dragMode == mode || _hoverMode == mode ? AccentHoverBrush : AccentBrush;
         dc.DrawRoundedRectangle(brush, null, rect, 4, 4);
         var squareHalf = mode == DragMode.TrimStart
@@ -221,7 +222,7 @@ internal sealed class TimelineBar : FrameworkElement
             : new Rect(rect.Left, rect.Top, rect.Width / 2, rect.Height);
         dc.DrawRectangle(brush, null, squareHalf);
 
-        // Clean single slot pill inside the ice-cyan grip
+        // Center the grip inside its handle.
         var center = rect.Left + rect.Width / 2;
         var slotHeight = Math.Clamp(rect.Height * 0.42, 4, 12);
         var slotTop = rect.Top + (rect.Height - slotHeight) / 2;
@@ -292,6 +293,7 @@ internal sealed class TimelineBar : FrameworkElement
             : System.Windows.Input.Cursors.Hand;
         ScrubStarted?.Invoke(this, EventArgs.Empty);
         ApplyDrag(point);
+        InvalidateVisual();
     }
 
     protected override void OnMouseLeftButtonDown(System.Windows.Input.MouseButtonEventArgs e)

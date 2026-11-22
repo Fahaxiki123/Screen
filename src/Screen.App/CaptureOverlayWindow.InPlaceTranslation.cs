@@ -1,20 +1,30 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Shapes;
+using System.Windows.Threading;
 using Screen.Core;
 
 namespace Screen.App;
 
 internal sealed partial class CaptureOverlayWindow
 {
-    private readonly Border _inPlaceStatusBar = new() { Visibility = Visibility.Collapsed };
+    private readonly SquircleGlassBorder _inPlaceStatusBar = new()
+    {
+        CornerRadiusRadius = 10.5,
+        Padding = new Thickness(4),
+        Visibility = Visibility.Collapsed
+    };
     private readonly TextBlock _inPlaceStatus = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly DispatcherTimer _inPlaceCopyFeedback = new() { Interval = TimeSpan.FromSeconds(1) };
     private Button _originalToggle = null!;
     private Button _copyTranslation = null!;
     private PixelBuffer? _inPlaceResult;
     private AnnotationItem[] _inPlaceMosaics = [];
     private PixelRect _textSelection;
     private string _inPlaceText = string.Empty;
+    private string? _inPlaceCompletionDetail;
     private bool _inPlaceMode;
     private bool _translationBusy;
     private bool _captureClosed;
@@ -25,36 +35,56 @@ internal sealed partial class CaptureOverlayWindow
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         _originalToggle = CreateInlineButton("查看原文", (_, _) =>
         {
-            var showingTranslation = _surface.IsShowingTranslation;
-            _surface.SetTranslatedSelection(showingTranslation ? null : _inPlaceResult);
-            _originalToggle.Content = showingTranslation ? "查看译文" : "查看原文";
+            bool showOriginal = _surface.IsShowingTranslation;
+            _surface.SetTranslatedSelection(showOriginal ? null : _inPlaceResult, animateComparison: true);
+            _originalToggle.Content = showOriginal ? "查看译文" : "查看原文";
+            SetInPlaceStatus(showOriginal ? "正在对照原文" : "原位覆盖完成", _inPlaceCompletionDetail);
         });
         _copyTranslation = CreateInlineButton("复制译文", (_, _) =>
         {
             try
-            { BitmapUtilities.SetClipboardTextWithRetry(_inPlaceText); }
+            {
+                BitmapUtilities.SetClipboardTextWithRetry(_inPlaceText);
+                _copyTranslation.Content = "✓ 已复制";
+                PositionFloatingPanels();
+                _inPlaceCopyFeedback.Stop();
+                _inPlaceCopyFeedback.Start();
+            }
             catch (Exception exception) { SetInPlaceStatus($"复制失败：{exception.Message}"); }
         });
+        _copyTranslation.SetResourceReference(StyleProperty, "CardPrimaryButtonStyle");
+        _inPlaceCopyFeedback.Tick += (_, _) =>
+        {
+            _inPlaceCopyFeedback.Stop();
+            _copyTranslation.Content = "复制译文";
+            PositionFloatingPanels();
+        };
+        Closed += (_, _) => _inPlaceCopyFeedback.Stop();
         actions.Children.Add(_originalToggle);
         actions.Children.Add(_copyTranslation);
-        actions.Children.Add(CreateInlineButton("关闭", (_, _) =>
+        var close = CreateInlineButton("关闭", (_, _) =>
         {
             CancelTranslation();
             ClearInPlaceTranslation();
             PositionFloatingPanels();
-        }));
+        });
+        close.Content = AppleVectorIcons.Create("close", 14);
+        close.ToolTip = "关闭原位翻译";
+        AutomationProperties.SetName(close, "关闭原位翻译");
+        close.Padding = new Thickness(0);
+        close.Width = 28;
+        actions.Children.Add(close);
         DockPanel.SetDock(actions, Dock.Right);
         row.Children.Add(actions);
+        var dot = new Ellipse { Width = 7, Height = 7, Margin = new Thickness(9, 0, 2, 0) };
+        dot.SetResourceReference(Shape.FillProperty, "Brush.Success");
+        DockPanel.SetDock(dot, Dock.Left);
+        row.Children.Add(dot);
         _inPlaceStatus.Foreground = FindResourceBrush("Brush.OverlayText");
         _inPlaceStatus.FontSize = 12;
         _inPlaceStatus.Margin = new Thickness(6, 0, 12, 0);
         row.Children.Add(_inPlaceStatus);
         _inPlaceStatusBar.Child = row;
-        _inPlaceStatusBar.Background = FindResourceBrush("Brush.ChromeGradient");
-        _inPlaceStatusBar.BorderBrush = FindResourceBrush("Brush.OverlayBorder");
-        _inPlaceStatusBar.BorderThickness = new Thickness(1);
-        _inPlaceStatusBar.CornerRadius = new CornerRadius(9);
-        _inPlaceStatusBar.Padding = new Thickness(5);
         _root.Children.Add(_inPlaceStatusBar);
         Panel.SetZIndex(_inPlaceStatusBar, 22);
         ClearInPlaceTranslation();
@@ -111,44 +141,26 @@ internal sealed partial class CaptureOverlayWindow
         _inPlaceResult = null;
         _inPlaceMosaics = [];
         _inPlaceText = string.Empty;
+        _inPlaceCompletionDetail = null;
+        _inPlaceCopyFeedback.Stop();
         _inPlaceStatusBar.Visibility = Visibility.Collapsed;
         if (_originalToggle is not null)
         {
             _originalToggle.Visibility = _copyTranslation.Visibility = Visibility.Collapsed;
             _originalToggle.Content = "查看原文";
+            _copyTranslation.Content = "复制译文";
         }
     }
 
-    private void SetInPlaceStatus(string status)
+    private void SetInPlaceStatus(string status, string? detail = null)
     {
         _inPlaceStatus.Text = status;
-        _inPlaceStatus.ToolTip = status;
+        _inPlaceStatus.ToolTip = detail ?? status;
+        bool entering = _inPlaceStatusBar.Visibility != Visibility.Visible;
         _inPlaceStatusBar.Visibility = Visibility.Visible;
         PositionFloatingPanels();
-    }
-
-    private void PositionInPlaceTranslation()
-    {
-        var selection = _surface.Selection;
-        if (selection.IsEmpty || ActualWidth <= 0 || ActualHeight <= 0)
-            return;
-        var sx = ActualWidth / _frame.Width;
-        var sy = ActualHeight / _frame.Height;
-        if (_inPlaceStatusBar.Visibility != Visibility.Visible)
-            return;
-        _inPlaceStatusBar.Width = Math.Min(Math.Max(400, selection.Width * sx), Math.Max(1, ActualWidth - 16));
-        _inPlaceStatusBar.Measure(new Size(_inPlaceStatusBar.Width, double.PositiveInfinity));
-        var height = _inPlaceStatusBar.DesiredSize.Height;
-        var toolbar = ToolbarBounds();
-        var top = selection.Y * sy - height - 10;
-        if (top < 8 || new Rect(selection.X * sx, top, _inPlaceStatusBar.Width, height).IntersectsWith(toolbar))
-        {
-            top = toolbar.Bottom + 6;
-            if (top + height > ActualHeight - 8)
-                top = Math.Max(8, toolbar.Top - height - 6);
-        }
-        Canvas.SetLeft(_inPlaceStatusBar, Math.Clamp(selection.X * sx, 8, Math.Max(8, ActualWidth - _inPlaceStatusBar.Width - 8)));
-        Canvas.SetTop(_inPlaceStatusBar, top);
+        if (entering)
+            GlassMotion.Enter(_inPlaceStatusBar, -10, 0.96, 280);
     }
 
     private async Task TranslateInPlaceAsync(AppSettings settings, string targetLanguage, CancellationTokenSource operation)
@@ -207,6 +219,7 @@ internal sealed partial class CaptureOverlayWindow
         _surface.SetTranslatedSelection(_inPlaceResult);
         _inPlaceText = string.Join(Environment.NewLine + Environment.NewLine, translated.Select(region => region.Text));
         _originalToggle.Visibility = _copyTranslation.Visibility = Visibility.Visible;
-        SetInPlaceStatus(usedFallback ? "原位翻译完成 · 已使用备用服务" : "原位翻译完成");
+        _inPlaceCompletionDetail = usedFallback ? "原位覆盖完成 · 已使用备用服务" : null;
+        SetInPlaceStatus("原位覆盖完成", _inPlaceCompletionDetail);
     }
 }

@@ -76,34 +76,8 @@ internal sealed partial class CaptureSurface : FrameworkElement
     private WriteableBitmap? _mosaicCompositeSource;
     private bool _mosaicCompositeDirty = true;
     private List<MosaicSnapshot>? _appliedMosaicSnapshots;
-    private int _magnifierSampleIndex = 9;
-
-    // Theme tokens used by the per-frame render path. Looked up once in the
-    // constructor: fetching resources on every OnRender is measurable.
     private readonly Brush _accentBrush;
-    private readonly Brush _overlayBaseBrush;
-    private readonly Brush _overlayBorderBrush;
-    private readonly Brush _overlayTextBrush;
-    private readonly Brush _overlayTextDimBrush;
-    private readonly Brush _overlayIconBrush;
-    private readonly Brush _neutral500Brush;
-
-    // Sample widths → zoom = MagnifierWidth / sample, from 1× to 38×.
-    // Default = sample 23 ≈ 10×.
-    private static readonly int[] MagnifierSamples =
-        [6, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 29, 33, 39, 45, 53, 61, 71, 83, 97, 115, 135, 159, 187, 230];
-    private const int MagnifierWidth = 230;
-    private const int MagnifierHeight = 160;
-
-    // The displayed height varies slightly per zoom (≈160, up to 167); keep a
-    // few spare rows so the shared buffer can never be overrun.
-    private readonly byte[] _magnifierBuffer = new byte[MagnifierWidth * (MagnifierHeight + 8) * 4];
-
-    private static readonly Typeface PanelMono = new(
-        new FontFamily("Cascadia Mono, Consolas"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
-    private static readonly Typeface PanelMonoBold = new(
-        new FontFamily("Cascadia Mono, Consolas"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
-    private static readonly Typeface PanelUi = new("Segoe UI");
+    private readonly Brush _selectionMask;
 
     public CaptureSurface(
         CaptureFrame frame,
@@ -118,17 +92,13 @@ internal sealed partial class CaptureSurface : FrameworkElement
         _snapService = snapService;
         var resources = themeResources ?? Application.Current.Resources;
         _accentBrush = (Brush)resources["Brush.Accent"];
-        _overlayBaseBrush = (Brush)resources["Brush.OverlayBase"];
-        _overlayBorderBrush = (Brush)resources["Brush.OverlayBorder"];
-        _overlayTextBrush = (Brush)resources["Brush.OverlayText"];
-        _overlayTextDimBrush = (Brush)resources["Brush.OverlayTextDim"];
-        _overlayIconBrush = (Brush)resources["Brush.OverlayIcon"];
-        _neutral500Brush = (Brush)resources["Brush.Neutral500"];
+        _selectionMask = resources["Brush.SelectionMask"] as Brush ?? new SolidColorBrush(Color.FromArgb(0x57, 15, 23, 42));
         Focusable = true;
         Cursor = Cursors.Cross;
         SnapsToDevicePixels = true;
         RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.NearestNeighbor);
         InitializeProcessingVisual();
+        InitializeCaptureChrome();
     }
 
     public event EventHandler? SelectionChanged;
@@ -174,7 +144,7 @@ internal sealed partial class CaptureSurface : FrameworkElement
         && MosaicMode == MosaicDrawMode.Brush
         && Contains(Selection, _cursor);
     public bool ColorRgbMode { get; set; }
-    public string ColorStatus { get; set; } = "Ctrl+C 复制色值 · Shift 切换格式";
+
     public bool CanUndo => _history.CanUndo;
     public bool CanRedo => _history.CanRedo;
 
@@ -198,29 +168,32 @@ internal sealed partial class CaptureSurface : FrameworkElement
         InvalidateVisual();
     }
 
-    internal uint HoverColor => GetPixelColor(_cursor);
+    // A source pixel occupies [x, x + 1) even when monitor scaling places
+    // the pointer between integral coordinates on the capture surface.
+    private (int X, int Y) HoverPixel => ((int)_cursor.X, (int)_cursor.Y);
 
-    // Utility methods
+    internal uint HoverColor
+    {
+        get
+        {
+            var (x, y) = HoverPixel;
+            var offset = y * _sourceBuffer.Stride + x * 4;
+            return 0xFF000000u
+                   | ((uint)_sourceBuffer.Pixels[offset + 2] << 16)
+                   | ((uint)_sourceBuffer.Pixels[offset + 1] << 8)
+                   | _sourceBuffer.Pixels[offset];
+        }
+    }
+
+    // Remove floating-point noise at exact device-pixel boundaries before
+    // the selection and magnifier take the integral part (e.g. at 150% DPI).
     private PixelPoint ToPixel(Point point) => new(
-        Math.Clamp(point.X * _frame.Width / Math.Max(1, ActualWidth), 0, _frame.Width - 1),
-        Math.Clamp(point.Y * _frame.Height / Math.Max(1, ActualHeight), 0, _frame.Height - 1));
+        Math.Clamp(Math.Round(point.X * _frame.Width / Math.Max(1, ActualWidth), 8), 0, _frame.Width - 1),
+        Math.Clamp(Math.Round(point.Y * _frame.Height / Math.Max(1, ActualHeight), 8), 0, _frame.Height - 1));
 
     private PixelPoint ClampAnnotationPoint(PixelPoint point) => new(
         Math.Clamp(point.X, Selection.X, Selection.Right),
         Math.Clamp(point.Y, Selection.Y, Selection.Bottom));
-
-    private uint GetPixelColor(PixelPoint point)
-    {
-        var x = (int)Math.Round(point.X);
-        var y = (int)Math.Round(point.Y);
-        x = Math.Clamp(x, 0, _sourceBuffer.Width - 1);
-        y = Math.Clamp(y, 0, _sourceBuffer.Height - 1);
-        var offset = y * _sourceBuffer.Stride + x * 4;
-        return 0xFF000000u
-               | ((uint)_sourceBuffer.Pixels[offset + 2] << 16)
-               | ((uint)_sourceBuffer.Pixels[offset + 1] << 8)
-               | _sourceBuffer.Pixels[offset];
-    }
 
     private PixelPoint ToScreenPoint(PixelPoint point) => ScreenPointMapper?.Invoke(point)
         ?? new PixelPoint(_frame.ScreenBounds.X + point.X, _frame.ScreenBounds.Y + point.Y);

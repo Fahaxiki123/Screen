@@ -51,7 +51,7 @@ internal sealed class CaptureCoordinator(
             SimpleLogger.LogError("Screen capture failed", exception);
             MessageBox.Show(
                 $"无法开始截图：{exception.Message}",
-                "Screen",
+                "Flick",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }

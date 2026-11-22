@@ -1,5 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Windows.Media.Imaging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using NAudio.Wave;
 using Screen.Core;
@@ -281,6 +282,53 @@ public sealed class RecordingRegressionTests
         }
     }
 
+    [STATestMethod(UseSTASynchronizationContext = true)]
+    [DataRow(4, 10, false)]
+    [DataRow(1, 30, false)]
+    [DataRow(4, 10, true)]
+    public async Task StoppingGifDeliversAPlayableFileAndProtectsThePreviewSource(int frames, int fps, bool pathOccupied)
+    {
+        const int width = 1536, height = 96;
+        var scratch = Directory.CreateDirectory(Path.Combine(_root, "session")).FullName;
+        var source = Path.Combine(scratch, "video.mp4");
+        var destination = Path.Combine(_root, "recording.gif");
+        using (var pipeline = new RecordingPipeline(source, width, height, fps, 400_000, "nv12"))
+        {
+            var pixels = new byte[width * height * 3 / 2];
+            for (int i = 0; i < frames; i++)
+                pipeline.WriteVideoFrame(pixels);
+            pipeline.FinalizeFile();
+        }
+        if (pathOccupied)
+            File.WriteAllText(destination, "previous recording");
+        var capture = new FakeRecordingCapture(() => { }) { EncodedDurationSeconds = (double)frames / fps };
+        using var controller = new RecordingController(capture, new PixelRect(0, 0, width, height),
+            destination, scratch, audio: null, border: null, new RecordingStopSignal(), format: RecordingExportFormat.Gif);
+        var result = await controller.StopAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.IsTrue(File.Exists(source));
+        Assert.AreEqual(0, Directory.GetFiles(_root, "*.mp4").Length);
+        if (pathOccupied)
+        {
+            Assert.IsFalse(result.Saved);
+            Assert.AreEqual(scratch, result.RecoveryDirectory);
+            Assert.AreEqual("previous recording", File.ReadAllText(destination));
+            result.ReleasePreviewSource();
+            Assert.IsTrue(File.Exists(source));
+            return;
+        }
+        Assert.IsTrue(result.Saved, result.Error);
+        Assert.AreEqual(source, result.TemporaryPreviewSource);
+        result.ReleasePreviewSource();
+        Assert.IsFalse(Directory.Exists(scratch));
+        using var input = File.OpenRead(destination);
+        var gif = new GifBitmapDecoder(input, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        Assert.AreEqual(1, gif.Frames.Count, "A still scene only needs one GIF frame.");
+        var image = gif.Frames[0];
+        Assert.AreEqual(1280, image.PixelWidth);
+        Assert.AreEqual(80, image.PixelHeight);
+        Assert.AreEqual((ushort)Math.Round(100.0 * frames / fps), (ushort)((BitmapMetadata)image.Metadata).GetQuery("/grctlext/Delay"));
+    }
+
     [TestMethod]
     public async Task ClipboardExportSurvivesPreviewCacheDisposal()
     {
@@ -423,6 +471,25 @@ public sealed class RecordingRegressionTests
 
         Assert.AreEqual(4L, track.BytesWritten);
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, File.ReadAllBytes(path));
+    }
+
+    [TestMethod]
+    public void RecordingMeterReturnsToSilenceWhenLoopbackStopsDeliveringPackets()
+    {
+        var capture = new FakeWaveIn();
+        var track = new RecordingAudioTrack(capture, Path.Combine(_root, "meter.raw"), "s16le", 48000, 2, new RecordingStopSignal());
+        using var audio = new RecordingAudioService([track]);
+        byte[] loud = [0, 64, 0, 64];
+        capture.Emit(loud);
+        Assert.AreEqual(0.5f, audio.TakeMeterSample());
+        Assert.AreEqual(0f, audio.TakeMeterSample());
+
+        capture.Emit(loud);
+        audio.Paused = true;
+        audio.Paused = false;
+        Assert.AreEqual(0f, audio.TakeMeterSample());
+        capture.Emit(loud);
+        Assert.AreEqual(0.5f, audio.TakeMeterSample());
     }
 
     [TestMethod]

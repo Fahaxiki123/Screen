@@ -9,7 +9,7 @@ namespace Screen.App;
 
 /// <summary>
 /// Full-virtual-screen dimming mask with an optical camera-viewfinder frame:
-/// hairline guide + four luminous ice-cyan corner brackets + compact resolution
+/// hairline guide + four system-blue corner brackets + compact resolution
 /// badge. Click-through everywhere and carries WDA_EXCLUDEFROMCAPTURE so none
 /// of the viewfinder chrome ever enters the recorded video.
 /// </summary>
@@ -17,11 +17,12 @@ internal sealed class RecordingBorderWindow : Window
 {
     public RecordingBorderWindow(PixelRect region)
     {
-        Title = "Screen 录制区域";
+        Title = "Flick 录制区域";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         Topmost = true;
         ShowInTaskbar = false;
+        ShowActivated = false;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
         IsHitTestVisible = false;
@@ -42,8 +43,7 @@ internal sealed class RecordingBorderWindow : Window
         var rw = region.Width / dpi;
         var rh = region.Height / dpi;
 
-        var mask = RecordingTheme.Brush("Brush.WindowBackground", "#0A1222").Clone();
-        mask.Opacity = 0.52;
+        var mask = RecordingTheme.Brush("Brush.SelectionMask", "#570F172A");
         var canvas = new Canvas { ClipToBounds = true };
         // Four dimmed bands around the region; the region itself stays crystal clear.
         canvas.Children.Add(MaskRect(mask, 0, 0, Width, ry));
@@ -54,7 +54,7 @@ internal sealed class RecordingBorderWindow : Window
         // Subtle continuous 1px optical guide outside the region so no inner pixel is covered
         var guide = new Border
         {
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x52, 0x7D, 0xD3, 0xFC)),
+            BorderBrush = RecordingTheme.Brush("Brush.OverlayBorder", "#210F172A"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Width = rw + 2,
@@ -66,13 +66,13 @@ internal sealed class RecordingBorderWindow : Window
 
         // Four Leica-style luminous viewfinder corner brackets
         var arm = Math.Clamp(Math.Min(rw, rh) * 0.12, 14, 22);
-        var bracketStroke = RecordingTheme.Brush("Brush.AccentHover", "#7DD3FC");
+        var bracketStroke = RecordingTheme.Brush("Brush.Accent", "#007AFF");
         var bracketGlow = new DropShadowEffect
         {
-            Color = Color.FromRgb(0x38, 0xBD, 0xF8),
+            Color = Color.FromRgb(0, 122, 255),
             BlurRadius = 10,
             ShadowDepth = 0,
-            Opacity = 0.65
+            Opacity = 0.24
         };
 
         canvas.Children.Add(CornerBracket(rx - 1.5, ry - 1.5, arm, top: true, left: true, bracketStroke, bracketGlow));
@@ -83,21 +83,20 @@ internal sealed class RecordingBorderWindow : Window
         // Compact viewfinder spec badge at top-left (when space above permits)
         if (ry >= 28)
         {
-            var specBadge = new Border
+            var dimensions = new TextBlock
             {
-                Background = new SolidColorBrush(Color.FromArgb(0xDC, 0x0B, 0x15, 0x28)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(0x48, 0x7D, 0xD3, 0xFC)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(8, 2, 8, 2),
-                Child = new TextBlock
-                {
-                    Text = $"REC · {region.Width} × {region.Height}",
-                    FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI Variable Text"),
-                    FontSize = 11,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = RecordingTheme.Brush("Brush.AccentText", "#7DD3FC")
-                }
+                Text = $"{region.Width} × {region.Height}",
+                FontSize = 11,
+                FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+                Foreground = RecordingTheme.Brush("Brush.TextPrimary", "#1D1D1F")
+            };
+            System.Windows.Documents.Typography.SetNumeralAlignment(dimensions, FontNumeralAlignment.Tabular);
+            var specBadge = new SquircleGlassBorder
+            {
+                CornerRadiusRadius = 7.5,
+                Padding = new Thickness(8, 3, 8, 3),
+                GlassBackground = RecordingTheme.Brush("Brush.ChromeGradient", "#D9FFFFFF"),
+                Child = dimensions
             };
             Canvas.SetLeft(specBadge, rx);
             Canvas.SetTop(specBadge, ry - 25);
