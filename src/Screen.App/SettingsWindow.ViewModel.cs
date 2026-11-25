@@ -40,8 +40,8 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         _settings = store.Load();
 
         var savedCredentials = TranslationCredentialStore.ReadSaved(_settings.Translation, credentials);
-        _tencentSecretId = savedCredentials.TencentSecretId ?? string.Empty;
-        _tencentSecretKey = savedCredentials.TencentSecretKey ?? string.Empty;
+        _tencentSecretId = credentials.ReadSecret(OcrProfile.TencentSecretIdCredentialName) ?? string.Empty;
+        _tencentSecretKey = credentials.ReadSecret(OcrProfile.TencentSecretKeyCredentialName) ?? string.Empty;
         _apiKey = savedCredentials.ApiKey ?? string.Empty;
         _racingApiKey = savedCredentials.RacingApiKey ?? string.Empty;
 
@@ -316,22 +316,10 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     public int TranslationProviderIndex
     {
-        get => _settings.Translation.Provider switch
-        {
-            TranslationProviderKind.OpenAiCompatible => 1,
-            TranslationProviderKind.Tencent => 2,
-            TranslationProviderKind.MyMemory => 3,
-            _ => 0
-        };
+        get => _settings.Translation.Provider == TranslationProviderKind.OpenAiCompatible ? 1 : 0;
         set
         {
-            var provider = value switch
-            {
-                1 => TranslationProviderKind.OpenAiCompatible,
-                2 => TranslationProviderKind.Tencent,
-                3 => TranslationProviderKind.MyMemory,
-                _ => TranslationProviderKind.Edge
-            };
+            var provider = value == 1 ? TranslationProviderKind.OpenAiCompatible : TranslationProviderKind.Edge;
             if (_settings.Translation.Provider == provider)
             {
                 return;
@@ -360,54 +348,16 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public int TencentRegionIndex
+    public bool EnableFreeFallback
     {
-        get
-        {
-            var regions = TranslationRegions();
-            var index = Array.FindIndex(regions, region =>
-                string.Equals(region, _settings.Translation.TencentRegion, StringComparison.OrdinalIgnoreCase));
-            return index >= 0 ? index : 0;
-        }
+        get => _settings.Translation.EnableFreeFallback;
         set
         {
-            var regions = TranslationRegions();
-            var region = value >= 0 && value < regions.Length ? regions[value] : regions[0];
-            if (string.Equals(_settings.Translation.TencentRegion, region, StringComparison.Ordinal))
+            if (_settings.Translation.EnableFreeFallback == value)
             {
                 return;
             }
-            _settings.Translation = _settings.Translation with { TencentRegion = region };
-            OnPropertyChanged();
-            QueueSave();
-        }
-    }
-
-    public bool EnableMyMemoryFallback
-    {
-        get => _settings.Translation.EnableMyMemoryFallback;
-        set
-        {
-            if (_settings.Translation.EnableMyMemoryFallback == value)
-            {
-                return;
-            }
-            _settings.Translation = _settings.Translation with { EnableMyMemoryFallback = value };
-            OnPropertyChanged();
-            QueueSave();
-        }
-    }
-
-    public string MyMemoryContactEmail
-    {
-        get => _settings.Translation.MyMemoryContactEmail;
-        set
-        {
-            if (string.Equals(_settings.Translation.MyMemoryContactEmail, value, StringComparison.Ordinal))
-            {
-                return;
-            }
-            _settings.Translation = _settings.Translation with { MyMemoryContactEmail = value };
+            _settings.Translation = _settings.Translation with { EnableFreeFallback = value };
             OnPropertyChanged();
             QueueSave();
         }
@@ -493,40 +443,6 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public bool EnableFastFallbackRace
-    {
-        get => _settings.Translation.EnableFastFallbackRace;
-        set
-        {
-            if (_settings.Translation.EnableFastFallbackRace == value)
-            {
-                return;
-            }
-            _settings.Translation = _settings.Translation with { EnableFastFallbackRace = value };
-            OnPropertyChanged();
-            QueueSave();
-        }
-    }
-
-    public string FastFallbackDelayText
-    {
-        get => _settings.Translation.FastFallbackDelaySeconds.ToString();
-        set
-        {
-            var normalized = value.Trim();
-            if (string.Equals(FastFallbackDelayText, normalized, StringComparison.Ordinal))
-            {
-                return;
-            }
-            _settings.Translation = _settings.Translation with
-            {
-                FastFallbackDelaySeconds = int.TryParse(normalized, out var seconds) ? seconds : _settings.Translation.FastFallbackDelaySeconds
-            };
-            OnPropertyChanged();
-            QueueSave();
-        }
-    }
-
     public int TargetLanguageIndex
     {
         get
@@ -554,13 +470,13 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     public string TencentSecretId
     {
         get => _tencentSecretId;
-        set => SetCredential(ref _tencentSecretId, value, TranslationProfile.TencentSecretIdCredentialName);
+        set => SetCredential(ref _tencentSecretId, value, OcrProfile.TencentSecretIdCredentialName);
     }
 
     public string TencentSecretKey
     {
         get => _tencentSecretKey;
-        set => SetCredential(ref _tencentSecretKey, value, TranslationProfile.TencentSecretKeyCredentialName);
+        set => SetCredential(ref _tencentSecretKey, value, OcrProfile.TencentSecretKeyCredentialName);
     }
 
     public string ApiKey
@@ -609,23 +525,14 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         var keys = BuildTranslationCredentials();
         var ai = profile.Provider == TranslationProviderKind.OpenAiCompatible;
         var racing = ai && profile.EnableRacing;
-        var hasTencentKeys = keys.TencentSecretId is not null && keys.TencentSecretKey is not null;
-        var tencent = profile.Provider == TranslationProviderKind.Tencent || (ai && hasTencentKeys);
-        var fallback = profile.Provider != TranslationProviderKind.MyMemory && profile.EnableMyMemoryFallback;
-        var fastTencent = ai && profile.EnableFastFallbackRace && hasTencentKeys;
         return new TranslationTestInputs(
-            profile.Provider, profile.TargetLanguage, fallback,
+            profile.Provider, profile.TargetLanguage, ai && profile.EnableFreeFallback,
             ai ? (profile.BaseAddress, profile.Model, keys.ApiKey, CanBindApiKey) : null,
-            racing ? (profile.RacingBaseAddress, profile.RacingModel, keys.RacingApiKey, CanBindRacingApiKey) : null,
-            tencent ? (profile.TencentRegion, keys.TencentSecretId, keys.TencentSecretKey) : null,
-            fastTencent ? Math.Clamp(profile.FastFallbackDelaySeconds, 2, 30) : null,
-            fallback || profile.Provider == TranslationProviderKind.MyMemory ? profile.MyMemoryContactEmail.Trim() : null);
+            racing ? (profile.RacingBaseAddress, profile.RacingModel, keys.RacingApiKey, CanBindRacingApiKey) : null);
     }
 
     public TranslationCredentials BuildTranslationCredentials() => new(
         GetApiKeyForRequest(_apiKey, racing: false),
-        string.IsNullOrWhiteSpace(_tencentSecretId) ? null : _tencentSecretId,
-        string.IsNullOrWhiteSpace(_tencentSecretKey) ? null : _tencentSecretKey,
         GetApiKeyForRequest(_racingApiKey, racing: true));
 
     public void SaveNow()
@@ -705,9 +612,6 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         _disposed = true;
         SaveNow();
     }
-
-    public static string[] TranslationRegions() =>
-        ["ap-guangzhou", "ap-shanghai", "ap-beijing", "ap-chengdu", "ap-hongkong"];
 
     public static string[] TranslationLanguages() =>
         ["简体中文", "繁體中文", "English", "日本語", "한국어", "Français", "Español", "Português", "Deutsch"];
@@ -881,7 +785,6 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         {
             BaseAddress = TrimUrl(_settings.Translation.BaseAddress),
             Model = (_settings.Translation.Model ?? string.Empty).Trim(),
-            MyMemoryContactEmail = (_settings.Translation.MyMemoryContactEmail ?? string.Empty).Trim(),
             RacingBaseAddress = TrimUrl(_settings.Translation.RacingBaseAddress),
             RacingModel = (_settings.Translation.RacingModel ?? string.Empty).Trim()
         };
@@ -929,12 +832,6 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
         {
             return "AI 模型不能为空。";
         }
-        if (_settings.Translation.Provider == TranslationProviderKind.OpenAiCompatible
-            && _settings.Translation.EnableFastFallbackRace
-            && (_settings.Translation.FastFallbackDelaySeconds < 2 || _settings.Translation.FastFallbackDelaySeconds > 30))
-        {
-            return "快速翻译等待秒数需要在 2 到 30 之间。";
-        }
         return null;
     }
 
@@ -959,10 +856,7 @@ internal sealed record TranslationTestInputs(
     string TargetLanguage,
     bool FreeFallback,
     (string Address, string Model, string? Key, bool CanBindDraft)? Ai,
-    (string Address, string Model, string? Key, bool CanBindDraft)? Racing,
-    (string Region, string? Id, string? Key)? Tencent,
-    int? FastFallbackSeconds,
-    string? MyMemoryEmail)
+    (string Address, string Model, string? Key, bool CanBindDraft)? Racing)
 {
     // Keep credentials out of diagnostic representations of this in-memory comparison.
     public override string ToString() => Provider.ToString();

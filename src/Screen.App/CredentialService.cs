@@ -10,17 +10,8 @@ internal interface ICredentialStore
     StoredCredential? ReadCredential(string targetName);
     void Write(string targetName, string secret, string? endpointScope = null);
     void Delete(string targetName);
-}
 
-internal sealed record StoredCredential(string Secret, string? EndpointScope);
-
-internal sealed class CredentialService : ICredentialStore
-{
-    private const uint CredTypeGeneric = 1;
-    private const uint CredPersistLocalMachine = 2;
-    private const int ErrorNotFound = 1168;
-
-    public string? Read(string targetName)
+    string? ReadSecret(string targetName)
     {
         try
         {
@@ -32,6 +23,15 @@ internal sealed class CredentialService : ICredentialStore
             return null;
         }
     }
+}
+
+internal sealed record StoredCredential(string Secret, string? EndpointScope);
+
+internal sealed class CredentialService : ICredentialStore
+{
+    private const uint CredTypeGeneric = 1;
+    private const uint CredPersistLocalMachine = 2;
+    private const int ErrorNotFound = 1168;
 
     public StoredCredential? ReadCredential(string targetName)
     {
@@ -113,8 +113,8 @@ internal sealed class CredentialService : ICredentialStore
     {
         if (targetName is not (TranslationProfile.ApiKeyCredentialName
             or TranslationProfile.RacingApiKeyCredentialName
-            or TranslationProfile.TencentSecretIdCredentialName
-            or TranslationProfile.TencentSecretKeyCredentialName))
+            or OcrProfile.TencentSecretIdCredentialName
+            or OcrProfile.TencentSecretKeyCredentialName))
         {
             throw new ArgumentException("This credential is outside the Screen credential slots.", nameof(targetName));
         }

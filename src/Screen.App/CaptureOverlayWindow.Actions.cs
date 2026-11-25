@@ -517,13 +517,8 @@ internal sealed partial class CaptureOverlayWindow
         return $"Translation fell back ({primaryProvider} -> {fallbackProvider?.ToString() ?? "Unknown"}){attempts}";
     }
 
-    private static string FormatProviderDisplayName(TranslationProviderKind provider) => provider switch
-    {
-        TranslationProviderKind.Edge => "免费在线翻译",
-        TranslationProviderKind.Tencent => "腾讯机器翻译",
-        TranslationProviderKind.MyMemory => "MyMemory",
-        _ => "AI 自然翻译"
-    };
+    private static string FormatProviderDisplayName(TranslationProviderKind provider) =>
+        provider == TranslationProviderKind.OpenAiCompatible ? "AI 自然翻译" : "免费在线翻译";
 
     private Task<OcrDocument?> TryExtractDirectTextAsync(CancellationToken cancellationToken)
     {

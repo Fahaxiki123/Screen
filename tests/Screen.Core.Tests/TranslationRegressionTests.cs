@@ -81,7 +81,7 @@ public sealed class TranslationRegressionTests
         {
             var host = request.RequestUri!.Host;
             requests.Add(host);
-            return Task.FromResult(host == "ai.example.test" ? SseResponse(stream) : MyMemoryResponse());
+            return Task.FromResult(host == "ai.example.test" ? SseResponse(stream) : EdgeResponse());
         }));
 
         var result = await new OnlineTranslationProvider(client).TranslateAsync(
@@ -90,7 +90,7 @@ public sealed class TranslationRegressionTests
         Assert.AreEqual("完整的保底译文", result.Text);
         Assert.IsTrue(result.UsedFallback);
         Assert.IsFalse(string.IsNullOrWhiteSpace(result.PrimaryFailure));
-        CollectionAssert.AreEqual(new[] { "ai.example.test", "edge.microsoft.com", "api.mymemory.translated.net" }, requests);
+        CollectionAssert.AreEqual(new[] { "ai.example.test", "edge.microsoft.com" }, requests);
     }
 
     [TestMethod]
@@ -156,7 +156,7 @@ public sealed class TranslationRegressionTests
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
-            return MyMemoryResponse();
+            return EdgeResponse();
         }))
         {
             Timeout = TimeSpan.FromMilliseconds(50)
@@ -168,7 +168,7 @@ public sealed class TranslationRegressionTests
         Assert.IsTrue(result.UsedFallback);
         Assert.AreEqual("完整的保底译文", result.Text);
         StringAssert.Contains(result.PrimaryFailure, "超时");
-        CollectionAssert.AreEqual(new[] { "ai.example.test", "edge.microsoft.com", "api.mymemory.translated.net" }, requests);
+        CollectionAssert.AreEqual(new[] { "ai.example.test", "edge.microsoft.com" }, requests);
     }
 
     [TestMethod]
@@ -182,7 +182,7 @@ public sealed class TranslationRegressionTests
             Interlocked.Increment(ref requests);
             entered.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-            return MyMemoryResponse();
+            return EdgeResponse();
         }));
         var operation = new OnlineTranslationProvider(client).TranslateAsync(
             "Hello world", "en-US", NaturalProfile(), new TranslationCredentials(ApiKey: "offline-test-key"),
@@ -245,7 +245,7 @@ public sealed class TranslationRegressionTests
         var profile = NaturalProfile() with
         {
             BaseAddress = "http://ai.example.test/v1",
-            EnableMyMemoryFallback = false
+            EnableFreeFallback = false
         };
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
@@ -264,7 +264,7 @@ public sealed class TranslationRegressionTests
     }
 
     [TestMethod]
-    public async Task FastFallbackRacePreservesFirstProgressAndFinalTextAsync()
+    public async Task AiTranslationPreservesFirstProgressAndFinalTextAsync()
     {
         var requests = new List<string>();
         using var client = new HttpClient(new OfflineHandler((request, _) =>
@@ -283,16 +283,14 @@ public sealed class TranslationRegressionTests
             Provider = TranslationProviderKind.OpenAiCompatible,
             BaseAddress = "https://ai.example.test/v1",
             Model = "stream-model",
-            EnableFastFallbackRace = true,
-            FastFallbackDelaySeconds = 8,
-            EnableMyMemoryFallback = false
+            EnableFreeFallback = false
         };
 
         var result = await new OnlineTranslationProvider(client).TranslateAsync(
             "First part, second part, third part.",
             "en-US",
             profile,
-            new TranslationCredentials("offline-test-key", "tencent-id", "tencent-secret"),
+            new TranslationCredentials(ApiKey: "offline-test-key"),
             progress);
 
         Assert.AreEqual("第一段、第二段、第三段", result.Text);
@@ -303,7 +301,7 @@ public sealed class TranslationRegressionTests
     }
 
     [TestMethod]
-    public async Task ImmediateAiAndTencentFailuresDoNotWaitEightSecondsOrDuplicateRequestsAsync()
+    public async Task ImmediateAiFailureDoesNotDuplicateFreeTranslationRequestsAsync()
     {
         var requests = new List<string>();
         using var client = new HttpClient(new OfflineHandler((request, _) =>
@@ -319,11 +317,8 @@ public sealed class TranslationRegressionTests
                 {
                     Content = new StringContent("{\"error\":{\"message\":\"invalid key\"}}")
                 },
-                "tmt.tencentcloudapi.com" => new HttpResponseMessage(HttpStatusCode.Forbidden)
-                {
-                    Content = new StringContent("{\"Response\":{\"Error\":{\"Code\":\"AuthFailure\",\"Message\":\"bad secret\"}}}")
-                },
-                _ => MyMemoryResponse()
+                "edge.microsoft.com" => EdgeResponse(),
+                _ => throw new AssertFailedException($"Unexpected translation host: {host}")
             });
         }));
         var profile = new AppSettings().Translation with
@@ -331,25 +326,20 @@ public sealed class TranslationRegressionTests
             Provider = TranslationProviderKind.OpenAiCompatible,
             BaseAddress = "https://ai.example.test/v1",
             Model = "primary-model",
-            EnableFastFallbackRace = true,
-            FastFallbackDelaySeconds = 8,
-            EnableMyMemoryFallback = true
+            EnableFreeFallback = true
         };
 
-        var timer = System.Diagnostics.Stopwatch.StartNew();
         var result = await new OnlineTranslationProvider(client).TranslateAsync(
             "Hello world",
             "en-US",
             profile,
-            new TranslationCredentials("bad-ai-key", "bad-tencent-id", "bad-tencent-secret"));
+            new TranslationCredentials(ApiKey: "bad-ai-key"));
 
         Assert.AreEqual("完整的保底译文", result.Text);
         Assert.IsTrue(result.UsedFallback);
         StringAssert.Contains(result.PrimaryFailure, "AI 自然翻译");
-        StringAssert.Contains(result.PrimaryFailure, "腾讯机器翻译");
-        Assert.IsTrue(timer.Elapsed < TimeSpan.FromSeconds(1.5), $"Expected immediate fallback without 8s sleep, took {timer.Elapsed.TotalSeconds:F2}s");
         CollectionAssert.AreEqual(
-            new[] { "ai.example.test", "tmt.tencentcloudapi.com", "edge.microsoft.com", "api.mymemory.translated.net" },
+            new[] { "ai.example.test", "edge.microsoft.com" },
             requests);
     }
 
@@ -392,59 +382,39 @@ public sealed class TranslationRegressionTests
     }
 
     [TestMethod]
-    public async Task EdgeFailureFallsBackToMyMemoryAsync()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task EdgeFailureOnlyRetriesEdgeAsync(bool batch)
     {
-        var hosts = new List<string>();
+        var requests = new List<string>();
         using var client = new HttpClient(new OfflineHandler((request, _) =>
         {
-            var host = request.RequestUri!.Host;
-            hosts.Add(host);
-            return Task.FromResult(host == "edge.microsoft.com"
-                ? new HttpResponseMessage(HttpStatusCode.BadGateway)
-                : MyMemoryResponse());
+            requests.Add(request.RequestUri!.Host);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests));
         }));
-        var profile = new AppSettings().Translation with
+        var provider = new OnlineTranslationProvider(client);
+        var profile = new AppSettings().Translation;
+        var error = await Assert.ThrowsExactlyAsync<HttpRequestException>(async () =>
         {
-            Provider = TranslationProviderKind.Edge,
-            EnableMyMemoryFallback = true
-        };
+            if (batch)
+            {
+                await provider.TranslateBatchAsync(["Hello", "World"], "en-US", profile, new TranslationCredentials());
+            }
+            else
+            {
+                await provider.TranslateAsync("Hello world", "en-US", profile, new TranslationCredentials());
+            }
+        });
 
-        var result = await new OnlineTranslationProvider(client).TranslateAsync(
-            "Hello world", "en-US", profile, new TranslationCredentials());
-
-        Assert.AreEqual("完整的保底译文", result.Text);
-        Assert.IsTrue(result.UsedFallback);
-        Assert.AreEqual("MyMemory 基础翻译", result.ProviderName);
-        CollectionAssert.AreEqual(new[] { "edge.microsoft.com", "edge.microsoft.com", "api.mymemory.translated.net" }, hosts);
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, error.StatusCode);
+        CollectionAssert.AreEqual(new[] { "edge.microsoft.com", "edge.microsoft.com" }, requests);
     }
 
     [TestMethod]
-    public async Task DetectLanguageHandlesMixedChineseEnglishAndMyMemoryNeverSendsSameLanguagePairAsync()
+    public void DetectLanguageHandlesMixedChineseEnglish()
     {
         Assert.AreEqual("en-US", OcrQualityEvaluator.DetectLanguage("Click 复制 to save the pricing table from settings."));
         Assert.AreEqual("zh-CN", OcrQualityEvaluator.DetectLanguage("点击 Copy 按钮保存截图配置到当前目录。"));
-
-        string? capturedQuery = null;
-        using var client = new HttpClient(new OfflineHandler((request, _) =>
-        {
-            capturedQuery = request.RequestUri!.Query;
-            return Task.FromResult(MyMemoryResponse());
-        }));
-        var profile = new AppSettings().Translation with
-        {
-            Provider = TranslationProviderKind.MyMemory,
-            TargetLanguage = "简体中文"
-        };
-
-        var result = await new OnlineTranslationProvider(client).TranslateAsync(
-            "Click 复制 to save settings.",
-            "zh-CN",
-            profile,
-            new TranslationCredentials());
-
-        Assert.AreEqual("完整的保底译文", result.Text);
-        Assert.IsNotNull(capturedQuery);
-        StringAssert.Contains(Uri.UnescapeDataString(capturedQuery), "langpair=en|zh-CN");
     }
 
     [TestMethod]
@@ -499,7 +469,7 @@ public sealed class TranslationRegressionTests
         var result = await new OnlineTranslationProvider(client).TranslateBatchAsync(
             ["Save settings", "Cancel"],
             "en-US",
-            NaturalProfile() with { EnableMyMemoryFallback = false },
+            NaturalProfile() with { EnableFreeFallback = false },
             new TranslationCredentials(ApiKey: "offline-key"));
 
         Assert.AreEqual(1, requests);
@@ -534,7 +504,7 @@ public sealed class TranslationRegressionTests
         var result = await new OnlineTranslationProvider(client).TranslateBatchAsync(
             ["Alpha region", "Beta region"],
             "en-US",
-            NaturalProfile() with { EnableMyMemoryFallback = false },
+            NaturalProfile() with { EnableFreeFallback = false },
             new TranslationCredentials(ApiKey: "offline-key"));
 
         Assert.AreEqual(3, requests, "1 次批量格式错乱 + 2 次逐区降级。");
@@ -575,7 +545,7 @@ public sealed class TranslationRegressionTests
         var result = await new OnlineTranslationProvider(client).TranslateBatchAsync(
             regions,
             "en-US",
-            NaturalProfile() with { EnableMyMemoryFallback = true },
+            NaturalProfile() with { EnableFreeFallback = true },
             new TranslationCredentials(ApiKey: "offline-key"));
 
         Assert.AreEqual(expectedAiCalls, aiCalls, "遇到 401/429 时绝不能向同一 AI 端点补发 N 次逐区请求。");
@@ -585,34 +555,84 @@ public sealed class TranslationRegressionTests
     }
 
     [TestMethod]
-    public void LegacyDefaultTencentWithoutCredentialsMigratesToEdgeWhileConfiguredTencentStays()
+    [DataRow(4, 0)]
+    [DataRow(4, 2)]
+    [DataRow(5, 0)]
+    [DataRow(5, 2)]
+    public void RetiredProviderMigratesOnLoadAndIsPersistedAtStartup(int schema, int legacyProvider)
     {
         var directory = Directory.CreateTempSubdirectory("screen-migrate-");
         try
         {
-            var pathWithoutKey = Path.Combine(directory.FullName, "no-key.json");
-            File.WriteAllText(pathWithoutKey, """
+            var path = Path.Combine(directory.FullName, "settings.json");
+            File.WriteAllText(path, $$"""
                 {
-                  "SchemaVersion": 4,
-                  "Translation": { "Provider": 0 }
+                  "SchemaVersion": {{schema}},
+                  "HotKey": "Alt+Shift+K",
+                  "Translation": {
+                    "Provider": {{legacyProvider}},
+                    "BaseAddress": "https://custom.example.test/v1",
+                    "Model": "custom-model",
+                    "TargetLanguage": "日本語",
+                    "EnableMyMemoryFallback": false
+                  }
                 }
                 """);
-            var storeNoKey = new JsonSettingsStore(pathWithoutKey);
-            Assert.IsTrue(storeNoKey.TryMigrateLegacyDefaultProvider(() => false));
-            var migrated = storeNoKey.Load();
-            Assert.AreEqual(TranslationProviderKind.Edge, migrated.Translation.Provider);
-            Assert.AreEqual(AppSettings.CurrentSchemaVersion, migrated.SchemaVersion);
+            var store = new JsonSettingsStore(path);
+            Assert.AreEqual(TranslationProviderKind.Edge, store.Load().Translation.Provider);
+            Assert.IsTrue(store.TryMigrateLegacyDefaultProvider());
+            Assert.IsFalse(store.TryMigrateLegacyDefaultProvider());
 
-            var pathWithKey = Path.Combine(directory.FullName, "with-key.json");
-            File.WriteAllText(pathWithKey, """
+            var settings = store.Load();
+            Assert.AreEqual(AppSettings.CurrentSchemaVersion, settings.SchemaVersion);
+            Assert.AreEqual("Alt+Shift+K", settings.HotKey);
+            Assert.AreEqual("日本語", settings.Translation.TargetLanguage);
+            Assert.AreEqual("https://custom.example.test/v1", settings.Translation.BaseAddress);
+            Assert.AreEqual("custom-model", settings.Translation.Model);
+            Assert.IsFalse(settings.Translation.EnableFreeFallback);
+            using var saved = JsonDocument.Parse(File.ReadAllText(path));
+            Assert.AreEqual(3, saved.RootElement.GetProperty("Translation").GetProperty("Provider").GetInt32());
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(1, TranslationProviderKind.OpenAiCompatible)]
+    [DataRow(3, TranslationProviderKind.Edge)]
+    public void SupportedProviderAndCustomAiConfigurationSurviveUpgrade(int savedId, TranslationProviderKind expected)
+    {
+        var directory = Directory.CreateTempSubdirectory("screen-upgrade-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "settings.json");
+            File.WriteAllText(path, $$"""
                 {
-                  "SchemaVersion": 4,
-                  "Translation": { "Provider": 0 }
+                  "SchemaVersion": 5,
+                  "Translation": {
+                    "Provider": {{savedId}},
+                    "BaseAddress": "https://custom.example.test/v1",
+                    "Model": "custom-model",
+                    "EnableMyMemoryFallback": false,
+                    "EnableRacing": true,
+                    "RacingBaseAddress": "https://second.example.test/v1",
+                    "RacingModel": "second-model"
+                  }
                 }
                 """);
-            var storeWithKey = new JsonSettingsStore(pathWithKey);
-            Assert.IsFalse(storeWithKey.TryMigrateLegacyDefaultProvider(() => true));
-            Assert.AreEqual(TranslationProviderKind.Tencent, storeWithKey.Load().Translation.Provider);
+            var store = new JsonSettingsStore(path);
+            store.TryMigrateLegacyDefaultProvider();
+            var profile = store.Load().Translation;
+
+            Assert.AreEqual(expected, profile.Provider);
+            Assert.AreEqual("https://custom.example.test/v1", profile.BaseAddress);
+            Assert.AreEqual("custom-model", profile.Model);
+            Assert.IsTrue(profile.EnableRacing);
+            Assert.AreEqual("https://second.example.test/v1", profile.RacingBaseAddress);
+            Assert.AreEqual("second-model", profile.RacingModel);
+            Assert.IsFalse(profile.EnableFreeFallback);
         }
         finally
         {
@@ -656,49 +676,6 @@ public sealed class TranslationRegressionTests
             {
             }
         });
-    }
-
-    [TestMethod]
-    public async Task AiBatchInPlaceHonorsFastTencentFallbackWhenPrimaryAiHangsAsync()
-    {
-        var tencentCalls = 0;
-        using var client = new HttpClient(new OfflineHandler(async (request, cancellationToken) =>
-        {
-            if (request.RequestUri!.Host == "tmt.tencentcloudapi.com")
-            {
-                Interlocked.Increment(ref tencentCalls);
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent("{\"Response\":{\"TargetText\":\"腾讯原位快退\",\"RequestId\":\"fast\"}}")
-                };
-            }
-            await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"{\\\"0\\\":\\\"太慢\\\"}\"}}]}", Encoding.UTF8, "application/json")
-            };
-        }));
-
-        var profile = NaturalProfile() with
-        {
-            EnableFastFallbackRace = true,
-            FastFallbackDelaySeconds = 2,
-            EnableMyMemoryFallback = false
-        };
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var result = await new OnlineTranslationProvider(client).TranslateBatchAsync(
-            ["First line", "Second line"],
-            "en-US",
-            profile,
-            new TranslationCredentials("ai-key", "tencent-id", "tencent-secret"));
-        sw.Stop();
-
-        Assert.IsTrue(result.UsedFallback);
-        Assert.AreEqual("腾讯机器翻译", result.ProviderName);
-        StringAssert.Contains(result.PrimaryFailure, "超过 2 秒");
-        Assert.AreEqual(2, tencentCalls);
-        CollectionAssert.AreEqual(new[] { "腾讯原位快退", "腾讯原位快退" }, result.Texts.ToArray());
-        Assert.IsTrue(sw.Elapsed < TimeSpan.FromSeconds(4.5), $"原位快退耗时过长：{sw.Elapsed.TotalSeconds:F1}s");
     }
 
     [TestMethod]
@@ -748,7 +725,7 @@ public sealed class TranslationRegressionTests
             EnableRacing = true,
             RacingBaseAddress = "https://race.example.test/v1",
             RacingModel = "race-model",
-            EnableMyMemoryFallback = true
+            EnableFreeFallback = true
         };
         var result = await new OnlineTranslationProvider(client).TranslateBatchAsync(
             ["One", "Two", "Three", "Four"],
@@ -823,34 +800,6 @@ public sealed class TranslationRegressionTests
         Assert.IsFalse(capturedBody!.Contains("QZXKEEP", StringComparison.Ordinal), "Edge 神经翻译不应插入破坏语序的占位符。");
         StringAssert.Contains(result.Text, "$0.435");
         StringAssert.Contains(result.Text, "https://github.com/Fahaxiki123/Screen");
-    }
-
-    [TestMethod]
-    public async Task MyMemoryFallbackDetectsJapaneseAndKoreanPerRegionInsteadOfDocumentLanguageAsync()
-    {
-        var queries = new List<string>();
-        using var client = new HttpClient(new OfflineHandler((request, _) =>
-        {
-            lock (queries)
-            {
-                queries.Add(Uri.UnescapeDataString(request.RequestUri!.Query));
-            }
-            return Task.FromResult(MyMemoryResponse());
-        }));
-        var profile = new AppSettings().Translation with
-        {
-            Provider = TranslationProviderKind.MyMemory,
-            TargetLanguage = "Français"
-        };
-
-        await new OnlineTranslationProvider(client).TranslateBatchAsync(
-            ["こんにちは、これはテストです。", "안녕하세요, 테스트입니다."],
-            "en-US",
-            profile,
-            new TranslationCredentials());
-
-        Assert.IsTrue(queries.Any(q => q.Contains("langpair=ja|fr", StringComparison.Ordinal)), string.Join(" ; ", queries));
-        Assert.IsTrue(queries.Any(q => q.Contains("langpair=ko|fr", StringComparison.Ordinal)), string.Join(" ; ", queries));
     }
 
     [TestMethod]
@@ -930,7 +879,7 @@ public sealed class TranslationRegressionTests
         var result = await new OnlineTranslationProvider(client).TranslateBatchAsync(
             regions,
             "en-US",
-            NaturalProfile() with { EnableMyMemoryFallback = false },
+            NaturalProfile() with { EnableFreeFallback = false },
             new TranslationCredentials(ApiKey: "offline-key"));
 
         Assert.AreEqual(3, calls, "13 区应仅发出 2 次批量 + 1 次单条降级。");
@@ -940,52 +889,36 @@ public sealed class TranslationRegressionTests
     }
 
     [TestMethod]
-    public async Task EdgeBatchPartialFailurePreservesCompletedSliceAndOnlyFallsBackRemainingRegionsToMyMemoryAsync()
+    public async Task FailedEdgeSliceDoesNotResendCompletedRegionsOrContactAnotherProviderAsync()
     {
-        var edgeCalls = 0;
-        var myMemoryQueries = new List<string>();
-        using var client = new HttpClient(new OfflineHandler(async (request, cancellationToken) =>
+        var batches = new List<string[]>();
+        using var client = new HttpClient(new OfflineHandler(async (request, token) =>
         {
-            if (request.RequestUri!.Host == "edge.microsoft.com")
+            Assert.AreEqual("edge.microsoft.com", request.RequestUri!.Host);
+            var items = JsonSerializer.Deserialize<string[]>(await request.Content!.ReadAsStringAsync(token))!;
+            batches.Add(items);
+            if (batches.Count > 1)
             {
-                var call = Interlocked.Increment(ref edgeCalls);
-                if (call == 1)
-                {
-                    var body = await request.Content!.ReadAsStringAsync(cancellationToken);
-                    var items = JsonSerializer.Deserialize<string[]>(body)!;
-                    var payload = items.Select((_, i) => new { translations = new[] { new { text = $"Edge{i}" } } });
-                    return new HttpResponseMessage(HttpStatusCode.OK)
-                    {
-                        Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-                    };
-                }
                 return new HttpResponseMessage(HttpStatusCode.BadRequest);
             }
-
-            lock (myMemoryQueries)
-            {
-                myMemoryQueries.Add(Uri.UnescapeDataString(request.RequestUri.Query));
-            }
+            var payload = items.Select(item => new { translations = new[] { new { text = item } } });
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"responseStatus\":200,\"responseData\":{\"translatedText\":\"兜底10\"}}")
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
             };
         }));
 
         var regions = Enumerable.Range(0, 11).Select(i => $"Line {i}").ToArray();
-        var result = await new OnlineTranslationProvider(client).TranslateBatchAsync(
-            regions,
-            "en-US",
-            new AppSettings().Translation with { Provider = TranslationProviderKind.Edge, EnableMyMemoryFallback = true },
-            new TranslationCredentials());
+        var progress = new List<int>();
+        var error = await Assert.ThrowsExactlyAsync<HttpRequestException>(() => new OnlineTranslationProvider(client)
+            .TranslateBatchAsync(regions, "en-US", new AppSettings().Translation, new TranslationCredentials(),
+                new SynchronousIntProgress(progress.Add)));
 
-        Assert.AreEqual(2, edgeCalls);
-        Assert.AreEqual(1, myMemoryQueries.Count, "前 10 区已由 Edge 成功完成，MyMemory 只能收到第 11 区。");
-        StringAssert.Contains(myMemoryQueries[0], "Line 10");
-        Assert.IsTrue(result.UsedFallback);
-        Assert.AreEqual("Edge0", result.Texts[0]);
-        Assert.AreEqual("Edge9", result.Texts[9]);
-        Assert.AreEqual("兜底10", result.Texts[10]);
+        Assert.AreEqual(HttpStatusCode.BadRequest, error.StatusCode);
+        Assert.AreEqual(2, batches.Count);
+        CollectionAssert.AreEqual(regions[..10], batches[0]);
+        CollectionAssert.AreEqual(regions[10..], batches[1]);
+        CollectionAssert.AreEqual(new[] { 10 }, progress);
     }
 
     [TestMethod]
@@ -1013,7 +946,7 @@ public sealed class TranslationRegressionTests
             EnableRacing = true,
             RacingBaseAddress = "https://race.example.test/v1",
             RacingModel = "fast-race-model",
-            EnableMyMemoryFallback = false
+            EnableFreeFallback = false
         };
 
         var result = await new OnlineTranslationProvider(client).TranslateBatchAsync(
@@ -1047,7 +980,7 @@ public sealed class TranslationRegressionTests
                 """);
             var store = new JsonSettingsStore(path);
             // 模拟 AppHost 真实启动顺序：先执行旧默认迁移，再调用 Load()。
-            Assert.IsFalse(store.TryMigrateLegacyDefaultProvider(() => false));
+            store.TryMigrateLegacyDefaultProvider();
             var loaded = store.Load();
             Assert.AreEqual(TranslationProviderKind.OpenAiCompatible, loaded.Translation.Provider);
             Assert.AreEqual("https://open.bigmodel.cn/api/paas/v4", loaded.Translation.BaseAddress);
@@ -1093,8 +1026,7 @@ public sealed class TranslationRegressionTests
         BaseAddress = "https://ai.example.test/v1",
         Model = "offline-model",
         EnableRacing = false,
-        EnableFastFallbackRace = false,
-        EnableMyMemoryFallback = true
+        EnableFreeFallback = true
     };
 
     private static string AiEvent(string content, string? finishReason = null) =>
@@ -1105,9 +1037,9 @@ public sealed class TranslationRegressionTests
         Content = new StringContent(stream, Encoding.UTF8, "text/event-stream")
     };
 
-    private static HttpResponseMessage MyMemoryResponse() => new(HttpStatusCode.OK)
+    private static HttpResponseMessage EdgeResponse() => new(HttpStatusCode.OK)
     {
-        Content = new StringContent("{\"responseStatus\":200,\"responseData\":{\"translatedText\":\"完整的保底译文\"}}")
+        Content = new StringContent("[{\"translations\":[{\"text\":\"完整的保底译文\"}]}]")
     };
 
     private sealed class SynchronousProgress(Action<string> report) : IProgress<string>

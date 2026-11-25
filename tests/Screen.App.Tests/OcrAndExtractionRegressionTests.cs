@@ -106,8 +106,8 @@ public sealed class OcrAndExtractionRegressionTests
                 new CredentialService(),
                 key => key switch
                 {
-                    TranslationProfile.TencentSecretIdCredentialName => "test-secret-id",
-                    TranslationProfile.TencentSecretKeyCredentialName => "test-secret-key",
+                    OcrProfile.TencentSecretIdCredentialName => "test-secret-id",
+                    OcrProfile.TencentSecretKeyCredentialName => "test-secret-key",
                     _ => null
                 });
 

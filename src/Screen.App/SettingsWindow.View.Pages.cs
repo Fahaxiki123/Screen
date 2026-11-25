@@ -82,7 +82,7 @@ public partial class SettingsWindow
             CreateBoundComboBox(nameof(SettingsViewModel.TargetLanguageIndex), SettingsViewModel.TranslationLanguages()));
         AddSettingRow(preferences, LucideIconKind.Cloud, "翻译服务", "开箱即可免费使用；追求母语级表达可切换 AI 自然翻译",
             CreateBoundComboBox(nameof(SettingsViewModel.TranslationProviderIndex),
-                ["免费在线翻译（推荐 · 免配置）", "AI 自然翻译（填 Key 效果最佳）", "腾讯机器翻译（传统机翻）", "MyMemory（基础兜底）"], width: 242));
+                ["免费在线翻译（推荐 · 免配置）", "AI 自然翻译（自配 API Key）"], width: 242));
 
         _edgeSection = AddGroup(page, "免费在线翻译", out var edge);
         AddSettingRow(edge, LucideIconKind.Cloud, "零配置在线通道",
@@ -101,23 +101,9 @@ public partial class SettingsWindow
             CreateBoundTextBox(nameof(SettingsViewModel.Model)));
         AddSettingRow(ai, LucideIconKind.Pencil, "API Key", "仅保存在 Windows 凭据管理器，更换地址自动隔离", CreateApiKeyInput(racing: false));
 
-        _tencentSection = AddGroup(page, "腾讯机器翻译与云端 OCR 密钥", out var tencent);
-        AddSettingRow(tencent, LucideIconKind.Copy, "SecretId", "腾讯云访问密钥 ID，仅保存在 Windows 凭据管理器",
-            CreateBoundTextBox(nameof(SettingsViewModel.TencentSecretId)));
-        AddSettingRow(tencent, LucideIconKind.Pencil, "SecretKey", "腾讯云访问密钥，仅保存在 Windows 凭据管理器",
-            CreateCredentialPasswordBox(nameof(SettingsViewModel.TencentSecretKey), password: _viewModel.TencentSecretKey));
-        AddSettingRow(tencent, LucideIconKind.Cloud, "接入地域", "通常选择离你最近的可用区即可",
-            CreateBoundComboBox(nameof(SettingsViewModel.TencentRegionIndex), SettingsViewModel.TranslationRegions()));
-        AddFootnote(tencent, "注：腾讯云传统机器翻译已停止新购，建议优先使用免费在线翻译或 AI 自然翻译。");
-
-        _memorySection = AddGroup(page, "MyMemory 基础翻译", out var memory);
-        AddSettingRow(memory, LucideIconKind.Copy, "联系邮箱（可选）", "随请求发送可提高匿名日额度，留空也能使用",
-            CreateBoundTextBox(nameof(SettingsViewModel.MyMemoryContactEmail)));
-
         AddGroup(page, "连接测试", out var test);
         AddSettingRow(test, LucideIconKind.Check, "测试当前服务", "使用固定文本验证当前翻译服务连通性", CreateTranslationTestControl());
 
-        // 将低频的 OCR 策略、AI 竞速/快退和保底回退折叠收起，保持主界面清爽。
         AddCollapsibleSection(page, "高级选项", "文字识别策略、AI 竞速与失败回退配置", out var advanced);
 
         AddGroup(advanced, "文字识别（OCR）", out var recognition);
@@ -125,42 +111,25 @@ public partial class SettingsWindow
             CreateBoundComboBox(nameof(SettingsViewModel.OcrModeIndex), ["智能增强（推荐）", "云端优先", "仅本地识别"]));
         AddSettingRow(recognition, LucideIconKind.Cloud, "截图翻译时云端增强", "已配腾讯云密钥时，在翻译前叠加腾讯云高精度 OCR",
             CreateBoundToggle(nameof(SettingsViewModel.UseCloudForTranslation)));
-        var configureTencent = CreateSecondaryButton("展开密钥");
-        configureTencent.Click += (_, _) =>
-        {
-            if (_tencentSection is { } credentials)
-            {
-                _tencentSectionForcedVisible = true;
-                UpdateTranslationSections();
-                PageScroll.UpdateLayout();
-                credentials.BringIntoView();
-            }
-        };
-        AddSettingRow(recognition, LucideIconKind.Settings2, "腾讯云增强密钥", "云端 OCR 与腾讯翻译共用下方保存的腾讯云密钥", configureTencent);
+        AddSettingRow(recognition, LucideIconKind.Copy, "腾讯云 SecretId", "仅用于云端 OCR，保存在 Windows 凭据管理器",
+            CreateBoundTextBox(nameof(SettingsViewModel.TencentSecretId)));
+        AddSettingRow(recognition, LucideIconKind.Pencil, "腾讯云 SecretKey", "仅用于云端 OCR，保存在 Windows 凭据管理器",
+            CreateCredentialPasswordBox(nameof(SettingsViewModel.TencentSecretKey), password: _viewModel.TencentSecretKey));
         AddFootnote(recognition, "敏感截图请选择“仅本地识别”，绝不上传图像到云端。");
 
         _aiAdvancedSection = new StackPanel();
         advanced.Children.Add(_aiAdvancedSection);
-        AddGroup(_aiAdvancedSection, "AI 竞速与超时回退", out var aiAdvanced);
+        AddGroup(_aiAdvancedSection, "AI 竞速与失败回退", out var aiAdvanced);
         AddSettingRow(aiAdvanced, LucideIconKind.Settings2, "第二模型竞速", "两个模型同时翻译，自动采用最先返回的结果",
             CreateBoundToggle(nameof(SettingsViewModel.EnableRacing)));
+        AddSettingRow(aiAdvanced, LucideIconKind.Check, "AI 失败时使用免费在线翻译", "开启后，AI 翻译失败时会将待译文字发送给免费在线翻译服务",
+            CreateBoundToggle(nameof(SettingsViewModel.EnableFreeFallback)));
         _racingRows = AddGroup(_aiAdvancedSection, "竞速模型", out var racing);
         AddSettingRow(racing, LucideIconKind.Cloud, "基础地址", "第二个 OpenAI 兼容接口地址",
             CreateBoundTextBox(nameof(SettingsViewModel.RacingBaseAddress)));
         AddSettingRow(racing, LucideIconKind.Pencil, "模型名称", "例如 Qwen/Qwen2.5-7B-Instruct",
             CreateBoundTextBox(nameof(SettingsViewModel.RacingModel)));
         AddSettingRow(racing, LucideIconKind.Pencil, "API Key", "仅保存在 Windows 凭据管理器", CreateApiKeyInput(racing: true));
-
-        AddGroup(_aiAdvancedSection, "快速回退", out var fast);
-        AddSettingRow(fast, LucideIconKind.Download, "超时后快速回退", "AI 翻译等待超时后自动切换腾讯快速翻译",
-            CreateBoundToggle(nameof(SettingsViewModel.EnableFastFallbackRace)));
-        _fastFallbackRow = AddSettingRow(fast, LucideIconKind.Clock, "快速回退等待", "等待秒数，允许范围 2–30 秒",
-            CreateBoundTextBox(nameof(SettingsViewModel.FastFallbackDelayText), 80));
-
-        AddGroup(advanced, "失败自动保底", out var fallback);
-        AddSettingRow(fallback, LucideIconKind.Check, "首选失败时自动回退免费翻译", "AI 或腾讯失败时依次尝试免费在线翻译与 MyMemory",
-            CreateBoundToggle(nameof(SettingsViewModel.EnableMyMemoryFallback)));
-        AddFootnote(fallback, "开启后可在主服务异常或超时时自动保底，避免中断工作流。");
 
         return page;
     }

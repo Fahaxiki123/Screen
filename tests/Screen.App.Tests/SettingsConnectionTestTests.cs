@@ -56,8 +56,6 @@ public sealed class SettingsConnectionTestTests
         var vm = ui.Model;
         vm.TranslationProviderIndex = 1;
         vm.ApiKey = "fake-primary";
-        vm.TencentSecretId = "fake-id";
-        vm.TencentSecretKey = "fake-key";
         vm.EnableRacing = true;
         vm.RacingBaseAddress = "https://race.example.test/v1";
         vm.RacingModel = "race";
@@ -69,13 +67,8 @@ public sealed class SettingsConnectionTestTests
             () => vm.TargetLanguageIndex = 2,
             () => vm.RacingModel = "new-race",
             () => vm.RacingApiKey = "new-fake-race",
-            () => vm.FastFallbackDelayText = "4",
-            () => vm.TencentRegionIndex = 1,
-            () => vm.TencentSecretKey = "other-fake-key",
-            () => vm.MyMemoryContactEmail = "fixture@example.test",
-            () => vm.EnableMyMemoryFallback = false,
+            () => vm.EnableFreeFallback = false,
             () => vm.EnableRacing = false,
-            () => vm.EnableFastFallbackRace = false,
             () => vm.AiPresetIndex = 2,
             () => vm.BaseAddress = "https://new.example.test/v1"
         };
@@ -110,13 +103,12 @@ public sealed class SettingsConnectionTestTests
     {
         using var ui = new TestWindow();
         var vm = ui.Model;
-        vm.EnableMyMemoryFallback = false;
         var pending = ui.Start();
         vm.OcrModeIndex = 2;
         vm.UseCloudForTranslation = !vm.UseCloudForTranslation;
         vm.TranslationDisplayModeIndex = 1;
         vm.Model = "inactive-ai-model";
-        vm.MyMemoryContactEmail = "unused@example.test";
+        vm.EnableFreeFallback = false;
         vm.TencentSecretKey = "unused-test-key";
         Assert.IsFalse(pending.Token.IsCancellationRequested);
         Assert.IsFalse(ui.Button.IsEnabled);
@@ -128,24 +120,18 @@ public sealed class SettingsConnectionTestTests
     }
 
     [STATestMethod]
-    public void DormantTencentAndUnchangedEffectiveDelayKeepAiTestValid()
+    public void ChangingOcrCredentialsDoesNotAffectAnAiConnectionTest()
     {
         using var ui = new TestWindow();
         var vm = ui.Model;
         vm.TranslationProviderIndex = 1;
-        vm.EnableFastFallbackRace = true;
         var request = ui.Start();
-        vm.TencentRegionIndex = 1;
-        vm.TencentSecretId = "test-id-only";
-        vm.FastFallbackDelayText = "4";
+        vm.TencentSecretId = "ocr-test-id";
+        vm.TencentSecretKey = "ocr-test-key";
         Assert.IsFalse(request.Token.IsCancellationRequested);
-        vm.TencentSecretKey = "completes-the-pair";
-        Assert.IsTrue(request.Token.IsCancellationRequested);
-        request.Succeed("旧请求");
+        request.Succeed("当前服务");
         ui.Drain();
-        ui.Start().Succeed("当前服务");
-        ui.Drain();
-        vm.FastFallbackDelayText = "invalid";
+        vm.TencentSecretKey = string.Empty;
         Assert.AreEqual("连接成功：当前服务", ui.Status.Text);
     }
 

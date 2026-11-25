@@ -130,8 +130,8 @@ internal sealed class SelectionTextCache
         {
             return false;
         }
-        var secretId = credentials.ReadCredential(TranslationProfile.TencentSecretIdCredentialName)?.Secret;
-        var secretKey = credentials.ReadCredential(TranslationProfile.TencentSecretKeyCredentialName)?.Secret;
+        var secretId = credentials.ReadCredential(OcrProfile.TencentSecretIdCredentialName)?.Secret;
+        var secretKey = credentials.ReadCredential(OcrProfile.TencentSecretKeyCredentialName)?.Secret;
         return !string.IsNullOrWhiteSpace(secretId) && !string.IsNullOrWhiteSpace(secretKey);
     }
 }

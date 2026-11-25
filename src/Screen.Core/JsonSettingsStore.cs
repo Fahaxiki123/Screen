@@ -40,8 +40,11 @@ public sealed class JsonSettingsStore
 
     public string Path { get; }
 
-    public AppSettings Load()
+    public AppSettings Load() => Load(out _);
+
+    private AppSettings Load(out bool needsMigration)
     {
+        needsMigration = false;
         try
         {
             if (!File.Exists(Path))
@@ -49,8 +52,19 @@ public sealed class JsonSettingsStore
                 return new AppSettings();
             }
 
-            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), Options)
-                           ?? new AppSettings();
+            using var document = JsonDocument.Parse(File.ReadAllText(Path));
+            var settings = document.RootElement.Deserialize<AppSettings>(Options) ?? new AppSettings();
+            var translationJson = FindProperty(document.RootElement, nameof(AppSettings.Translation));
+            // In 2.0.2 this switch already controlled AI → Edge. Preserve an explicit opt-out.
+            var legacyFallback = FindProperty(translationJson, "EnableMyMemoryFallback");
+            if (settings.Translation is not null && legacyFallback.ValueKind is JsonValueKind.True or JsonValueKind.False
+                && FindProperty(translationJson, nameof(TranslationProfile.EnableFreeFallback)).ValueKind == JsonValueKind.Undefined)
+            {
+                settings.Translation = settings.Translation with { EnableFreeFallback = legacyFallback.GetBoolean() };
+                needsMigration = true;
+            }
+            needsMigration |= settings.SchemaVersion < AppSettings.CurrentSchemaVersion
+                              || (settings.Translation is { } profile && !Enum.IsDefined(profile.Provider));
             var defaults = new AppSettings();
             settings.HotKey ??= defaults.HotKey;
             settings.ClickThroughRecoveryHotKey ??= defaults.ClickThroughRecoveryHotKey;
@@ -69,8 +83,6 @@ public sealed class JsonSettingsStore
                     Model = translation.Model ?? defaults.Translation.Model,
                     CredentialName = translation.CredentialName ?? string.Empty,
                     TargetLanguage = translation.TargetLanguage ?? defaults.Translation.TargetLanguage,
-                    TencentRegion = translation.TencentRegion ?? defaults.Translation.TencentRegion,
-                    MyMemoryContactEmail = translation.MyMemoryContactEmail ?? string.Empty,
                     RacingBaseAddress = translation.RacingBaseAddress ?? string.Empty,
                     RacingModel = translation.RacingModel ?? string.Empty,
                     RacingCredentialName = translation.RacingCredentialName ?? string.Empty
@@ -110,46 +122,29 @@ public sealed class JsonSettingsStore
         // path; a locked file is not.
     }
 
+    // Match the serializer: property names ignore case and the last occurrence wins.
+    private static JsonElement FindProperty(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object
+            ? element.EnumerateObject().LastOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)).Value
+            : default;
+
     private static bool IsLegacyZhipuOcrProfile(TranslationProfile profile) =>
         profile.BaseAddress?.Contains("open.bigmodel.cn", StringComparison.OrdinalIgnoreCase) == true
         && profile.BaseAddress.Contains("layout_parsing", StringComparison.OrdinalIgnoreCase)
         && string.Equals(profile.Model, "glm-ocr", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// 将旧版本（Schema &lt; 5）默认指向腾讯但未配置腾讯密钥的用户平滑迁移到免费在线翻译（Edge），
-    /// 已配置腾讯密钥的老用户保持原配置不变。
+    /// Persist normalized settings on upgrade, without reading or changing any credentials.
     /// </summary>
-    public bool TryMigrateLegacyDefaultProvider(Func<bool> hasTencentCredentials)
+    public bool TryMigrateLegacyDefaultProvider()
     {
-        ArgumentNullException.ThrowIfNull(hasTencentCredentials);
         lock (_gate)
         {
-            if (!File.Exists(Path))
+            var latest = Load(out var needsMigration);
+            if (!needsMigration || latest.SchemaVersion > AppSettings.CurrentSchemaVersion)
             {
                 return false;
             }
-            AppSettings? raw;
-            try
-            {
-                raw = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), Options);
-            }
-            catch (JsonException)
-            {
-                return false;
-            }
-            if (raw is null || raw.SchemaVersion >= AppSettings.CurrentSchemaVersion)
-            {
-                return false;
-            }
-            if (raw.Translation?.Provider != TranslationProviderKind.Tencent
-                || IsLegacyZhipuOcrProfile(raw.Translation)
-                || hasTencentCredentials())
-            {
-                return false;
-            }
-            var latest = Load();
-            latest.Translation = latest.Translation with { Provider = TranslationProviderKind.Edge };
-            latest.SchemaVersion = AppSettings.CurrentSchemaVersion;
             Save(latest);
             return true;
         }

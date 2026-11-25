@@ -87,8 +87,8 @@ public sealed class SelectionTextCacheAndSettingsTests
         var settings = new AppSettings { Ocr = new OcrProfile { Mode = OcrProviderMode.Smart, UseCloudForTranslation = true } };
         Assert.IsFalse(SelectionTextCache.RequiresCloudTranslationOcr(settings, credentials));
 
-        credentials.Write(TranslationProfile.TencentSecretIdCredentialName, "id");
-        credentials.Write(TranslationProfile.TencentSecretKeyCredentialName, "key");
+        credentials.Write(OcrProfile.TencentSecretIdCredentialName, "id");
+        credentials.Write(OcrProfile.TencentSecretKeyCredentialName, "key");
         Assert.IsTrue(SelectionTextCache.RequiresCloudTranslationOcr(settings, credentials));
 
         settings.Ocr = settings.Ocr with { Mode = OcrProviderMode.LocalOnly };
@@ -285,6 +285,15 @@ public sealed class SelectionTextCacheAndSettingsTests
                 navButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 PumpDispatcher(window, 150);
 
+                var providers = FindVisualChildren<ComboBox>(window)
+                    .Single(c => AutomationProperties.GetName(c) == "翻译服务");
+                CollectionAssert.AreEqual(new[] { "免费在线翻译（推荐 · 免配置）", "AI 自然翻译（自配 API Key）" },
+                    providers.Items.Cast<string>().ToArray());
+                Assert.AreEqual(0, providers.SelectedIndex);
+                providers.SelectedIndex = 1;
+                Assert.AreEqual(TranslationProviderKind.OpenAiCompatible,
+                    ((SettingsViewModel)window.DataContext).BuildTranslationProfile().Provider);
+
                 var advancedToggle = FindVisualChildren<Button>(window)
                     .First(b => string.Equals(AutomationProperties.GetName(b), "高级选项", StringComparison.Ordinal));
                 var ocrComboBefore = FindVisualChildren<ComboBox>(window)
@@ -339,14 +348,8 @@ public sealed class SelectionTextCacheAndSettingsTests
 
     private static void EnsureThemeResources()
     {
-        if (Application.Current is null)
-        {
-            var screenApp = new App();
-            screenApp.InitializeComponent();
-            return;
-        }
-
-        var app = Application.Current;
+        // Pumping the dispatcher must not run the real tray app's single-instance startup.
+        var app = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         if (!app.Resources.Contains("AppleSwitchStyle"))
         {
             app.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(

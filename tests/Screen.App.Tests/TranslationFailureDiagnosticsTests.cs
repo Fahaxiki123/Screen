@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Screen.Core;
 
@@ -10,24 +9,24 @@ namespace Screen.App.Tests;
 [TestClass]
 public sealed class TranslationFailureDiagnosticsTests
 {
-    // Also a syntactically valid provider code and model name. Neither makes this safe to log.
+    // A model name and raw response body must be no more visible in logs than a key or screenshot.
     private const string Secret = "SensitiveScreenshotOrKey123";
-    private static readonly TranslationCredentials Credentials = new(Secret, "test-id", Secret, Secret);
+    private static readonly TranslationCredentials Credentials = new(Secret, Secret);
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
-    [DataRow(false, false)]
-    [DataRow(true, false)]
-    [DataRow(false, true)]
-    [DataRow(true, true)]
-    public async Task FreeRoutePreservesBothFailuresAndRedactsUpstreamDetails(bool batch, bool businessError)
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AiAndFreeFallbackFailuresRetainBothStatusesWithoutLeakingText(bool batch)
     {
-        using var client = new HttpClient(new Handler(host => host == "edge.microsoft.com"
-            ? Reply(HttpStatusCode.Forbidden, Secret)
-            : Reply(businessError ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests,
-                JsonSerializer.Serialize(new { responseStatus = 429, responseDetails = Secret }))));
+        using var client = new HttpClient(new Handler(host => host switch
+        {
+            "primary.example.test" => Reply(HttpStatusCode.Unauthorized, Secret),
+            "edge.microsoft.com" => Reply(HttpStatusCode.Forbidden, Secret),
+            _ => throw new AssertFailedException("Unexpected provider")
+        }));
         var route = new OnlineTranslationProvider(client);
-        var profile = Profile(TranslationProviderKind.Edge);
+        var profile = Profile(TranslationProviderKind.OpenAiCompatible);
         var error = await Assert.ThrowsExactlyAsync<TranslationRouteException>(async () =>
         {
             if (batch)
@@ -36,31 +35,25 @@ public sealed class TranslationFailureDiagnosticsTests
                 await route.TranslateAsync(Secret, "en", profile, Credentials, cancellationToken: TestContext.CancellationToken);
         });
 
-        StringAssert.Contains(error.Message, "403");
-        StringAssert.Contains(error.Message, "429");
-        CollectionAssert.AreEqual(new[] { TranslationProviderKind.Edge, TranslationProviderKind.MyMemory },
+        CollectionAssert.AreEqual(new[] { TranslationProviderKind.OpenAiCompatible, TranslationProviderKind.Edge },
             error.Failures.Select(f => f.Provider).ToArray());
-        Assert.AreEqual(HttpStatusCode.Forbidden, error.Failures[0].HttpStatus);
-        Assert.AreEqual(businessError ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, error.Failures[1].HttpStatus);
-        Assert.AreEqual("429", error.Failures[1].ServiceCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, error.Failures[0].HttpStatus);
+        Assert.AreEqual(HttpStatusCode.Forbidden, error.Failures[1].HttpStatus);
         var log = CaptureOverlayWindow.FormatSafeTranslationErrorLog(profile.Provider, error);
         StringAssert.Contains(log, "HTTP 403");
-        StringAssert.Contains(log, businessError ? "HTTP 200" : "HTTP 429");
-        StringAssert.Contains(log, "service 429");
+        StringAssert.Contains(log, "HTTP 401");
         Assert.IsFalse(log.Contains(Secret));
     }
 
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public async Task NestedSuccessfulFallbackRetainsAllProviderReasons(bool batch)
+    public async Task SuccessfulFreeFallbackRetainsAiFailure(bool batch)
     {
         using var client = new HttpClient(new Handler(host => host switch
         {
             "primary.example.test" => Reply(HttpStatusCode.Unauthorized, Secret),
-            "tmt.tencentcloudapi.com" => TencentError("AuthFailure.SignatureFailure"),
-            "edge.microsoft.com" => Reply(HttpStatusCode.Forbidden, Secret),
-            "api.mymemory.translated.net" => Reply(HttpStatusCode.OK, """{"responseStatus":200,"responseData":{"translatedText":"done"}}"""),
+            "edge.microsoft.com" => Reply(HttpStatusCode.OK, """[{"translations":[{"text":"done"}]}]"""),
             _ => throw new InvalidOperationException("Unexpected provider")
         }));
         var route = new OnlineTranslationProvider(client);
@@ -80,40 +73,28 @@ public sealed class TranslationFailureDiagnosticsTests
             destination = result.FallbackProvider;
         }
 
-        Assert.AreEqual(TranslationProviderKind.MyMemory, destination);
-        CollectionAssert.AreEqual(new[] { TranslationProviderKind.OpenAiCompatible, TranslationProviderKind.Tencent, TranslationProviderKind.Edge },
+        Assert.AreEqual(TranslationProviderKind.Edge, destination);
+        CollectionAssert.AreEqual(new[] { TranslationProviderKind.OpenAiCompatible },
             failures.Select(f => f.Provider).ToArray());
         var log = CaptureOverlayWindow.FormatSafeFallbackLog(profile.Provider, destination, failures);
-        foreach (var value in new[] { "MyMemory", "HTTP 401", "HTTP 200", "AuthFailure.SignatureFailure", "HTTP 403" })
-            StringAssert.Contains(log, value);
+        StringAssert.Contains(log, "OpenAiCompatible -> Edge");
+        StringAssert.Contains(log, "HTTP 401");
         Assert.IsFalse(log.Contains(Secret));
     }
 
     [TestMethod]
-    [DataRow("SensitiveScreenshotOrKey123", null)]
-    [DataRow("AuthFailure.SensitiveScreenshotOrKey123", "AuthFailure")]
-    public async Task UnknownBusinessCodeCannotEchoTextOrCredentialsIntoLogs(string rawCode, string? safeCode)
+    [DataRow(HttpStatusCode.TooManyRequests)]
+    [DataRow(HttpStatusCode.ServiceUnavailable)]
+    public async Task FreeServiceReportsItsOwnTransportStatusWithoutUsingAnotherProvider(HttpStatusCode status)
     {
-        using var client = new HttpClient(new Handler(host => host == "tmt.tencentcloudapi.com"
-            ? TencentError(rawCode)
-            : Reply(HttpStatusCode.OK, """[{"translations":[{"text":"done"}]}]""")));
-        var profile = Profile(TranslationProviderKind.Tencent);
-        var result = await new OnlineTranslationProvider(client).TranslateAsync(Secret, "en", profile, Credentials,
-            cancellationToken: TestContext.CancellationToken);
-        Assert.AreEqual(safeCode, result.Failures.Single().ServiceCode);
-        var log = CaptureOverlayWindow.FormatSafeFallbackLog(profile.Provider, result.FallbackProvider, result.Failures);
-        StringAssert.Contains(log, "HTTP 200");
-        Assert.IsFalse(log.Contains(Secret));
-    }
-
-    [TestMethod]
-    [DataRow(TranslationProviderKind.MyMemory, HttpStatusCode.TooManyRequests)]
-    [DataRow(TranslationProviderKind.Tencent, HttpStatusCode.ServiceUnavailable)]
-    public async Task DirectHttpFailuresRetainTheirTransportStatus(TranslationProviderKind provider, HttpStatusCode status)
-    {
-        using var client = new HttpClient(new Handler(_ => Reply(status, Secret)));
+        using var client = new HttpClient(new Handler(host =>
+        {
+            Assert.AreEqual("edge.microsoft.com", host);
+            return Reply(status, Secret);
+        }));
+        const TranslationProviderKind provider = TranslationProviderKind.Edge;
         var error = await Assert.ThrowsExactlyAsync<HttpRequestException>(() => new OnlineTranslationProvider(client)
-            .TranslateAsync("sample", "en", Profile(provider) with { EnableMyMemoryFallback = false }, Credentials,
+            .TranslateAsync("sample", "en", Profile(provider), Credentials,
                 cancellationToken: TestContext.CancellationToken));
         Assert.AreEqual(status, error.StatusCode);
         var log = CaptureOverlayWindow.FormatSafeTranslationErrorLog(provider, error);
@@ -196,12 +177,8 @@ public sealed class TranslationFailureDiagnosticsTests
         {
             Provider = provider,
             BaseAddress = "https://primary.example.test",
-            Model = Secret,
-            EnableFastFallbackRace = false
+            Model = Secret
         };
-
-    private static HttpResponseMessage TencentError(string code) => Reply(HttpStatusCode.OK,
-        JsonSerializer.Serialize(new { Response = new { Error = new { Code = code, Message = Secret } } }));
 
     private static HttpResponseMessage Reply(HttpStatusCode status, string body) => new(status)
     {

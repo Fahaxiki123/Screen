@@ -6,10 +6,10 @@ internal sealed class SmartOcrEngine(
     IOcrEngine local,
     TencentCloudOcrEngine cloud,
     JsonSettingsStore settingsStore,
-    CredentialService credentials,
+    ICredentialStore credentials,
     Func<string, string?>? readCredential = null) : IOcrEngine, IDisposable
 {
-    private readonly Func<string, string?> _readCredential = readCredential ?? credentials.Read;
+    private readonly Func<string, string?> _readCredential = readCredential ?? credentials.ReadSecret;
 
     public IReadOnlyList<string> AvailableLanguages { get; } = ["auto"];
 
@@ -29,8 +29,8 @@ internal sealed class SmartOcrEngine(
     {
         var settings = settingsStore.Load();
         var profile = settings.Ocr ?? new OcrProfile();
-        var secretId = _readCredential(TranslationProfile.TencentSecretIdCredentialName);
-        var secretKey = _readCredential(TranslationProfile.TencentSecretKeyCredentialName);
+        var secretId = _readCredential(OcrProfile.TencentSecretIdCredentialName);
+        var secretKey = _readCredential(OcrProfile.TencentSecretKeyCredentialName);
         var cloudAvailable = profile.Mode != OcrProviderMode.LocalOnly
                              && !string.IsNullOrWhiteSpace(secretId)
                              && !string.IsNullOrWhiteSpace(secretKey);

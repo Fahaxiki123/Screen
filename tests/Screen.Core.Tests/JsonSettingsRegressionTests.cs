@@ -6,6 +6,26 @@ namespace Screen.Core.Tests;
 public sealed class JsonSettingsRegressionTests
 {
     [TestMethod]
+    public void MixedCaseFallbackSettingsRespectTheLastValueAndPreferTheNewSwitch()
+    {
+        var directory = Directory.CreateTempSubdirectory("screen-json-");
+        var path = Path.Combine(directory.FullName, "settings.json");
+        try
+        {
+            var store = new JsonSettingsStore(path);
+            File.WriteAllText(path, """{ "translation": { "EnableMyMemoryFallback": true, "enableMyMemoryFallback": false } }""");
+            Assert.IsFalse(store.Load().Translation.EnableFreeFallback);
+            File.WriteAllText(path, """{ "translation": { "enableFreeFallback": false, "EnableMyMemoryFallback": true } }""");
+            Assert.IsFalse(store.Load().Translation.EnableFreeFallback);
+        }
+        finally
+        {
+            File.Delete(path);
+            directory.Delete();
+        }
+    }
+
+    [TestMethod]
     public void LegacyExplicitNullsLoadWithoutGuessingAnEndpoint()
     {
         var directory = Directory.CreateTempSubdirectory("screen-json-");
@@ -50,13 +70,11 @@ public sealed class JsonSettingsRegressionTests
             Assert.AreEqual(defaults.Ocr, loaded.Ocr);
             Assert.AreEqual(defaults.Translation.Model, loaded.Translation.Model);
             Assert.AreEqual(defaults.Translation.TargetLanguage, loaded.Translation.TargetLanguage);
-            Assert.AreEqual(defaults.Translation.TencentRegion, loaded.Translation.TencentRegion);
             Assert.AreEqual(string.Empty, loaded.Translation.BaseAddress);
             Assert.AreEqual(string.Empty, loaded.Translation.RacingBaseAddress);
             Assert.AreEqual(string.Empty, loaded.Translation.CredentialName);
             Assert.AreEqual(string.Empty, loaded.Translation.RacingCredentialName);
             Assert.AreEqual(string.Empty, loaded.Translation.RacingModel);
-            Assert.AreEqual(string.Empty, loaded.Translation.MyMemoryContactEmail);
             Assert.IsTrue(loaded.Translation.EnableRacing);
         }
         finally

@@ -45,13 +45,9 @@ public partial class SettingsWindow : Window
 
     // 识别与翻译页按服务商动态显隐的配置分区。
     private StackPanel? _edgeSection;
-    private StackPanel? _tencentSection;
     private StackPanel? _aiSection;
     private StackPanel? _aiAdvancedSection;
-    private StackPanel? _memorySection;
     private StackPanel? _racingRows;
-    private FrameworkElement? _fastFallbackRow;
-    private bool _tencentSectionForcedVisible;
 
     internal SettingsWindow(
         JsonSettingsStore store,
@@ -236,7 +232,6 @@ public partial class SettingsWindow : Window
         PageHost.Content = page;
         ApplyPageHeader(id);
         PageScroll.ScrollToTop();
-        _tencentSectionForcedVisible = false;
         UpdateTranslationSections();
         AnimatePageGroups(page);
     }
@@ -266,43 +261,16 @@ public partial class SettingsWindow : Window
 
     private void UpdateTranslationSections()
     {
-        if (_edgeSection is null || _tencentSection is null || _aiSection is null || _memorySection is null)
+        if (_edgeSection is null || _aiSection is null || _aiAdvancedSection is null || _racingRows is null)
         {
             return;
         }
 
-        _edgeSection.Visibility = _viewModel.TranslationProviderIndex == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        _aiSection.Visibility = _viewModel.TranslationProviderIndex == 1
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        if (_aiAdvancedSection is not null)
-        {
-            _aiAdvancedSection.Visibility = _viewModel.TranslationProviderIndex == 1
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        }
-        _tencentSection.Visibility = _viewModel.TranslationProviderIndex == 2 || _tencentSectionForcedVisible
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        _memorySection.Visibility = _viewModel.TranslationProviderIndex == 3
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-        if (_racingRows is not null)
-        {
-            _racingRows.Visibility = _viewModel.EnableRacing
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        }
-
-        if (_fastFallbackRow is not null)
-        {
-            _fastFallbackRow.Visibility = _viewModel.EnableFastFallbackRace
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        }
+        var ai = _viewModel.TranslationProviderIndex == 1;
+        _edgeSection.Visibility = ai ? Visibility.Collapsed : Visibility.Visible;
+        _aiSection.Visibility = ai ? Visibility.Visible : Visibility.Collapsed;
+        _aiAdvancedSection.Visibility = _aiSection.Visibility;
+        _racingRows.Visibility = _viewModel.EnableRacing ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -311,13 +279,7 @@ public partial class SettingsWindow : Window
         {
             ResetTranslationTest();
         }
-        if (e.PropertyName == nameof(SettingsViewModel.TranslationProviderIndex))
-        {
-            _tencentSectionForcedVisible = false;
-            UpdateTranslationSections();
-        }
-        else if (e.PropertyName is nameof(SettingsViewModel.EnableRacing)
-                 or nameof(SettingsViewModel.EnableFastFallbackRace))
+        if (e.PropertyName is nameof(SettingsViewModel.TranslationProviderIndex) or nameof(SettingsViewModel.EnableRacing))
         {
             UpdateTranslationSections();
         }

@@ -331,7 +331,7 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task NaturalTranslationFallsBackToTencentWhenAiServiceFails()
+    public async Task NaturalTranslationFallsBackToEdgeWhenAiServiceFails()
     {
         var requests = 0;
         using var client = new HttpClient(new StubHttpHandler((request, _) =>
@@ -344,10 +344,10 @@ public sealed class CoreTests
                     Content = new StringContent("{\"error\":{\"message\":\"invalid api key\"}}")
                 });
             }
-            Assert.AreEqual("tmt.tencentcloudapi.com", request.RequestUri?.Host);
+            Assert.AreEqual("edge.microsoft.com", request.RequestUri?.Host);
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"Response\":{\"TargetText\":\"腾讯保底译文\",\"RequestId\":\"test\"}}")
+                Content = new StringContent("[{\"translations\":[{\"text\":\"免费保底译文\"}]}]")
             });
         }));
         var provider = new OnlineTranslationProvider(client);
@@ -356,18 +356,18 @@ public sealed class CoreTests
             Provider = TranslationProviderKind.OpenAiCompatible,
             BaseAddress = "https://example.test/v1",
             Model = "natural-model",
-            EnableMyMemoryFallback = false
+            EnableFreeFallback = true
         };
 
         var result = await provider.TranslateAsync(
             "Hello world",
             "en-US",
             profile,
-            new TranslationCredentials("test-key", "test-id", "test-secret"));
+            new TranslationCredentials(ApiKey: "test-key"));
 
         Assert.AreEqual(2, requests);
-        Assert.AreEqual("腾讯保底译文", result.Text);
-        Assert.AreEqual("腾讯机器翻译", result.ProviderName);
+        Assert.AreEqual("免费保底译文", result.Text);
+        Assert.AreEqual("免费在线翻译", result.ProviderName);
         Assert.IsTrue(result.UsedFallback);
         StringAssert.Contains(result.PrimaryFailure, "AI 自然翻译");
     }
@@ -399,65 +399,18 @@ public sealed class CoreTests
             Provider = TranslationProviderKind.OpenAiCompatible,
             BaseAddress = "https://example.test/v1",
             Model = "natural-model",
-            EnableMyMemoryFallback = false,
-            EnableFastFallbackRace = false
+            EnableFreeFallback = false
         };
 
         var result = await provider.TranslateAsync(
             "Hello world",
             "en-US",
             profile,
-            new TranslationCredentials("test-key", "test-id", "test-secret"));
+            new TranslationCredentials(ApiKey: "test-key"));
 
         Assert.AreEqual(3, requests);
         Assert.AreEqual("重试后的译文", result.Text);
         Assert.IsFalse(result.UsedFallback);
-    }
-
-    [TestMethod]
-    public async Task NaturalTranslationSwitchesToFastTencentWhenAiIsSlow()
-    {
-        using var client = new HttpClient(new StubHttpHandler(async (request, cancellationToken) =>
-        {
-            if (request.RequestUri?.Host == "tmt.tencentcloudapi.com")
-            {
-                return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-                {
-                    Content = new StringContent("{\"Response\":{\"TargetText\":\"腾讯快速译文\",\"RequestId\":\"test\"}}")
-                };
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
-            var stream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(
-                "data: {\"choices\":[{\"delta\":{\"content\":\"太慢的AI译文\"}}]}\n\ndata: [DONE]\n\n"));
-            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-            {
-                Content = new StreamContent(stream)
-            };
-        }));
-        var provider = new OnlineTranslationProvider(client);
-        var profile = new AppSettings().Translation with
-        {
-            Provider = TranslationProviderKind.OpenAiCompatible,
-            BaseAddress = "https://slow.test/v1",
-            Model = "primary-model",
-            EnableFastFallbackRace = true,
-            FastFallbackDelaySeconds = 2,
-            EnableMyMemoryFallback = false
-        };
-
-        var timer = System.Diagnostics.Stopwatch.StartNew();
-        var result = await provider.TranslateAsync(
-            "Hello world, please translate this sentence.",
-            "en-US",
-            profile,
-            new TranslationCredentials("test-key", "test-id", "test-secret"));
-
-        Assert.AreEqual("腾讯快速译文", result.Text);
-        Assert.AreEqual("腾讯机器翻译", result.ProviderName);
-        Assert.IsTrue(result.UsedFallback);
-        StringAssert.Contains(result.PrimaryFailure, "超过 2 秒");
-        Assert.IsTrue(timer.Elapsed < TimeSpan.FromSeconds(4), $"fast fallback took {timer.Elapsed.TotalSeconds:F1}s");
     }
 
     [TestMethod]
@@ -494,7 +447,7 @@ public sealed class CoreTests
             EnableRacing = true,
             RacingBaseAddress = "https://slow.test/v1",
             RacingModel = "slow-model",
-            EnableMyMemoryFallback = false
+            EnableFreeFallback = false
         };
 
         var timer = System.Diagnostics.Stopwatch.StartNew();
@@ -502,7 +455,7 @@ public sealed class CoreTests
             "Hello world, please translate this sentence.",
             "en-US",
             profile,
-            new TranslationCredentials("primary-key", "test-id", "test-secret", "racing-key"));
+            new TranslationCredentials(ApiKey: "primary-key", RacingApiKey: "racing-key"));
 
         Assert.AreEqual(fastText, result.Text);
         Assert.IsTrue(result.ProviderName.Contains("primary-model", StringComparison.Ordinal));
@@ -513,21 +466,23 @@ public sealed class CoreTests
     [TestMethod]
     public void TencentTc3SignatureMatchesIndependentReference()
     {
-        const string payload = "{\"SourceText\":\"hello\",\"Source\":\"auto\",\"Target\":\"zh\",\"ProjectId\":0}";
+        const string payload = "{\"ImageBase64\":\"dGVzdA==\"}";
 
-        var authorization = TencentTranslationProvider.CreateAuthorization(
+        var authorization = TencentCloudApiSigner.CreateAuthorization(
             "AKIDEXAMPLE",
             "test-secret-key",
             payload,
-            1551113065);
+            1551113065,
+            "ocr.tencentcloudapi.com",
+            "ocr");
 
         Assert.AreEqual(
-            "TC3-HMAC-SHA256 Credential=AKIDEXAMPLE/2019-02-25/tmt/tc3_request, SignedHeaders=content-type;host, Signature=c319b4a995151594bc771eac854db8104fa942e8d6c554e70c352463ed94c13f",
+            "TC3-HMAC-SHA256 Credential=AKIDEXAMPLE/2019-02-25/ocr/tc3_request, SignedHeaders=content-type;host, Signature=0829e958b520a60dbefc69a4a9e3570a9f7392f983eb72b80d794dd9527f2416",
             authorization);
     }
 
     [TestMethod]
-    public void TranslationChunkerHonorsMyMemoryUtf8ByteLimit()
+    public void TranslationChunkerHonorsUtf8ByteLimit()
     {
         var chunks = TranslationTextChunker.SplitByUtf8Bytes(string.Concat(Enumerable.Repeat("你好 world。", 90)), 450);
 
@@ -695,13 +650,14 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public void NewSettingsDefaultToEdgeFreeTranslationWithFallback()
+    public void NewSettingsDefaultToEdgeAndOnlyOfferTwoTranslationProviders()
     {
         var settings = new AppSettings();
 
         Assert.AreEqual(TranslationProviderKind.Edge, settings.Translation.Provider);
-        Assert.IsTrue(settings.Translation.EnableMyMemoryFallback);
-        Assert.AreEqual("ap-guangzhou", settings.Translation.TencentRegion);
+        Assert.IsTrue(settings.Translation.EnableFreeFallback);
+        CollectionAssert.AreEquivalent(new[] { TranslationProviderKind.OpenAiCompatible, TranslationProviderKind.Edge },
+            Enum.GetValues<TranslationProviderKind>());
     }
 
     [TestMethod]
@@ -878,40 +834,6 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task MissingTencentCredentialsFallsBackToFreeProviders()
-    {
-        var hosts = new List<string>();
-        using var client = new HttpClient(new StubHttpHandler((request, _) =>
-        {
-            var host = request.RequestUri!.Host;
-            hosts.Add(host);
-            if (host == "edge.microsoft.com")
-            {
-                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
-            }
-            Assert.AreEqual("api.mymemory.translated.net", host);
-            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"responseData\":{\"translatedText\":\"你好 &amp; 欢迎\"},\"responseStatus\":200}")
-            });
-        }));
-        var provider = new OnlineTranslationProvider(client);
-        var profile = new AppSettings().Translation with { Provider = TranslationProviderKind.Tencent };
-
-        var result = await provider.TranslateAsync(
-            "Hello and welcome",
-            "en-US",
-            profile,
-            new TranslationCredentials());
-
-        Assert.AreEqual("你好 & 欢迎", result.Text);
-        Assert.IsTrue(result.UsedFallback);
-        Assert.AreEqual("MyMemory 基础翻译", result.ProviderName);
-        StringAssert.Contains(result.PrimaryFailure, "SecretId");
-        CollectionAssert.AreEqual(new[] { "edge.microsoft.com", "edge.microsoft.com", "api.mymemory.translated.net" }, hosts);
-    }
-
-    [TestMethod]
     public void SettingsRoundTripDoesNotNeedImageOrOcrHistory()
     {
         var path = Path.Combine(Path.GetTempPath(), $"Screen-{Guid.NewGuid():N}", "settings.json");
@@ -962,7 +884,7 @@ public sealed class CoreTests
                 "Screen.Translation",
                 "简体中文")
             {
-                Provider = TranslationProviderKind.Tencent
+                Provider = (TranslationProviderKind)0 // Historical Tencent ID.
             }
         };
         try

@@ -3,19 +3,10 @@ using System.Text;
 namespace Screen.Core;
 
 /// <summary>
-/// 统一为非流式翻译请求施加单次超时上限，避免共享 HttpClient 的长超时阻塞回退链路。
+/// 限制非流式翻译请求的等待时间，并区分超时和用户取消。
 /// </summary>
 internal static class TranslationHttp
 {
-    private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(30);
-
-    internal static Task<(int Status, string Reason, string Body)> SendAsync(
-        HttpClient httpClient,
-        HttpRequestMessage request,
-        string timeoutMessage,
-        CancellationToken cancellationToken) =>
-        SendAsync(httpClient, request, timeoutMessage, DefaultRequestTimeout, cancellationToken);
-
     internal static async Task<(int Status, string Reason, string Body)> SendAsync(
         HttpClient httpClient,
         HttpRequestMessage request,
@@ -39,7 +30,7 @@ internal static class TranslationHttp
 }
 
 /// <summary>
-/// 各翻译服务商的目标与源语言代码映射。
+/// 免费在线翻译的目标语言代码映射。
 /// </summary>
 internal static class TranslationLanguageCodes
 {
@@ -56,149 +47,6 @@ internal static class TranslationLanguageCodes
         "Deutsch" => "de",
         _ => "zh-Hans"
     };
-
-    public static string ToTencent(string language) => language switch
-    {
-        "简体中文" => "zh",
-        "繁體中文" => "zh-TW",
-        "English" => "en",
-        "日本語" => "ja",
-        "한국어" => "ko",
-        "Français" => "fr",
-        "Español" => "es",
-        "Português" => "pt",
-        "Deutsch" => "de",
-        _ => "zh"
-    };
-
-    public static string ToMyMemoryTarget(string language) => language switch
-    {
-        "简体中文" => "zh-CN",
-        "繁體中文" => "zh-TW",
-        "English" => "en",
-        "日本語" => "ja",
-        "한국어" => "ko",
-        "Français" => "fr",
-        "Español" => "es",
-        "Português" => "pt",
-        "Deutsch" => "de",
-        _ => "zh-CN"
-    };
-
-    public static string ToMyMemorySource(string sourceLanguage, string text, string? targetCode = null)
-    {
-        // 多语种原位回退时，整图 sourceLanguage 可能与当前单段文本语种不一致（如整图偏英文但单段为日/韩文）；
-        // 优先依据当前文本自身特征识别，避免日/韩文段落被误按 en 翻译而原样残留。
-        var textDetected = DetectDistinctScriptCode(text);
-        var detected = textDetected
-                       ?? ParseMyMemoryCode(sourceLanguage)
-                       ?? ParseMyMemoryCode(OcrQualityEvaluator.DetectLanguage(text))
-                       ?? "en";
-        // 避免中英混排时源语种与目标语种相同导致 MyMemory 直接报 "PLEASE SELECT TWO DISTINCT LANGUAGES"。
-        if (!string.IsNullOrWhiteSpace(targetCode)
-            && IsSameLanguageFamily(detected, targetCode))
-        {
-            var fallbackByText = ParseMyMemoryCode(OcrQualityEvaluator.DetectLanguage(text));
-            if (fallbackByText is not null && !IsSameLanguageFamily(fallbackByText, targetCode))
-            {
-                return fallbackByText;
-            }
-            return targetCode.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "en" : "zh-CN";
-        }
-        return detected;
-    }
-
-    private static string? DetectDistinctScriptCode(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return null;
-        }
-        var han = 0;
-        var kana = 0;
-        var hangul = 0;
-        var latin = 0;
-        foreach (var character in text)
-        {
-            if (character is >= '\u3400' and <= '\u9FFF')
-            {
-                han++;
-            }
-            else if (character is >= '\u3040' and <= '\u30FF')
-            {
-                kana++;
-            }
-            else if (character is >= '\uAC00' and <= '\uD7AF')
-            {
-                hangul++;
-            }
-            else if (character is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
-            {
-                latin++;
-            }
-        }
-        if (kana > Math.Max(1, han / 5) && (kana + han) * 3 >= latin)
-        {
-            return "ja";
-        }
-        if (hangul > 1 && hangul * 3 >= latin)
-        {
-            return "ko";
-        }
-        if (han > 0 && han * 3 >= latin)
-        {
-            return "zh-CN";
-        }
-        return null;
-    }
-
-    private static string? ParseMyMemoryCode(string? language)
-    {
-        if (string.IsNullOrWhiteSpace(language))
-        {
-            return null;
-        }
-        if (language.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
-        {
-            return "zh-CN";
-        }
-        if (language.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
-        {
-            return "ja";
-        }
-        if (language.StartsWith("ko", StringComparison.OrdinalIgnoreCase))
-        {
-            return "ko";
-        }
-        if (language.StartsWith("en", StringComparison.OrdinalIgnoreCase))
-        {
-            return "en";
-        }
-        if (language.StartsWith("fr", StringComparison.OrdinalIgnoreCase))
-        {
-            return "fr";
-        }
-        if (language.StartsWith("es", StringComparison.OrdinalIgnoreCase))
-        {
-            return "es";
-        }
-        if (language.StartsWith("pt", StringComparison.OrdinalIgnoreCase))
-        {
-            return "pt";
-        }
-        if (language.StartsWith("de", StringComparison.OrdinalIgnoreCase))
-        {
-            return "de";
-        }
-        return null;
-    }
-
-    private static bool IsSameLanguageFamily(string source, string target)
-    {
-        var sourcePrimary = source.Split('-')[0];
-        var targetPrimary = target.Split('-')[0];
-        return string.Equals(sourcePrimary, targetPrimary, StringComparison.OrdinalIgnoreCase);
-    }
 }
 
 /// <summary>

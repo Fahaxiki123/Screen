@@ -23,8 +23,6 @@ internal static class TranslationCredentialStore
 
     public static TranslationCredentials ReadSaved(TranslationProfile profile, ICredentialStore store) => new(
         ReadSavedKey(store, TranslationProfile.ApiKeyCredentialName, profile.BaseAddress, profile.CredentialName),
-        ReadSecret(store, TranslationProfile.TencentSecretIdCredentialName),
-        ReadSecret(store, TranslationProfile.TencentSecretKeyCredentialName),
         ReadSavedKey(store, TranslationProfile.RacingApiKeyCredentialName, profile.RacingBaseAddress, profile.RacingCredentialName));
 
     public static void BindLegacyKeys(ICredentialStore store, TranslationProfile savedProfile)
@@ -82,19 +80,6 @@ internal static class TranslationCredentialStore
             store.Write(slot, credential.Secret, credential.EndpointScope);
         }
         return credential;
-    }
-
-    private static string? ReadSecret(ICredentialStore store, string slot)
-    {
-        try
-        {
-            return store.ReadCredential(slot)?.Secret;
-        }
-        catch (Win32Exception exception)
-        {
-            SimpleLogger.LogError("Could not read a Tencent translation credential", exception);
-            return null;
-        }
     }
 
     public static void SaveKey(ICredentialStore store, string slot, string secret, string scope)

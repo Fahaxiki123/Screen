@@ -254,30 +254,21 @@ public sealed class SettingsPersistenceTests
     }
 
     [STATestMethod]
-    [DataRow(0)]
-    [DataRow(2)]
-    [DataRow(3)]
-    public void InactiveAiOptionsDoNotBlockOtherSettings(int providerIndex)
+    public void InactiveAiOptionsDoNotBlockFreeTranslationSettings()
     {
         var credentials = new FakeCredentialStore();
         using var settings = new SettingsViewModel(_store, credentials, _ => { });
         settings.TranslationProviderIndex = 1;
-        settings.FastFallbackDelayText = "31";
+        settings.EnableRacing = true;
         settings.RacingBaseAddress = "invalid";
-        settings.TranslationProviderIndex = providerIndex;
+        settings.TranslationProviderIndex = 0;
         settings.RecordingShowCursor = false;
 
         settings.SaveNow();
 
         Assert.IsFalse(settings.HasError, settings.StatusText);
         Assert.IsFalse(_store.Load().Recording.ShowCursor);
-        var expected = providerIndex switch
-        {
-            2 => TranslationProviderKind.Tencent,
-            3 => TranslationProviderKind.MyMemory,
-            _ => TranslationProviderKind.Edge
-        };
-        Assert.AreEqual(expected, _store.Load().Translation.Provider);
+        Assert.AreEqual(TranslationProviderKind.Edge, _store.Load().Translation.Provider);
     }
 
     [STATestMethod]
@@ -352,17 +343,37 @@ public sealed class SettingsPersistenceTests
     }
 
     [STATestMethod]
+    public void ExistingCloudOcrKeysRemainEditableWithoutChangingTranslation()
+    {
+        const string legacyIdSlot = "Screen.Translation.Tencent.SecretId";
+        const string legacyKeySlot = "Screen.Translation.Tencent.SecretKey";
+        var credentials = new FakeCredentialStore();
+        credentials.Write(legacyIdSlot, "existing-id");
+        credentials.Write(legacyKeySlot, "existing-key");
+        using var settings = new SettingsViewModel(_store, credentials, _ => { });
+
+        Assert.AreEqual("existing-id", settings.TencentSecretId);
+        Assert.AreEqual("existing-key", settings.TencentSecretKey);
+        settings.TencentSecretKey = "updated-key";
+        settings.SaveNow();
+
+        Assert.AreEqual("updated-key", credentials.Read(legacyKeySlot));
+        Assert.AreEqual(TranslationProviderKind.Edge, settings.BuildTranslationProfile().Provider);
+        Assert.IsNull(settings.BuildTranslationCredentials().ApiKey);
+    }
+
+    [STATestMethod]
     public void ConfiguredCredentialNamesCannotSelectOrDeleteAnotherCredential()
     {
         var profile = SaveAiProfile() with
         {
             CredentialName = "AnotherApp",
-            RacingCredentialName = TranslationProfile.TencentSecretKeyCredentialName
+            RacingCredentialName = OcrProfile.TencentSecretKeyCredentialName
         };
         _store.Update(latest => latest.Translation = profile);
         var credentials = new FakeCredentialStore();
         credentials.Write("AnotherApp", "unrelated-key");
-        credentials.Write(TranslationProfile.TencentSecretKeyCredentialName, "tencent-key");
+        credentials.Write(OcrProfile.TencentSecretKeyCredentialName, "tencent-key");
         credentials.Write(TranslationProfile.ApiKeyCredentialName, "legacy-key");
         using var settings = new SettingsViewModel(_store, credentials, _ => { });
 
@@ -375,7 +386,7 @@ public sealed class SettingsPersistenceTests
 
         Assert.IsNull(credentials.Read(TranslationProfile.ApiKeyCredentialName));
         Assert.AreEqual("unrelated-key", credentials.Read("AnotherApp"));
-        Assert.AreEqual("tencent-key", credentials.Read(TranslationProfile.TencentSecretKeyCredentialName));
+        Assert.AreEqual("tencent-key", credentials.Read(OcrProfile.TencentSecretKeyCredentialName));
         Assert.IsNull(TranslationCredentialStore.ReadSaved(profile, credentials).ApiKey);
         Assert.IsNull(TranslationCredentialStore.ReadSaved(profile, credentials).RacingApiKey);
     }

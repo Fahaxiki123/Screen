@@ -143,6 +143,10 @@ public enum OcrProviderMode
 
 public sealed record OcrProfile
 {
+    // Keep the original Windows Credential Manager names for existing OCR users.
+    public const string TencentSecretIdCredentialName = "Screen.Translation.Tencent.SecretId";
+    public const string TencentSecretKeyCredentialName = "Screen.Translation.Tencent.SecretKey";
+
     public OcrProviderMode Mode { get; init; } = OcrProviderMode.CloudFirst;
     public bool UseCloudForTranslation { get; init; } = true;
     public double CloudConfidenceThreshold { get; init; } = 0.88;
@@ -151,9 +155,8 @@ public sealed record OcrProfile
 
 public enum TranslationProviderKind
 {
-    Tencent = 0,
+    // Values are persisted in settings.json. Do not reuse retired values 0 and 2.
     OpenAiCompatible = 1,
-    MyMemory = 2,
     Edge = 3
 }
 
@@ -171,25 +174,17 @@ public sealed record TranslationProfile(
 {
     public const string ApiKeyCredentialName = "Screen.Translation";
     public const string RacingApiKeyCredentialName = "Screen.RacingTranslation";
-    public const string TencentSecretIdCredentialName = "Screen.Translation.Tencent.SecretId";
-    public const string TencentSecretKeyCredentialName = "Screen.Translation.Tencent.SecretKey";
 
     public TranslationProviderKind Provider { get; init; } = TranslationProviderKind.Edge;
-    public string TencentRegion { get; init; } = "ap-guangzhou";
-    public bool EnableMyMemoryFallback { get; init; } = true;
-    public string MyMemoryContactEmail { get; init; } = string.Empty;
+    public bool EnableFreeFallback { get; init; } = true;
     public bool EnableRacing { get; init; }
     public string RacingBaseAddress { get; init; } = string.Empty;
     public string RacingModel { get; init; } = string.Empty;
     public string RacingCredentialName { get; init; } = RacingApiKeyCredentialName;
-    public bool EnableFastFallbackRace { get; init; } = true;
-    public int FastFallbackDelaySeconds { get; init; } = 8;
 }
 
 public sealed record TranslationCredentials(
     string? ApiKey = null,
-    string? TencentSecretId = null,
-    string? TencentSecretKey = null,
     string? RacingApiKey = null);
 
 public sealed record TranslationResult(
@@ -277,7 +272,7 @@ public sealed record StitchResult(
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
     public const string DefaultHotKey = "Ctrl+Shift+A";
     public const string DefaultClickThroughRecoveryHotKey = "F1";
     public const string DefaultRecordHotKey = "Ctrl+Shift+R";

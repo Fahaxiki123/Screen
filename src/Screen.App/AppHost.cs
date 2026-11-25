@@ -34,11 +34,9 @@ internal sealed class AppHost : IDisposable
     {
         try
         {
-            if (_settingsStore.TryMigrateLegacyDefaultProvider(() =>
-                !string.IsNullOrWhiteSpace(_credentialService.Read(TranslationProfile.TencentSecretIdCredentialName))
-                && !string.IsNullOrWhiteSpace(_credentialService.Read(TranslationProfile.TencentSecretKeyCredentialName))))
+            if (_settingsStore.TryMigrateLegacyDefaultProvider())
             {
-                SimpleLogger.LogInfo("Migrated legacy default Tencent translation profile without credentials to built-in Edge translation.");
+                SimpleLogger.LogInfo("Migrated legacy translation settings.");
             }
             _settings = _settingsStore.Load();
         }

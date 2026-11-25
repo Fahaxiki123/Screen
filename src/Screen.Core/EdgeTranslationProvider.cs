@@ -75,9 +75,9 @@ public sealed class EdgeTranslationProvider(HttpClient httpClient) : ITranslatio
     }
 
     /// <summary>
-    /// 按条数和字符上限划分批量请求分片，便于上层编排器保留已成功分片并在失败时仅重试剩余分片。
+    /// 按条数和字符上限划分请求，保留原始区域的索引。
     /// </summary>
-    internal static IReadOnlyList<(IReadOnlyList<int> Indices, IReadOnlyList<string> Texts)> BuildSlices(
+    private static IReadOnlyList<(IReadOnlyList<int> Indices, IReadOnlyList<string> Texts)> BuildSlices(
         IReadOnlyList<string> texts)
     {
         var slices = new List<(IReadOnlyList<int> Indices, IReadOnlyList<string> Texts)>();
@@ -122,7 +122,7 @@ public sealed class EdgeTranslationProvider(HttpClient httpClient) : ITranslatio
         return slices;
     }
 
-    internal async Task<string[]> TranslateSliceAsync(
+    private async Task<string[]> TranslateSliceAsync(
         IReadOnlyList<string> sliceTexts,
         string targetCode,
         string sourceLanguage,
