@@ -141,6 +141,21 @@ public partial class SettingsWindow
         _viewModel.SetStatus($"新快捷键：{value}（已生效）", isError: false);
     }
 
+    private void ResetTranslationTest()
+    {
+        var previous = _translationTestOperation;
+        _translationTestOperation = null;
+        _testedInputs = null;
+        if (_translationTestStatus is not null && _translationTestButton is not null)
+        {
+            _translationTestStatus.Foreground = GetResource<Brush>("Settings.Brush.TextTertiary");
+            _translationTestStatus.Text = "未测试";
+            _translationTestButton.IsEnabled = true;
+        }
+        // A cancelled request may still need its token. Its own finally disposes the source.
+        previous?.Cancel();
+    }
+
     private async void TestTranslationAsync(object sender, RoutedEventArgs e)
     {
         if (_translationTestStatus is null || sender is not Button button)
@@ -148,12 +163,10 @@ public partial class SettingsWindow
             return;
         }
 
-        button.IsEnabled = false;
-        // Cancel without disposing: the in-flight test may still be linking
-        // this token, and disposing it surfaces ObjectDisposedException
-        // instead of cancellation (see OcrCard.RecognizeAsync).
-        _translationTestOperation?.Cancel();
+        ResetTranslationTest();
         var operation = _translationTestOperation = new CancellationTokenSource();
+        _testedInputs = _viewModel.BuildTranslationTestInputs();
+        button.IsEnabled = false;
         _translationTestStatus.Foreground = GetResource<Brush>("Settings.Brush.TextTertiary");
         _translationTestStatus.Text = "正在连接…";
 
@@ -178,17 +191,14 @@ public partial class SettingsWindow
                 }
             }
             var credentials = _viewModel.BuildTranslationCredentials();
-            var provider = new OnlineTranslationProvider(_translationTestClient);
-            var result = await provider.TranslateAsync(
+            var result = await _translationTestProvider.TranslateAsync(
                 "Major Agent upgrades with strong production gains! Flexible reasoning effort: low for simple tasks, high for daily Agent workflows, max for complex tasks.",
                 "en-US",
                 profile,
                 credentials,
                 cancellationToken: operation.Token);
-            if (operation.IsCancellationRequested)
+            if (!ReferenceEquals(_translationTestOperation, operation))
             {
-                // A newer test has begun; a stale success must not overwrite
-                // its "正在连接…" status.
                 return;
             }
 
@@ -202,11 +212,7 @@ public partial class SettingsWindow
         }
         catch (Exception exception)
         {
-            if (operation.IsCancellationRequested)
-            {
-                SimpleLogger.LogError("Translation connection test ended with an error after cancellation", exception);
-            }
-            else
+            if (ReferenceEquals(_translationTestOperation, operation))
             {
                 _translationTestStatus.Foreground = GetResource<Brush>("Settings.Brush.Error");
                 _translationTestStatus.Text = exception.Message;
@@ -217,10 +223,7 @@ public partial class SettingsWindow
             if (ReferenceEquals(_translationTestOperation, operation))
             {
                 _translationTestOperation = null;
-                if (!operation.IsCancellationRequested)
-                {
-                    button.IsEnabled = true;
-                }
+                button.IsEnabled = true;
             }
             operation.Dispose();
         }

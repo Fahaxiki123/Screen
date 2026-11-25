@@ -474,6 +474,98 @@ public partial class SettingsWindow
         };
     }
 
+    /// <summary>创建可折叠的高级设置分区，默认折叠以保持主页面清爽。</summary>
+    private StackPanel AddCollapsibleSection(Panel page, string title, string description, out StackPanel content)
+    {
+        content = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 12, 0, 0) };
+        var chevron = new TextBlock
+        {
+            Text = "▸",
+            FontSize = 13,
+            Foreground = RowDescriptionBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 2, 0)
+        };
+        var headerGrid = new Grid { MinHeight = 30, Margin = new Thickness(16, 13, 16, 13) };
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.Children.Add(CreateRowIcon(LucideIconKind.Settings2));
+
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(11, 0, 12, 0) };
+        text.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 13.5,
+            FontWeight = FontWeights.Medium,
+            Foreground = RowTitleBrush
+        });
+        text.Children.Add(new TextBlock
+        {
+            Text = description,
+            FontSize = 12,
+            Foreground = RowDescriptionBrush,
+            Margin = new Thickness(0, 2, 0, 0),
+            TextWrapping = TextWrapping.Wrap
+        });
+        Grid.SetColumn(text, 1);
+        headerGrid.Children.Add(text);
+        Grid.SetColumn(chevron, 2);
+        headerGrid.Children.Add(chevron);
+
+        var headerButton = new Button
+        {
+            Content = headerGrid,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            FocusVisualStyle = GetResource<Style>("SettingsFocusVisualStyle")
+        };
+        headerButton.Template = CreatePlainButtonTemplate();
+        AutomationProperties.SetName(headerButton, title);
+
+        var innerContent = content;
+        headerButton.Click += (_, _) =>
+        {
+            var expanded = innerContent.Visibility != Visibility.Visible;
+            innerContent.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+            chevron.Text = expanded ? "▾" : "▸";
+            if (expanded)
+            {
+                AnimatePageGroups(innerContent);
+            }
+        };
+
+        var headerCard = new SquircleGlassBorder
+        {
+            CornerRadiusRadius = 10,
+            ShowRim = false,
+            ShadowLevel = 0,
+            OutlineBrush = CardOutlineBrush,
+            OutlineThickness = 1,
+            GlassBackground = Brushes.White,
+            Child = headerButton
+        };
+
+        var container = new StackPanel { Tag = headerCard, Margin = new Thickness(0, 0, 0, 18) };
+        container.Children.Add(headerCard);
+        container.Children.Add(content);
+        page.Children.Add(container);
+        return container;
+    }
+
+    private static ControlTemplate CreatePlainButtonTemplate()
+    {
+        var template = new ControlTemplate(typeof(Button));
+        var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
+        presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Stretch);
+        presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        template.VisualTree = presenter;
+        return template;
+    }
+
     /// <summary>创建等宽字体版本号徽章。</summary>
     private FrameworkElement CreateVersionBadge(string versionText) => new Border
     {

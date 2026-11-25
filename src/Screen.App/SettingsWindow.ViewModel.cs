@@ -318,17 +318,19 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _settings.Translation.Provider switch
         {
-            TranslationProviderKind.MyMemory => 1,
-            TranslationProviderKind.OpenAiCompatible => 2,
+            TranslationProviderKind.OpenAiCompatible => 1,
+            TranslationProviderKind.Tencent => 2,
+            TranslationProviderKind.MyMemory => 3,
             _ => 0
         };
         set
         {
             var provider = value switch
             {
-                1 => TranslationProviderKind.MyMemory,
-                2 => TranslationProviderKind.OpenAiCompatible,
-                _ => TranslationProviderKind.Tencent
+                1 => TranslationProviderKind.OpenAiCompatible,
+                2 => TranslationProviderKind.Tencent,
+                3 => TranslationProviderKind.MyMemory,
+                _ => TranslationProviderKind.Edge
             };
             if (_settings.Translation.Provider == provider)
             {
@@ -337,6 +339,24 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             _settings.Translation = _settings.Translation with { Provider = provider };
             OnPropertyChanged();
             QueueSave();
+        }
+    }
+
+    public int AiPresetIndex
+    {
+        get => TranslationPresets.FindPresetIndex(_settings.Translation.BaseAddress);
+        set
+        {
+            if (value <= 0 || value >= TranslationPresets.All.Count)
+            {
+                OnPropertyChanged();
+                return;
+            }
+            var preset = TranslationPresets.All[value];
+            // 通过 BaseAddress 属性写入，自动触发域名级密钥隔离刷新，绝不把旧密钥发往新预设地址。
+            BaseAddress = preset.BaseAddress;
+            Model = preset.DefaultModel;
+            OnPropertyChanged();
         }
     }
 
@@ -406,6 +426,7 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
             _settings.Translation = _settings.Translation with { BaseAddress = value };
             RefreshApiKey(ref _apiKey, TranslationProfile.ApiKeyCredentialName, oldAddress, value, nameof(ApiKey));
             OnPropertyChanged();
+            OnPropertyChanged(nameof(AiPresetIndex));
             QueueSave();
         }
     }
@@ -581,6 +602,25 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public TranslationProfile BuildTranslationProfile() => _settings.Translation;
+
+    internal TranslationTestInputs BuildTranslationTestInputs()
+    {
+        var profile = _settings.Translation;
+        var keys = BuildTranslationCredentials();
+        var ai = profile.Provider == TranslationProviderKind.OpenAiCompatible;
+        var racing = ai && profile.EnableRacing;
+        var hasTencentKeys = keys.TencentSecretId is not null && keys.TencentSecretKey is not null;
+        var tencent = profile.Provider == TranslationProviderKind.Tencent || (ai && hasTencentKeys);
+        var fallback = profile.Provider != TranslationProviderKind.MyMemory && profile.EnableMyMemoryFallback;
+        var fastTencent = ai && profile.EnableFastFallbackRace && hasTencentKeys;
+        return new TranslationTestInputs(
+            profile.Provider, profile.TargetLanguage, fallback,
+            ai ? (profile.BaseAddress, profile.Model, keys.ApiKey, CanBindApiKey) : null,
+            racing ? (profile.RacingBaseAddress, profile.RacingModel, keys.RacingApiKey, CanBindRacingApiKey) : null,
+            tencent ? (profile.TencentRegion, keys.TencentSecretId, keys.TencentSecretKey) : null,
+            fastTencent ? Math.Clamp(profile.FastFallbackDelaySeconds, 2, 30) : null,
+            fallback || profile.Provider == TranslationProviderKind.MyMemory ? profile.MyMemoryContactEmail.Trim() : null);
+    }
 
     public TranslationCredentials BuildTranslationCredentials() => new(
         GetApiKeyForRequest(_apiKey, racing: false),
@@ -912,4 +952,18 @@ internal sealed class SettingsViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+internal sealed record TranslationTestInputs(
+    TranslationProviderKind Provider,
+    string TargetLanguage,
+    bool FreeFallback,
+    (string Address, string Model, string? Key, bool CanBindDraft)? Ai,
+    (string Address, string Model, string? Key, bool CanBindDraft)? Racing,
+    (string Region, string? Id, string? Key)? Tencent,
+    int? FastFallbackSeconds,
+    string? MyMemoryEmail)
+{
+    // Keep credentials out of diagnostic representations of this in-memory comparison.
+    public override string ToString() => Provider.ToString();
 }

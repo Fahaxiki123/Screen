@@ -11,7 +11,7 @@
     <Product>Flick</Product>
     <AssemblyTitle>Flick</AssemblyTitle>
     <Description>Flick — 截图、贴图、录屏、文字识别与翻译工具</Description>
-    <Version>2.0.0</Version>
+    <Version>2.0.2</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Screen.ico</ApplicationIcon>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

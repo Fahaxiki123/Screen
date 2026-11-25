@@ -37,6 +37,17 @@ public interface ITranslationProvider
         CancellationToken cancellationToken = default);
 }
 
+public interface IBatchTranslationProvider
+{
+    Task<BatchTranslationResult> TranslateBatchAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        TranslationProfile profile,
+        TranslationCredentials credentials,
+        IProgress<int>? completedCount = null,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IScrollStitcher
 {
     StitchResult Stitch(IReadOnlyList<PixelBuffer> frames, CancellationToken cancellationToken = default);

@@ -151,9 +151,10 @@ public sealed record OcrProfile
 
 public enum TranslationProviderKind
 {
-    Tencent,
-    OpenAiCompatible,
-    MyMemory
+    Tencent = 0,
+    OpenAiCompatible = 1,
+    MyMemory = 2,
+    Edge = 3
 }
 
 public enum TranslationDisplayMode
@@ -173,7 +174,7 @@ public sealed record TranslationProfile(
     public const string TencentSecretIdCredentialName = "Screen.Translation.Tencent.SecretId";
     public const string TencentSecretKeyCredentialName = "Screen.Translation.Tencent.SecretKey";
 
-    public TranslationProviderKind Provider { get; init; } = TranslationProviderKind.Tencent;
+    public TranslationProviderKind Provider { get; init; } = TranslationProviderKind.Edge;
     public string TencentRegion { get; init; } = "ap-guangzhou";
     public bool EnableMyMemoryFallback { get; init; } = true;
     public string MyMemoryContactEmail { get; init; } = string.Empty;
@@ -195,7 +196,21 @@ public sealed record TranslationResult(
     string Text,
     string ProviderName,
     bool UsedFallback = false,
-    string? PrimaryFailure = null);
+    string? PrimaryFailure = null)
+{
+    public TranslationProviderKind? FallbackProvider { get; init; }
+    public IReadOnlyList<TranslationFailure> Failures { get; init; } = [];
+}
+
+public sealed record BatchTranslationResult(
+    IReadOnlyList<string> Texts,
+    string ProviderName,
+    bool UsedFallback = false,
+    string? PrimaryFailure = null)
+{
+    public TranslationProviderKind? FallbackProvider { get; init; }
+    public IReadOnlyList<TranslationFailure> Failures { get; init; } = [];
+}
 
 public enum RecordingQuality
 {
@@ -262,7 +277,7 @@ public sealed record StitchResult(
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
     public const string DefaultHotKey = "Ctrl+Shift+A";
     public const string DefaultClickThroughRecoveryHotKey = "F1";
     public const string DefaultRecordHotKey = "Ctrl+Shift+R";
@@ -281,6 +296,9 @@ public sealed class AppSettings
     public string SaveDirectory { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Screenshots");
     public TranslationProfile Translation { get; set; } = new(
-        "https://api.openai.com/v1", "gpt-4.1-mini", TranslationProfile.ApiKeyCredentialName, "简体中文");
+        TranslationPresets.DefaultOpenAi.BaseAddress,
+        TranslationPresets.DefaultOpenAi.DefaultModel,
+        TranslationProfile.ApiKeyCredentialName,
+        "简体中文");
     public TranslationDisplayMode TranslationDisplayMode { get; set; } = TranslationDisplayMode.Card;
 }

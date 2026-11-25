@@ -184,17 +184,50 @@ public static class OcrQualityEvaluator
     private static string WithoutWhitespace(string text) =>
         string.Concat(text.Where(character => !char.IsWhiteSpace(character)));
 
+    /// <summary>
+    /// 按各类文字占比识别主语种，避免英文段落夹杂少量中文界面词时误判为中文。
+    /// </summary>
     public static string DetectLanguage(string text)
     {
-        var han = text.Count(character => character is >= '\u3400' and <= '\u9FFF');
-        var kana = text.Count(character => character is >= '\u3040' and <= '\u30FF');
-        var hangul = text.Count(character => character is >= '\uAC00' and <= '\uD7AF');
-        if (kana > Math.Max(2, han / 5))
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "en-US";
+        }
+        var han = 0;
+        var kana = 0;
+        var hangul = 0;
+        var latin = 0;
+        foreach (var character in text)
+        {
+            if (character is >= '\u3400' and <= '\u9FFF')
+            {
+                han++;
+            }
+            else if (character is >= '\u3040' and <= '\u30FF')
+            {
+                kana++;
+            }
+            else if (character is >= '\uAC00' and <= '\uD7AF')
+            {
+                hangul++;
+            }
+            else if (character is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
+            {
+                latin++;
+            }
+        }
+        if (kana > Math.Max(2, han / 5) && (kana + han) * 3 >= latin)
+        {
             return "ja-JP";
-        if (hangul > 2)
+        }
+        if (hangul > 2 && hangul * 3 >= latin)
+        {
             return "ko-KR";
-        if (han > 0)
+        }
+        if (han > 0 && han * 3 >= latin)
+        {
             return "zh-CN";
+        }
         return "en-US";
     }
 

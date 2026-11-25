@@ -61,7 +61,10 @@ public sealed class JsonSettingsStore
             settings.Translation = settings.Translation is { } translation
                 ? translation with
                 {
-                    // An unknown endpoint must not become a guessed URL for a legacy key.
+                    // 未知提供方回退至默认免密服务，未知端点绝不猜测旧密钥地址。
+                    Provider = Enum.IsDefined(translation.Provider)
+                        ? translation.Provider
+                        : TranslationProviderKind.Edge,
                     BaseAddress = translation.BaseAddress ?? string.Empty,
                     Model = translation.Model ?? defaults.Translation.Model,
                     CredentialName = translation.CredentialName ?? string.Empty,
@@ -108,9 +111,49 @@ public sealed class JsonSettingsStore
     }
 
     private static bool IsLegacyZhipuOcrProfile(TranslationProfile profile) =>
-        profile.BaseAddress.Contains("open.bigmodel.cn", StringComparison.OrdinalIgnoreCase)
+        profile.BaseAddress?.Contains("open.bigmodel.cn", StringComparison.OrdinalIgnoreCase) == true
         && profile.BaseAddress.Contains("layout_parsing", StringComparison.OrdinalIgnoreCase)
-        && profile.Model.Equals("glm-ocr", StringComparison.OrdinalIgnoreCase);
+        && string.Equals(profile.Model, "glm-ocr", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 将旧版本（Schema &lt; 5）默认指向腾讯但未配置腾讯密钥的用户平滑迁移到免费在线翻译（Edge），
+    /// 已配置腾讯密钥的老用户保持原配置不变。
+    /// </summary>
+    public bool TryMigrateLegacyDefaultProvider(Func<bool> hasTencentCredentials)
+    {
+        ArgumentNullException.ThrowIfNull(hasTencentCredentials);
+        lock (_gate)
+        {
+            if (!File.Exists(Path))
+            {
+                return false;
+            }
+            AppSettings? raw;
+            try
+            {
+                raw = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), Options);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+            if (raw is null || raw.SchemaVersion >= AppSettings.CurrentSchemaVersion)
+            {
+                return false;
+            }
+            if (raw.Translation?.Provider != TranslationProviderKind.Tencent
+                || IsLegacyZhipuOcrProfile(raw.Translation)
+                || hasTencentCredentials())
+            {
+                return false;
+            }
+            var latest = Load();
+            latest.Translation = latest.Translation with { Provider = TranslationProviderKind.Edge };
+            latest.SchemaVersion = AppSettings.CurrentSchemaVersion;
+            Save(latest);
+            return true;
+        }
+    }
 
     /// <summary>
     /// Reloads the latest on-disk settings, applies <paramref name="mutate"/>, and

@@ -87,21 +87,22 @@ internal sealed class ProtectedTranslationText(
         @"Q\s*Z\s*X\s*K\s*E\s*E\s*P+[A-Z\s]{0,16}?W\s*Z\s*X\s*Q",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
+    private Regex[]? _reservedPatterns;
+    private Regex[]? _loosePatterns;
+
     internal string Text { get; } = text;
 
     internal string Restore(string translatedText)
     {
-        var restored = translatedText;
-        // The last-resort fallback below matches any marker-SHAPED token — an
-        // intact marker of a later value matches it too.  Reserve every
-        // value's intact marker (exact or whitespace-spaced) for its own
-        // iteration, so a dropped or mutated marker can never steal a later
-        // value's marker and displace its replacement.
-        var reserved = values.Select(value => new Regex(
-            "^" + string.Join(@"\s*", value.Marker.Select(character => Regex.Escape(character.ToString()))) + "$",
-            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)).ToArray();
-        foreach (var value in values)
+        if (values.Count == 0 || string.IsNullOrEmpty(translatedText))
         {
+            return translatedText;
+        }
+
+        var restored = translatedText;
+        for (var index = 0; index < values.Count; index++)
+        {
+            var value = values[index];
             var exactIndex = restored.IndexOf(value.Marker, StringComparison.OrdinalIgnoreCase);
             if (exactIndex >= 0)
             {
@@ -109,25 +110,16 @@ internal sealed class ProtectedTranslationText(
                 continue;
             }
 
-            // Some engines insert spaces around an unknown identifier.  Accept
-            // whitespace between marker characters while keeping the match very
-            // specific, so ordinary translated text cannot be replaced.
-            var looseMarker = string.Join(@"\s*", value.Marker.Select(character => Regex.Escape(character.ToString())));
-            var looseMatch = Regex.Match(
-                restored,
-                looseMarker,
-                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+            // 部分引擎会在未知标识符字符间插入空格，按需构建并复用宽松匹配正则。
+            var looseMatch = GetLoosePatterns()[index].Match(restored);
             if (looseMatch.Success)
             {
                 restored = restored.Remove(looseMatch.Index, looseMatch.Length).Insert(looseMatch.Index, value.Original);
                 continue;
             }
 
-            // Translation services occasionally duplicate or mutate one of the
-            // repeated P characters (for example QZXKEEPPCWZXQ).  Replace the
-            // next marker-shaped token that is not reserved for another value;
-            // markers whose original was dropped by the engine stay dropped —
-            // misplacing them onto another value's slot is worse.
+            // 翻译服务偶发重复或改写标记字母（如 QZXKEEPPCWZXQ），跳过其他槽位保留的完整标记后再替换。
+            var reserved = GetReservedPatterns();
             foreach (Match candidate in AlteredMarkerPattern.Matches(restored))
             {
                 if (reserved.Any(pattern => pattern.IsMatch(candidate.Value)))
@@ -140,4 +132,19 @@ internal sealed class ProtectedTranslationText(
         }
         return AlteredMarkerPattern.Replace(restored, string.Empty);
     }
+
+    private Regex[] GetLoosePatterns() => _loosePatterns ??= values
+        .Select(value => new Regex(
+            BuildSpacedPattern(value.Marker),
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase))
+        .ToArray();
+
+    private Regex[] GetReservedPatterns() => _reservedPatterns ??= values
+        .Select(value => new Regex(
+            "^" + BuildSpacedPattern(value.Marker) + "$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase))
+        .ToArray();
+
+    private static string BuildSpacedPattern(string marker) =>
+        string.Join(@"\s*", marker.Select(character => Regex.Escape(character.ToString())));
 }

@@ -12,6 +12,10 @@ namespace Screen.App;
 internal sealed class TranslationCard : GlassResultCard
 {
     private readonly TextBox _text;
+    private readonly TextBox _sourceText;
+    private readonly Border _sourcePanel;
+    private readonly Button _sourceToggle;
+    private readonly Button _inPlaceSwitch;
     private readonly TextBlock _status;
     private readonly Ellipse _statusDot;
     private readonly TextBlock _sourceLanguage;
@@ -22,16 +26,25 @@ internal sealed class TranslationCard : GlassResultCard
     private readonly Stopwatch _elapsed = new();
     private string _provider = string.Empty;
     private string _translation = string.Empty;
+    private string _originalSourceText = string.Empty;
+    private bool _sourceVisible;
 
     public event EventHandler? RetranslateRequested;
     public event EventHandler<string>? TargetLanguageChanged;
+    public event EventHandler? SwitchToInPlaceRequested;
     public string TargetLanguage { get; private set; } = "简体中文";
+    public string CurrentSourceText => _sourceText.Text;
+    public bool HasSourceLoaded { get; private set; }
+    public int SourceRevision { get; private set; } = -1;
+    public bool IsSourceEdited => !string.Equals(_sourceText.Text, _originalSourceText, StringComparison.Ordinal);
+
+    public void AcceptSourceEdit() => _originalSourceText = _sourceText.Text;
 
     private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
 
     public TranslationCard()
     {
-        Width = 380;
+        Width = 396;
         _sourceLanguage = new TextBlock
         {
             Text = "自动识别",
@@ -78,23 +91,48 @@ internal sealed class TranslationCard : GlassResultCard
         });
         languageGroup.Children.Add(target);
 
+        _sourceToggle = new Button
+        {
+            Content = "原文",
+            Height = 26,
+            MinWidth = 42,
+            Padding = new Thickness(7, 0, 7, 0),
+            Margin = new Thickness(0, 0, 4, 0),
+            FontSize = 11.5,
+            Foreground = Token("Brush.TextSecondary"),
+            Background = Brushes.Transparent,
+            ToolTip = "查看或修改识别原文后重译",
+            IsEnabled = false
+        };
+        _sourceToggle.SetResourceReference(StyleProperty, "CardSecondaryButtonStyle");
+        _sourceToggle.Click += (_, _) => SetSourceVisible(!_sourceVisible);
+
+        _inPlaceSwitch = new Button
+        {
+            Content = "原位",
+            Height = 26,
+            MinWidth = 42,
+            Padding = new Thickness(7, 0, 7, 0),
+            Margin = new Thickness(0, 0, 4, 0),
+            FontSize = 11.5,
+            Foreground = Token("Brush.TextSecondary"),
+            Background = Brushes.Transparent,
+            ToolTip = "切换为原位覆盖翻译"
+        };
+        _inPlaceSwitch.SetResourceReference(StyleProperty, "CardSecondaryButtonStyle");
+        _inPlaceSwitch.Click += (_, _) => SwitchToInPlaceRequested?.Invoke(this, EventArgs.Empty);
+
         var close = new Button { Content = AppleVectorIcons.Create("close", 15), ToolTip = "关闭翻译卡片" };
         close.SetResourceReference(StyleProperty, "CardIconButtonStyle");
         close.Click += (_, _) => Visibility = Visibility.Collapsed;
-        var dragHint = new TextBlock
-        {
-            Text = "可拖动",
-            ToolTip = "按住顶栏移动卡片",
-            FontSize = 11,
-            Foreground = Token("Brush.TextTertiary"),
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(4, 0, 6, 0)
-        };
+
         var headerPanel = new DockPanel();
         DockPanel.SetDock(close, Dock.Right);
-        DockPanel.SetDock(dragHint, Dock.Right);
+        DockPanel.SetDock(_inPlaceSwitch, Dock.Right);
+        DockPanel.SetDock(_sourceToggle, Dock.Right);
         headerPanel.Children.Add(close);
-        headerPanel.Children.Add(dragHint);
+        headerPanel.Children.Add(_inPlaceSwitch);
+        headerPanel.Children.Add(_sourceToggle);
         headerPanel.Children.Add(languageGroup);
         var header = new Border
         {
@@ -104,6 +142,49 @@ internal sealed class TranslationCard : GlassResultCard
             BorderBrush = Token("Brush.BorderSubtle"),
             BorderThickness = new Thickness(0, 0, 0, 1),
             Child = headerPanel
+        };
+
+        _sourceText = new TextBox
+        {
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            FontSize = 12.5,
+            Foreground = Token("Brush.TextSecondary"),
+            CaretBrush = Token("Brush.Accent"),
+            SelectionBrush = Token("Brush.Accent"),
+            SelectionOpacity = 0.25,
+            MinHeight = 42,
+            MaxHeight = 110,
+            Padding = new Thickness(8, 6, 8, 6)
+        };
+        TextBlock.SetLineHeight(_sourceText, 19);
+        var sourceBox = new SquircleGlassBorder
+        {
+            CornerRadiusRadius = 7,
+            ShowRim = false,
+            ShadowLevel = 0,
+            GlassBackground = Token("Brush.SurfaceSunken"),
+            Child = _sourceText
+        };
+        var sourceContent = new StackPanel();
+        sourceContent.Children.Add(new TextBlock
+        {
+            Text = "识别原文（可直接修改后点“重译”）",
+            FontSize = 11,
+            Foreground = Token("Brush.TextTertiary"),
+            Margin = new Thickness(2, 0, 0, 5)
+        });
+        sourceContent.Children.Add(sourceBox);
+        _sourcePanel = new Border
+        {
+            Padding = new Thickness(16, 10, 16, 8),
+            BorderBrush = Token("Brush.BorderSubtle"),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Visibility = Visibility.Collapsed,
+            Child = sourceContent
         };
 
         _text = new TextBox
@@ -193,8 +274,10 @@ internal sealed class TranslationCard : GlassResultCard
 
         var content = new DockPanel();
         DockPanel.SetDock(header, Dock.Top);
+        DockPanel.SetDock(_sourcePanel, Dock.Top);
         DockPanel.SetDock(footer, Dock.Bottom);
         content.Children.Add(header);
+        content.Children.Add(_sourcePanel);
         content.Children.Add(footer);
         content.Children.Add(_text);
         AttachCard(new SquircleGlassBorder
@@ -206,29 +289,91 @@ internal sealed class TranslationCard : GlassResultCard
         }, header);
     }
 
-    public void Begin(string targetLanguage)
+    public void Begin(string targetLanguage, bool preserveSource = false)
     {
         _elapsed.Restart();
         _provider = string.Empty;
         TargetLanguage = targetLanguage;
         _targetLanguage.Text = targetLanguage;
-        _sourceLanguage.Text = "自动识别";
+        if (!preserveSource)
+        {
+            _sourceLanguage.Text = "自动识别";
+            _originalSourceText = string.Empty;
+            _sourceText.Text = string.Empty;
+            HasSourceLoaded = false;
+            SourceRevision = -1;
+            _sourceToggle.IsEnabled = false;
+            SetSourceVisible(false);
+        }
         _translation = string.Empty;
         _copy.IsEnabled = false;
         _copy.Content = _copyLabel;
         _retranslate.IsEnabled = false;
-        _text.Text = "正在识别选区文字…";
+        _text.Text = preserveSource ? "正在翻译…" : "正在识别选区文字…";
         _text.ScrollToHome();
         _text.Foreground = Token("Brush.TextSecondary");
         _statusDot.Fill = Token("Brush.Accent");
-        SetStatus("正在准备翻译");
+        SetStatus(preserveSource ? "正在翻译…" : "正在准备翻译");
         Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// 直接展示已有译文（例如从原位覆盖秒切回浮动卡片），不重复发起翻译请求。
+    /// </summary>
+    public void ShowCachedTranslation(
+        string targetLanguage,
+        string sourceLanguage,
+        string sourceText,
+        string translatedText,
+        string providerName,
+        string? detail = null,
+        int sourceRevision = -1)
+    {
+        _elapsed.Reset();
+        TargetLanguage = targetLanguage;
+        _targetLanguage.Text = targetLanguage;
+        SetSourceLanguage(sourceLanguage);
+        SetSourceText(sourceText, sourceRevision);
+        SetProvider(providerName);
+        _translation = string.Empty;
+        SetText(translatedText);
+        _retranslate.IsEnabled = true;
+        _copy.IsEnabled = !string.IsNullOrWhiteSpace(translatedText);
+        _copy.Content = _copyLabel;
+        _statusDot.Fill = Token(_copy.IsEnabled ? "Brush.Success" : "Brush.Warning");
+        SetStatus(detail ?? $"{_provider} · 已复用原位译文", $"{_provider} · 已复用");
+        Visibility = Visibility.Visible;
+    }
+
+    public void SetSourceText(string text, int sourceRevision = -1)
+    {
+        _originalSourceText = text ?? string.Empty;
+        _sourceText.Text = _originalSourceText;
+        HasSourceLoaded = !string.IsNullOrWhiteSpace(_originalSourceText);
+        if (sourceRevision >= 0)
+        {
+            SourceRevision = sourceRevision;
+        }
+        _sourceToggle.IsEnabled = HasSourceLoaded;
+        if (!HasSourceLoaded)
+        {
+            SetSourceVisible(false);
+        }
+    }
+
+    private void SetSourceVisible(bool visible)
+    {
+        _sourceVisible = visible;
+        _sourcePanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        _sourceToggle.Foreground = Token(visible ? "Brush.Accent" : "Brush.TextSecondary");
+        _sourceToggle.Background = visible ? Token("Brush.AccentSubtle") : Brushes.Transparent;
     }
 
     public void SetAvailableSize(double availableWidth, double availableHeight)
     {
-        Width = Math.Min(Math.Clamp(availableWidth * 0.34, 372, 450), Math.Max(1, availableWidth - 16));
-        var bodyHeight = Math.Clamp(availableHeight - 140, 35, 330);
+        Width = Math.Min(Math.Clamp(availableWidth * 0.34, 388, 460), Math.Max(1, availableWidth - 16));
+        var extraSource = _sourceVisible ? 115 : 0;
+        var bodyHeight = Math.Clamp(availableHeight - 140 - extraSource, 35, 330);
         _text.MinHeight = Math.Min(82, bodyHeight);
         _text.MaxHeight = bodyHeight;
     }
@@ -236,23 +381,29 @@ internal sealed class TranslationCard : GlassResultCard
     public void SetText(string text)
     {
         if (text == _translation)
+        {
             return;
+        }
 
         bool firstResult = _translation.Length == 0;
         var selectionStart = firstResult ? 0 : _text.SelectionStart;
         var selectionLength = firstResult ? 0 : _text.SelectionLength;
         var horizontalOffset = _text.HorizontalOffset;
         var verticalOffset = _text.VerticalOffset;
-        // Providers send cumulative snapshots. Append the usual delta so an active
-        // mouse selection is not rebuilt for every token. A fallback provider may replace the text.
         if (!firstResult && text.StartsWith(_translation, StringComparison.Ordinal)
             && !(_translation[^1] == '\r' && text[_translation.Length] == '\n'))
+        {
             _text.AppendText(text[_translation.Length..]);
+        }
         else
+        {
             _text.Text = text;
+        }
         _translation = text;
         if (_text.SelectionStart != selectionStart || _text.SelectionLength != selectionLength)
+        {
             _text.Select(selectionStart, selectionLength);
+        }
         _text.ScrollToHorizontalOffset(horizontalOffset);
         _text.ScrollToVerticalOffset(verticalOffset);
         if (firstResult)
@@ -318,7 +469,9 @@ internal sealed class TranslationCard : GlassResultCard
     private void CopyTranslation()
     {
         if (string.IsNullOrWhiteSpace(_translation))
+        {
             return;
+        }
         try
         {
             BitmapUtilities.SetClipboardTextWithRetry(_translation);
@@ -336,17 +489,21 @@ internal sealed class TranslationCard : GlassResultCard
         foreach (var language in SettingsViewModel.TranslationLanguages())
         {
             var item = new MenuItem { Header = language, IsCheckable = true, IsChecked = language == TargetLanguage };
-            item.Click += (_, _) =>
-            {
-                if (TargetLanguage == language)
-                    return;
-                TargetLanguage = language;
-                _targetLanguage.Text = language;
-                TargetLanguageChanged?.Invoke(this, language);
-            };
+            item.Click += (_, _) => SelectTargetLanguage(language);
             menu.Items.Add(item);
         }
         target.ContextMenu = menu;
         menu.IsOpen = true;
+    }
+
+    internal void SelectTargetLanguage(string language)
+    {
+        if (TargetLanguage == language)
+        {
+            return;
+        }
+        TargetLanguage = language;
+        _targetLanguage.Text = language;
+        TargetLanguageChanged?.Invoke(this, language);
     }
 }

@@ -10,9 +10,10 @@ namespace Screen.App;
 /// </summary>
 internal sealed partial class CaptureSurface
 {
-    internal WindowTarget? UnmaskedTextWindow => _annotations.Any(item => item.Kind == AnnotationKind.Mosaic)
-        ? null
-        : SelectedWindow;
+    /// <summary>
+    /// 窗口直读只反映底层窗口。添加标注后，文字提取必须使用实际显示的像素。
+    /// </summary>
+    internal WindowTarget? UnmaskedTextWindow => _annotations.Count == 0 ? SelectedWindow : null;
 
     public void ClearAnnotationSelection() => SelectAnnotation(null);
 

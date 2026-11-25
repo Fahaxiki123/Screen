@@ -149,7 +149,7 @@ public sealed class SettingsPersistenceTests
     {
         var credentials = new FakeCredentialStore();
         using var settings = new SettingsViewModel(_store, credentials, _ => { });
-        settings.TranslationProviderIndex = 2;
+        settings.TranslationProviderIndex = 1;
         if (racing)
         {
             settings.EnableRacing = true;
@@ -206,7 +206,7 @@ public sealed class SettingsPersistenceTests
     {
         var credentials = new FakeCredentialStore();
         using var settings = new SettingsViewModel(_store, credentials, _ => { });
-        settings.TranslationProviderIndex = 2;
+        settings.TranslationProviderIndex = 1;
         settings.EnableRacing = true;
         if (racing)
         {
@@ -255,12 +255,13 @@ public sealed class SettingsPersistenceTests
 
     [STATestMethod]
     [DataRow(0)]
-    [DataRow(1)]
+    [DataRow(2)]
+    [DataRow(3)]
     public void InactiveAiOptionsDoNotBlockOtherSettings(int providerIndex)
     {
         var credentials = new FakeCredentialStore();
         using var settings = new SettingsViewModel(_store, credentials, _ => { });
-        settings.TranslationProviderIndex = 2;
+        settings.TranslationProviderIndex = 1;
         settings.FastFallbackDelayText = "31";
         settings.RacingBaseAddress = "invalid";
         settings.TranslationProviderIndex = providerIndex;
@@ -270,8 +271,13 @@ public sealed class SettingsPersistenceTests
 
         Assert.IsFalse(settings.HasError, settings.StatusText);
         Assert.IsFalse(_store.Load().Recording.ShowCursor);
-        Assert.AreEqual(providerIndex == 0 ? TranslationProviderKind.Tencent : TranslationProviderKind.MyMemory,
-            _store.Load().Translation.Provider);
+        var expected = providerIndex switch
+        {
+            2 => TranslationProviderKind.Tencent,
+            3 => TranslationProviderKind.MyMemory,
+            _ => TranslationProviderKind.Edge
+        };
+        Assert.AreEqual(expected, _store.Load().Translation.Provider);
     }
 
     [STATestMethod]
@@ -279,7 +285,7 @@ public sealed class SettingsPersistenceTests
     {
         var credentials = new FakeCredentialStore();
         using var settings = new SettingsViewModel(_store, credentials, _ => { });
-        settings.TranslationProviderIndex = 2;
+        settings.TranslationProviderIndex = 1;
         settings.EnableRacing = true;
         settings.RacingBaseAddress = "invalid";
         settings.EnableRacing = false;

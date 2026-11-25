@@ -144,12 +144,47 @@ public static partial class OcrTextFormatter
         int medianHeight,
         int verticalGap) =>
         verticalGap <= medianHeight * 0.55
-        && previous.Line.Bounds.Right >= rightEdge - medianHeight * 2
+        && (previous.Line.Bounds.Right >= rightEdge - medianHeight * 2
+            || IsContinuedLatinSentence(previous, current, medianHeight))
         && current.Line.Bounds.X <= previous.Line.Bounds.X + medianHeight * 1.5
         && !EndsParagraph(previous.Text)
+        && !IsShortStandaloneLabelAfterPeriod(previous, current)
         && !ListItemPattern().IsMatch(current.Text)
         && !HeadingPattern().IsMatch(previous.Text)
         && !HeadingPattern().IsMatch(current.Text);
+
+    private static bool IsShortStandaloneLabelAfterPeriod(
+        (OcrLine Line, string Text) previous,
+        (OcrLine Line, string Text) current) =>
+        previous.Text[^1] == '.'
+        && current.Text.Length <= 20
+        && !current.Text.Contains(' ')
+        && current.Line.Bounds.Width < previous.Line.Bounds.Width * 0.55;
+
+    /// <summary>
+    /// 识别窄卡片/弹窗内未贴满最右边缘的英文连续换行（如小写续行或逗号续行），避免把完整句子切碎。
+    /// </summary>
+    private static bool IsContinuedLatinSentence(
+        (OcrLine Line, string Text) previous,
+        (OcrLine Line, string Text) current,
+        int medianHeight)
+    {
+        if (Math.Abs(current.Line.Bounds.X - previous.Line.Bounds.X) > medianHeight * 1.5)
+        {
+            return false;
+        }
+        var last = previous.Text[^1];
+        if (last is '.' or ':' or '：')
+        {
+            return false;
+        }
+        var first = current.Text[0];
+        if (first is >= 'a' and <= 'z')
+        {
+            return last is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or ',' or '—' or '–' or ')';
+        }
+        return last == ',' && first is >= 'A' and <= 'Z';
+    }
 
     private static void AppendIndent(StringBuilder builder, int offset, int medianHeight)
     {

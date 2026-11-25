@@ -348,7 +348,7 @@ public sealed class CaptureBoundaryRegressionTests
         var end = new PixelPoint(90, 70);
         surface.Tool = CaptureTool.Rectangle;
         Invoke(surface, "AddAnnotation", start, end);
-        Assert.AreSame(target, surface.UnmaskedTextWindow);
+        Assert.IsNull(surface.UnmaskedTextWindow);
 
         surface.Tool = CaptureTool.Mosaic;
         surface.MosaicMode = useBrush ? MosaicDrawMode.Brush : MosaicDrawMode.Rectangle;
@@ -357,6 +357,81 @@ public sealed class CaptureBoundaryRegressionTests
         Invoke(surface, "AddAnnotation", start, end);
         Assert.AreSame(target, surface.SelectedWindow);
         Assert.IsNull(surface.UnmaskedTextWindow, "The shared direct-text path must skip the target window.");
+
+        surface.Undo();
+        Assert.IsNull(surface.UnmaskedTextWindow, "Undoing the mosaic leaves a rectangle on the selection.");
+        surface.Undo();
+        Assert.AreSame(target, surface.UnmaskedTextWindow);
+        surface.Redo();
+        Assert.IsNull(surface.UnmaskedTextWindow);
+    });
+
+    [TestMethod]
+    [DataRow("Rectangle")]
+    [DataRow("Ellipse")]
+    public void FlatSevenDipOutlineHidesPixelsAndDisablesWindowText(string toolName) => OnSta(() =>
+    {
+        var surface = CreateSurface();
+        var target = new WindowTarget(1, "Source", Region);
+        typeof(CaptureSurface).GetProperty(nameof(CaptureSurface.SelectedWindow))!.SetValue(surface, target);
+        Assert.AreSame(target, surface.UnmaskedTextWindow);
+
+        surface.Tool = Enum.Parse<CaptureTool>(toolName);
+        surface.CurrentStyle = new AnnotationStyle(0xFF000000, 7, 16);
+        SetField(surface, "_start", new PixelPoint(41, 42));
+        Invoke(surface, "FinishDrawing", new PixelPoint(97, 48));
+
+        var image = surface.RenderSelection();
+        for (int x = 60; x < 80; x++)
+        {
+            Assert.AreEqual(0xFF000000u, PixelAt(image.Pixels, image.Stride, x - Region.X, 45 - Region.Y));
+        }
+        Assert.IsNull(surface.UnmaskedTextWindow);
+        surface.Undo();
+        Assert.AreSame(target, surface.UnmaskedTextWindow);
+        surface.Redo();
+        Assert.IsNull(surface.UnmaskedTextWindow);
+    });
+
+    [TestMethod]
+    [DataRow("Pen")]
+    [DataRow("Line")]
+    [DataRow("Arrow")]
+    [DataRow("Text")]
+    [DataRow("Number")]
+    public void ObscuringOrTextAlteringAnnotationsSuppressWindowTextUntilUndone(string toolName) => OnSta(() =>
+    {
+        var tool = Enum.Parse<CaptureTool>(toolName);
+        var surface = CreateSurface();
+        var target = new WindowTarget(1, "Source", Region);
+        typeof(CaptureSurface).GetProperty(nameof(CaptureSurface.SelectedWindow))!.SetValue(surface, target);
+
+        var start = new PixelPoint(40, 35);
+        var end = new PixelPoint(90, 70);
+        surface.CurrentStyle = new AnnotationStyle(0xFF000000, 16, 16);
+        if (tool == CaptureTool.Text)
+        {
+            var before = Invoke(surface, "CaptureAnnotationSnapshot")!;
+            Items(surface).Add(new AnnotationItem(
+                Guid.NewGuid(),
+                AnnotationKind.Text,
+                [start, end],
+                new PixelRect(40, 35, 50, 24),
+                surface.CurrentStyle,
+                "遮盖文本",
+                null,
+                0));
+            Invoke(surface, "RecordAnnotationEdit", before);
+        }
+        else
+        {
+            surface.Tool = tool;
+            WorkingPoints(surface).AddRange([start, end]);
+            Invoke(surface, "AddAnnotation", start, end);
+        }
+
+        Assert.AreSame(target, surface.SelectedWindow);
+        Assert.IsNull(surface.UnmaskedTextWindow, $"使用 {tool} 遮挡或修改画面文字后必须禁用 UIA 直读并走图像 OCR。");
 
         surface.Undo();
         Assert.AreSame(target, surface.UnmaskedTextWindow);

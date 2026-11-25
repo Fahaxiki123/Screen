@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -17,11 +16,27 @@ using Screen.Core;
 
 namespace Screen.App;
 
+internal sealed record OcrCompletedEventArgs(
+    int Revision,
+    OcrDocument Document,
+    string FormattedText,
+    bool IsDirectText);
+
+internal sealed record OcrTranslateRequest(
+    int Revision,
+    string Text,
+    string LanguageTag,
+    string ProviderName,
+    bool IsEdited,
+    bool IsDirectText,
+    OcrDocument? Document);
+
 internal sealed class OcrCard : GlassResultCard, IDisposable
 {
     private readonly IOcrEngine _ocr;
     private readonly Func<PixelBuffer> _imageProvider;
     private readonly Func<CancellationToken, Task<OcrDocument?>>? _directTextProvider;
+    private readonly Func<int>? _revisionProvider;
     private readonly TextBox _text;
     private readonly Grid _editorChrome;
     private readonly Border _progress;
@@ -29,18 +44,28 @@ internal sealed class OcrCard : GlassResultCard, IDisposable
     private readonly Ellipse _statusDot;
     private readonly TextBlock _lineCount;
     private readonly Button _editButton;
+    private readonly Button _translateButton;
     private readonly Button _copyButton;
-    private readonly Button _installButton;
     private CancellationTokenSource? _operation;
     private bool _editing;
+    private OcrDocument? _lastDocument;
+    private string _originalFormattedText = string.Empty;
+    private bool _isEditedSource;
+    private bool _lastWasDirectText;
+    private int _lastRevision;
 
     private static Brush Token(string key) => (Brush)Application.Current.FindResource(key);
 
-    public OcrCard(IOcrEngine ocr, Func<PixelBuffer> imageProvider, Func<CancellationToken, Task<OcrDocument?>>? directTextProvider = null)
+    public OcrCard(
+        IOcrEngine ocr,
+        Func<PixelBuffer> imageProvider,
+        Func<CancellationToken, Task<OcrDocument?>>? directTextProvider = null,
+        Func<int>? revisionProvider = null)
     {
         _ocr = ocr;
         _imageProvider = imageProvider;
         _directTextProvider = directTextProvider;
+        _revisionProvider = revisionProvider;
         Width = 440;
 
         _lineCount = new TextBlock { FontSize = 11, Foreground = Token("Brush.TextSecondary"), Text = "0 行" };
@@ -96,7 +121,6 @@ internal sealed class OcrCard : GlassResultCard, IDisposable
         TextBlock.SetLineHeight(_text, 24);
         _text.Resources[typeof(ScrollBar)] = Application.Current.FindResource("DarkScrollBarStyle");
         AutomationProperties.SetName(_text, "识别文字");
-        // Fade the edit surface under the live text so the caret and IME remain in the same control.
         var editorSurface = new SquircleGlassBorder
         {
             CornerRadiusRadius = 8,
@@ -143,20 +167,28 @@ internal sealed class OcrCard : GlassResultCard, IDisposable
         var status = new DockPanel();
         status.Children.Add(_statusDot);
         status.Children.Add(_status);
-        _installButton = CreateCardButton("安装语言包", true);
-        _installButton.Visibility = Visibility.Collapsed;
-        _installButton.Click += (_, _) => Process.Start(new ProcessStartInfo("ms-settings:regionlanguage") { UseShellExecute = true });
         _editButton = CreateCardButton("编辑", false);
-        _editButton.Click += (_, _) => SetEditing(!_editing);
+        _editButton.Click += (_, _) =>
+        {
+            if (_editing)
+                FinishEditing();
+            else
+                SetEditing(true);
+        };
+        _translateButton = CreateCardButton("翻译", false);
+        _translateButton.ToolTip = "直接翻译当前文字（保留已编辑内容）";
+        _translateButton.Click += (_, _) => RequestTranslation();
         _copyButton = CreateCardButton("复制", true);
         _copyButton.MinWidth = 74;
         _copyButton.Click += (_, _) => CopyText();
         _text.TextChanged += (_, _) =>
         {
             if (_editing)
+            {
                 UpdateTextActions();
+            }
         };
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Children = { _installButton, _editButton, _copyButton } };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Children = { _editButton, _translateButton, _copyButton } };
         var footer = new DockPanel();
         DockPanel.SetDock(actions, Dock.Right);
         footer.Children.Add(actions);
@@ -175,6 +207,40 @@ internal sealed class OcrCard : GlassResultCard, IDisposable
     public string CurrentText => _text.Text;
     public bool IsRecognizing { get; private set; }
     public event EventHandler? RecognitionStateChanged;
+    public event EventHandler<OcrCompletedEventArgs>? RecognitionCompleted;
+    public event EventHandler<OcrTranslateRequest>? TranslateRequested;
+    public event Action<int, string, bool>? EditCommitted;
+
+    protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.Property == VisibilityProperty && (Visibility)e.NewValue != Visibility.Visible)
+        {
+            FinishEditing();
+        }
+    }
+
+    public void FinishEditing()
+    {
+        if (!_editing)
+        {
+            return;
+        }
+        SetEditing(false);
+        var text = _text.Text;
+        if (text == _originalFormattedText || (_revisionProvider is not null && _revisionProvider() != _lastRevision))
+        {
+            return;
+        }
+        _originalFormattedText = text;
+        _isEditedSource = true;
+        if (EditCommitted is { } commit)
+        {
+            commit(_lastRevision, text, _lastWasDirectText);
+            var status = string.IsNullOrWhiteSpace(text) ? "原文已清空" : "已保存到当前选区";
+            SetStatus(status, "此次编辑仅保留在本次截图的当前选区。", "Brush.Success");
+        }
+    }
 
     public void SetAvailableSize(double availableWidth, double availableHeight)
     {
@@ -197,48 +263,89 @@ internal sealed class OcrCard : GlassResultCard, IDisposable
         var text = _text.Text;
         int count = text.Length == 0 ? 0 : text.Count(c => c == '\n') + 1;
         _lineCount.Text = $"{count} 行";
-        _copyButton.IsEnabled = !string.IsNullOrWhiteSpace(text);
+        bool hasText = !string.IsNullOrWhiteSpace(text);
+        _copyButton.IsEnabled = hasText;
+        _translateButton.IsEnabled = hasText;
+    }
+
+    /// <summary>
+    /// 直接复用同一选区版本的已识别结果，避免连续打开 OCR 卡片时重复识别。
+    /// </summary>
+    public void ShowCachedResult(
+        int revision,
+        string formattedText,
+        string languageTag,
+        string providerName,
+        OcrDocument? imageDocument,
+        bool isDirectText,
+        bool isEdited = false)
+    {
+        _operation?.Cancel();
+        ShowProgress(false);
+        SetRecognizing(false);
+        SetEditing(false);
+        RestoreCopyLabel();
+        _lastRevision = revision;
+        _lastDocument = imageDocument;
+        _lastWasDirectText = isDirectText;
+        _isEditedSource = isEdited;
+        _originalFormattedText = formattedText ?? string.Empty;
+        _text.Text = _originalFormattedText;
+        UpdateTextActions();
+        var displayProvider = string.IsNullOrWhiteSpace(providerName)
+            ? $"自动识别{LanguageName(languageTag)}"
+            : providerName;
+        var status = isEdited && string.IsNullOrWhiteSpace(_text.Text) ? "原文已清空"
+            : _text.Text.Length == 0 ? "未识别到文字" : $"{displayProvider} · 已复用";
+        SetStatus(status,
+            $"{displayProvider} · {languageTag} · 已复用当前选区识别结果", "Brush.Success");
+        _editButton.Visibility = _translateButton.Visibility = _copyButton.Visibility = Visibility.Visible;
     }
 
     public async Task RecognizeAsync()
     {
         _operation?.Cancel();
         var operation = _operation = new CancellationTokenSource();
+        var capturedRevision = _revisionProvider?.Invoke() ?? 0;
         SetEditing(false);
         RestoreCopyLabel();
+        _lastDocument = null;
+        _originalFormattedText = string.Empty;
+        _isEditedSource = false;
+        _lastWasDirectText = false;
+        _lastRevision = capturedRevision;
         _lineCount.Text = "0 行";
-        _editButton.Visibility = _copyButton.Visibility = Visibility.Collapsed;
-        var supportedLanguages = GetAutomaticLanguages(_ocr.AvailableLanguages);
-        if (supportedLanguages.Count == 0)
-        {
-            ShowProgress(false);
-            SetRecognizing(false);
-            _text.Clear();
-            SetStatus("缺少语言包", "缺少可用的中、英或日文 OCR 语言包", "Brush.Warning");
-            _installButton.Visibility = Visibility.Visible;
-            return;
-        }
+        _editButton.Visibility = _translateButton.Visibility = _copyButton.Visibility = Visibility.Collapsed;
 
         try
         {
             SetRecognizing(true);
             ShowProgress(true);
             SetStatus("正在识别…", "正在提取选区文字", "Brush.Accent");
-            _installButton.Visibility = Visibility.Collapsed;
             _text.Text = "正在提取选区文字…";
             var timer = Stopwatch.StartNew();
-            var document = _directTextProvider is null ? null : await _directTextProvider(operation.Token);
+            var directDocument = _directTextProvider is null ? null : await _directTextProvider(operation.Token);
             operation.Token.ThrowIfCancellationRequested();
-            document ??= await RecognizeAutomaticallyAsync(
-                _ocr, _imageProvider(), supportedLanguages, OcrRecognitionPurpose.TextExtraction, operation.Token);
+            var isDirectText = directDocument is not null;
+            var document = directDocument ?? await RecognizeAutomaticallyAsync(
+                _ocr, _imageProvider(), purpose: OcrRecognitionPurpose.TextExtraction, cancellationToken: operation.Token);
             operation.Token.ThrowIfCancellationRequested();
-            _text.Text = OcrTextFormatter.Format(document);
+            if (_revisionProvider is not null && _revisionProvider() != capturedRevision)
+            {
+                return;
+            }
+            var formatted = OcrTextFormatter.Format(document);
+            _lastDocument = document;
+            _lastWasDirectText = isDirectText;
+            _originalFormattedText = formatted;
+            _text.Text = formatted;
             UpdateTextActions();
             string provider = ProviderName(document);
             string duration = $"{timer.Elapsed.TotalSeconds:0.0} 秒";
             SetStatus(_text.Text.Length == 0 ? "未识别到文字" : $"{provider} · {duration}",
                 $"{provider} · {document.LanguageTag} · 原始识别 {document.Lines.Count} 行 · {duration}", "Brush.Success");
-            _editButton.Visibility = _copyButton.Visibility = Visibility.Visible;
+            _editButton.Visibility = _translateButton.Visibility = _copyButton.Visibility = Visibility.Visible;
+            RecognitionCompleted?.Invoke(this, new OcrCompletedEventArgs(capturedRevision, document, formatted, isDirectText));
             GlassMotion.Enter(_text, 3, 1, 200);
         }
         catch (OperationCanceledException)
@@ -267,10 +374,37 @@ internal sealed class OcrCard : GlassResultCard, IDisposable
         }
     }
 
+    private void RequestTranslation()
+    {
+        var text = _text.Text;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+        FinishEditing();
+        var isEdited = _isEditedSource;
+        var languageTag = isEdited || _lastDocument is null
+            ? OcrQualityEvaluator.DetectLanguage(text)
+            : _lastDocument.LanguageTag;
+        var provider = isEdited
+            ? "已编辑文本"
+            : _lastDocument is null ? "文字识别" : ProviderName(_lastDocument);
+        TranslateRequested?.Invoke(this, new OcrTranslateRequest(
+            _lastRevision,
+            text,
+            languageTag,
+            provider,
+            isEdited,
+            _lastWasDirectText,
+            isEdited ? null : _lastDocument));
+    }
+
     private void SetRecognizing(bool value)
     {
         if (IsRecognizing == value)
+        {
             return;
+        }
         IsRecognizing = value;
         RecognitionStateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -302,89 +436,17 @@ internal sealed class OcrCard : GlassResultCard, IDisposable
         }
     }
 
-    internal static async Task<OcrDocument> RecognizeAutomaticallyAsync(
+    internal static Task<OcrDocument> RecognizeAutomaticallyAsync(
         IOcrEngine ocr,
         PixelBuffer image,
         IReadOnlyList<string>? languages = null,
         OcrRecognitionPurpose purpose = OcrRecognitionPurpose.TextExtraction,
         CancellationToken cancellationToken = default)
     {
-        var candidates = languages ?? GetAutomaticLanguages(ocr.AvailableLanguages);
-        if (candidates.Count == 0)
-        {
-            throw new InvalidOperationException("Windows 未安装可用的中、英或日文 OCR 语言包。");
-        }
-
-        var tasks = candidates.Select(async language =>
-        {
-            try
-            {
-                return (Document: (OcrDocument?)await ocr.RecognizeAsync(image, language, purpose, cancellationToken),
-                    Error: (Exception?)null);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                return (Document: (OcrDocument?)null, Error: exception);
-            }
-        });
-        var attempts = await Task.WhenAll(tasks);
-        var bestDocument = attempts.Select(attempt => attempt.Document)
-            .OfType<OcrDocument>()
-            .MaxBy(RecognitionScore);
-        if (bestDocument is not null)
-        {
-            return bestDocument;
-        }
-
-        var error = attempts.Select(attempt => attempt.Error).FirstOrDefault(error => error is not null);
-        throw new InvalidOperationException(error?.Message ?? "无法创建可用的 OCR 引擎。", error);
-    }
-
-    private static IReadOnlyList<string> GetAutomaticLanguages(IEnumerable<string> availableLanguages)
-    {
-        var automatic = availableLanguages.FirstOrDefault(language =>
-            language.Equals("auto", StringComparison.OrdinalIgnoreCase)
-            || language.Equals("multi", StringComparison.OrdinalIgnoreCase));
-        if (automatic is not null)
-        {
-            return [automatic];
-        }
-        var supported = new[] { "zh", "en", "ja" };
-        return supported
-            .Select(prefix => availableLanguages.FirstOrDefault(language =>
-                language.Equals(prefix, StringComparison.OrdinalIgnoreCase)
-                || language.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase)))
-            .Where(language => language is not null)
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
-    private static int RecognitionScore(OcrDocument document)
-    {
-        var text = document.Text ?? string.Empty;
-        var visible = text.Count(character => !char.IsWhiteSpace(character));
-        var latin = text.Count(character => character is >= 'A' and <= 'Z' or >= 'a' and <= 'z');
-        var han = text.Count(character => character is >= '\u3400' and <= '\u9FFF');
-        var kana = text.Count(character => character is >= '\u3040' and <= '\u30FF');
-        var score = visible * 3 + document.Lines.Count * 8 + document.Lines.Sum(line => line.Words.Count) * 2;
-        if (document.LanguageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
-        {
-            score += han * 3 - kana * 2;
-        }
-        else if (document.LanguageTag.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
-        {
-            score += han + kana * 8;
-        }
-        else if (document.LanguageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase))
-        {
-            score += latin * 3;
-        }
-        return score;
+        var language = languages?.FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+                       ?? ocr.AvailableLanguages.FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+                       ?? "auto";
+        return ocr.RecognizeAsync(image, language, purpose, cancellationToken);
     }
 
     private static string LanguageName(string languageTag) => languageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
@@ -416,7 +478,9 @@ internal sealed class OcrCard : GlassResultCard, IDisposable
     private void CopyText()
     {
         if (string.IsNullOrWhiteSpace(_text.Text))
+        {
             return;
+        }
         try
         {
             BitmapUtilities.SetClipboardTextWithRetry(_text.Text);

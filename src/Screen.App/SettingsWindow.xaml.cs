@@ -16,13 +16,16 @@ namespace Screen.App;
 public partial class SettingsWindow : Window
 {
     private readonly SettingsViewModel _viewModel;
-    private readonly HttpClient _translationTestClient = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private readonly HttpClient? _translationTestClient;
+    private readonly ITranslationProvider _translationTestProvider;
     private readonly Dictionary<string, Button> _navigation = [];
     private readonly Dictionary<string, string> _itemGroups = [];
     private readonly Dictionary<string, SettingsNavGroup> _navGroups = [];
     private readonly Dictionary<string, FrameworkElement> _pages = [];
 
     private CancellationTokenSource? _translationTestOperation;
+    private TranslationTestInputs? _testedInputs;
+    private Button? _translationTestButton;
     private TextBlock? _translationTestStatus;
     private string _activeNavId = string.Empty;
     private string _activeGroupId = string.Empty;
@@ -40,12 +43,15 @@ public partial class SettingsWindow : Window
     private Button? _recordHotKeyButton;
     private (Button Button, string PropertyName)? _hotKeyEditor;
 
-    // 翻译页按服务商动态显隐的配置分区。
+    // 识别与翻译页按服务商动态显隐的配置分区。
+    private StackPanel? _edgeSection;
     private StackPanel? _tencentSection;
     private StackPanel? _aiSection;
+    private StackPanel? _aiAdvancedSection;
     private StackPanel? _memorySection;
     private StackPanel? _racingRows;
     private FrameworkElement? _fastFallbackRow;
+    private bool _tencentSectionForcedVisible;
 
     internal SettingsWindow(
         JsonSettingsStore store,
@@ -54,9 +60,16 @@ public partial class SettingsWindow : Window
         Func<string, bool>? registerCaptureHotKey = null,
         Func<string, bool>? registerRecoveryHotKey = null,
         Func<string, bool>? registerRecordHotKey = null,
-        Func<bool, bool>? setHotKeyPriority = null)
+        Func<bool, bool>? setHotKeyPriority = null,
+        ITranslationProvider? translationTestProvider = null)
     {
         InitializeComponent();
+        if (translationTestProvider is null)
+        {
+            _translationTestClient = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            translationTestProvider = new OnlineTranslationProvider(_translationTestClient);
+        }
+        _translationTestProvider = translationTestProvider;
         Deactivated += (_, _) => EndHotKeyCapture();
         _registerCaptureHotKey = registerCaptureHotKey;
         _registerRecoveryHotKey = registerRecoveryHotKey;
@@ -127,8 +140,7 @@ public partial class SettingsWindow : Window
 
         var modulesGroup = AddNavigationGroup("modules", "功能模块");
         AddNavigationItem("modules", modulesGroup, "recording", AppleVectorIcons.Create("video", 16), "录屏");
-        AddNavigationItem("modules", modulesGroup, "ocr", AppleVectorIcons.Create("ocr", 16), "文字识别");
-        AddNavigationItem("modules", modulesGroup, "translation", AppleVectorIcons.Create("translate", 16), "翻译接口");
+        AddNavigationItem("modules", modulesGroup, "translation", AppleVectorIcons.Create("translate", 16), "识别与翻译");
     }
 
     private SettingsNavGroup AddNavigationGroup(string groupId, string title)
@@ -173,8 +185,14 @@ public partial class SettingsWindow : Window
 
     private void ShowPage(string id)
     {
+        if (string.Equals(id, "ocr", StringComparison.Ordinal))
+        {
+            id = "translation";
+        }
         if (_activeNavId == id)
+        {
             return;
+        }
         EndHotKeyCapture();
 
         string previousGroupId = _activeGroupId;
@@ -198,7 +216,9 @@ public partial class SettingsWindow : Window
         }
 
         if (crossGroup && _navGroups.TryGetValue(previousGroupId, out var oldGroup))
+        {
             oldGroup.Deselect();
+        }
         _navGroups[nextGroupId].Select(_navigation[id], crossGroup: crossGroup, instant: isInitial);
 
         if (!_pages.TryGetValue(id, out var page))
@@ -207,7 +227,6 @@ public partial class SettingsWindow : Window
             {
                 "shortcuts" => BuildShortcutsPage(),
                 "recording" => BuildRecordingPage(),
-                "ocr" => BuildOcrPage(),
                 "translation" => BuildTranslationPage(),
                 _ => BuildGeneralPage()
             };
@@ -217,6 +236,7 @@ public partial class SettingsWindow : Window
         PageHost.Content = page;
         ApplyPageHeader(id);
         PageScroll.ScrollToTop();
+        _tencentSectionForcedVisible = false;
         UpdateTranslationSections();
         AnimatePageGroups(page);
     }
@@ -233,13 +253,9 @@ public partial class SettingsWindow : Window
                 PageTitle.Text = "录屏";
                 PageDescription.Text = "录屏的帧率、清晰度与快捷键；每次录制前仍会先选择区域。";
                 break;
-            case "ocr":
-                PageTitle.Text = "文字识别";
-                PageDescription.Text = "本地识别优先，困难内容可自动使用云端增强。";
-                break;
             case "translation":
-                PageTitle.Text = "翻译接口";
-                PageDescription.Text = "配置截图翻译使用的服务、密钥和回退策略。";
+                PageTitle.Text = "识别与翻译";
+                PageDescription.Text = "免配置即可使用免费在线翻译；也可按需接入 AI 模型获得更自然的表达。";
                 break;
             default:
                 PageTitle.Text = "通用";
@@ -250,18 +266,27 @@ public partial class SettingsWindow : Window
 
     private void UpdateTranslationSections()
     {
-        if (_tencentSection is null || _aiSection is null || _memorySection is null)
+        if (_edgeSection is null || _tencentSection is null || _aiSection is null || _memorySection is null)
         {
             return;
         }
 
-        _tencentSection.Visibility = _viewModel.TranslationProviderIndex == 0
+        _edgeSection.Visibility = _viewModel.TranslationProviderIndex == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
-        _aiSection.Visibility = _viewModel.TranslationProviderIndex == 2
+        _aiSection.Visibility = _viewModel.TranslationProviderIndex == 1
             ? Visibility.Visible
             : Visibility.Collapsed;
-        _memorySection.Visibility = _viewModel.TranslationProviderIndex == 1
+        if (_aiAdvancedSection is not null)
+        {
+            _aiAdvancedSection.Visibility = _viewModel.TranslationProviderIndex == 1
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        _tencentSection.Visibility = _viewModel.TranslationProviderIndex == 2 || _tencentSectionForcedVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        _memorySection.Visibility = _viewModel.TranslationProviderIndex == 3
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -282,9 +307,17 @@ public partial class SettingsWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(SettingsViewModel.TranslationProviderIndex)
-            or nameof(SettingsViewModel.EnableRacing)
-            or nameof(SettingsViewModel.EnableFastFallbackRace))
+        if (_testedInputs is not null && _testedInputs != _viewModel.BuildTranslationTestInputs())
+        {
+            ResetTranslationTest();
+        }
+        if (e.PropertyName == nameof(SettingsViewModel.TranslationProviderIndex))
+        {
+            _tencentSectionForcedVisible = false;
+            UpdateTranslationSections();
+        }
+        else if (e.PropertyName is nameof(SettingsViewModel.EnableRacing)
+                 or nameof(SettingsViewModel.EnableFastFallbackRace))
         {
             UpdateTranslationSections();
         }
@@ -295,10 +328,9 @@ public partial class SettingsWindow : Window
         EndHotKeyCapture();
         foreach (var group in _navGroups.Values)
             group.Dispose();
-        // 仅取消不释放，避免在途连接测试仍链接该令牌时抛出 ObjectDisposedException。
-        _translationTestOperation?.Cancel();
-        _translationTestClient.Dispose();
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        ResetTranslationTest();
+        _translationTestClient?.Dispose();
         _viewModel.Dispose();
     }
 }

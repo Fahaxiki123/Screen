@@ -1,18 +1,21 @@
-using System.Globalization;
 using System.Net;
-using System.Text;
 using System.Text.Json;
 
 namespace Screen.Core;
 
-public sealed class OnlineTranslationProvider : ITranslationProvider
+/// <summary>
+/// 在线翻译路由与编排器：支持免费在线翻译（Edge 优先、MyMemory 冷备）、AI 自然翻译（含可选竞速与分片增量批量）、腾讯机器翻译与回退链。
+/// </summary>
+public sealed class OnlineTranslationProvider : ITranslationProvider, IBatchTranslationProvider
 {
+    private readonly EdgeTranslationProvider _edge;
     private readonly TencentTranslationProvider _tencent;
     private readonly MyMemoryTranslationProvider _myMemory;
     private readonly OpenAiTranslationProvider _openAi;
 
     public OnlineTranslationProvider(HttpClient httpClient)
     {
+        _edge = new EdgeTranslationProvider(httpClient);
         _tencent = new TencentTranslationProvider(httpClient);
         _myMemory = new MyMemoryTranslationProvider(httpClient);
         _openAi = new OpenAiTranslationProvider(httpClient);
@@ -26,35 +29,82 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         IProgress<string>? streamingText = null,
         CancellationToken cancellationToken = default)
     {
-        if (profile.Provider == TranslationProviderKind.OpenAiCompatible)
+        cancellationToken.ThrowIfCancellationRequested();
+        var trace = new TranslationFailureTrace();
+        try
         {
-            return await TranslateNaturallyWithFallbackAsync(
-                text,
-                sourceLanguage,
-                profile,
-                credentials,
-                streamingText,
-                cancellationToken).ConfigureAwait(false);
+            var task = profile.Provider switch
+            {
+                TranslationProviderKind.Edge => FallbackToFreeProvidersAsync(
+                    text, sourceLanguage, profile, credentials, streamingText, null, cancellationToken, trace),
+                TranslationProviderKind.OpenAiCompatible => TranslateNaturallyWithFallbackAsync(
+                    text, sourceLanguage, profile, credentials, streamingText, cancellationToken, trace),
+                TranslationProviderKind.MyMemory => _myMemory.TranslateAsync(
+                    text, sourceLanguage, profile, credentials, streamingText, cancellationToken),
+                _ => TranslateWithTencentFallbackAsync(
+                    text, sourceLanguage, profile, credentials, streamingText, cancellationToken, trace)
+            };
+            var result = await task.ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var attempts = trace.Snapshot();
+            return attempts.Length == 0 ? result : result with { Failures = attempts };
+        }
+        catch (Exception exception) when (IsExpectedProviderFailure(exception))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var failures = trace.Snapshot();
+            if (failures.Length > 1)
+            {
+                throw new TranslationRouteException(exception.Message, failures, exception);
+            }
+            throw;
+        }
+    }
+
+    public async Task<BatchTranslationResult> TranslateBatchAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        TranslationProfile profile,
+        TranslationCredentials credentials,
+        IProgress<int>? completedCount = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(texts);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (texts.Count == 0)
+        {
+            return new BatchTranslationResult([], string.Empty);
         }
 
-        if (profile.Provider == TranslationProviderKind.MyMemory)
+        var trace = new TranslationFailureTrace();
+        try
         {
-            return await _myMemory.TranslateAsync(
-                text,
-                sourceLanguage,
-                profile,
-                credentials,
-                streamingText,
-                cancellationToken).ConfigureAwait(false);
+            var task = profile.Provider switch
+            {
+                TranslationProviderKind.Edge => FallbackBatchToFreeProvidersAsync(
+                    texts, sourceLanguage, profile, credentials, completedCount, null, cancellationToken, trace),
+                TranslationProviderKind.OpenAiCompatible => TranslateBatchNaturallyWithFallbackAsync(
+                    texts, sourceLanguage, profile, credentials, completedCount, cancellationToken, trace),
+                TranslationProviderKind.MyMemory => TranslateRegionsIndividuallyAsync(
+                    texts, sourceLanguage, profile, credentials, _myMemory, "MyMemory 基础翻译", maxConcurrency: 2, completedCount, cancellationToken),
+                _ => TranslateBatchWithTencentFallbackAsync(
+                    texts, sourceLanguage, profile, credentials, completedCount, cancellationToken, trace)
+            };
+            var result = await task.ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var attempts = trace.Snapshot();
+            return attempts.Length == 0 ? result : result with { Failures = attempts };
         }
-
-        return await TranslateWithTencentFallbackAsync(
-            text,
-            sourceLanguage,
-            profile,
-            credentials,
-            streamingText,
-            cancellationToken).ConfigureAwait(false);
+        catch (Exception exception) when (IsExpectedProviderFailure(exception))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var failures = trace.Snapshot();
+            if (failures.Length > 1)
+            {
+                throw new TranslationRouteException(exception.Message, failures, exception);
+            }
+            throw;
+        }
     }
 
     private async Task<TranslationResult> TranslateNaturallyWithFallbackAsync(
@@ -63,7 +113,8 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         TranslationProfile profile,
         TranslationCredentials credentials,
         IProgress<string>? streamingText,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TranslationFailureTrace trace)
     {
         Exception primaryException;
         var tencentAlreadyAttempted = false;
@@ -76,34 +127,18 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
                 throw new InvalidOperationException("尚未配置 AI 自然翻译 API Key");
             }
 
-            var hasAiRacing = profile.EnableRacing
-                              && !string.IsNullOrWhiteSpace(profile.RacingBaseAddress)
-                              && !string.IsNullOrWhiteSpace(profile.RacingModel)
-                              && !string.IsNullOrWhiteSpace(credentials.RacingApiKey);
-            var hasTencent = !string.IsNullOrWhiteSpace(credentials.TencentSecretId)
-                             && !string.IsNullOrWhiteSpace(credentials.TencentSecretKey);
+            var hasAiRacing = HasAiRacing(profile, credentials);
+            var hasTencent = HasTencentCredentials(credentials);
             var hasFastTmt = profile.EnableFastFallbackRace && hasTencent;
 
             if (!hasAiRacing && !hasFastTmt)
             {
                 return await TranslateNaturallyWithRetryAsync(
-                    text,
-                    sourceLanguage,
-                    profile,
-                    credentials.ApiKey,
-                    streamingText,
-                    cancellationToken).ConfigureAwait(false);
+                    text, sourceLanguage, profile, credentials.ApiKey, streamingText, cancellationToken).ConfigureAwait(false);
             }
 
             var outcome = await RaceNaturallyAsync(
-                text,
-                sourceLanguage,
-                profile,
-                credentials,
-                hasAiRacing,
-                hasFastTmt,
-                streamingText,
-                cancellationToken).ConfigureAwait(false);
+                text, sourceLanguage, profile, credentials, hasAiRacing, hasFastTmt, streamingText, cancellationToken, trace).ConfigureAwait(false);
             if (outcome.Winner is not null)
             {
                 return outcome.Winner;
@@ -123,22 +158,17 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             primaryException = exception;
         }
 
-        if (!tencentAlreadyAttempted
-            && !string.IsNullOrWhiteSpace(credentials.TencentSecretId)
-            && !string.IsNullOrWhiteSpace(credentials.TencentSecretKey))
+        trace.Record(TranslationProviderKind.OpenAiCompatible, primaryException);
+        if (!tencentAlreadyAttempted && HasTencentCredentials(credentials))
         {
             try
             {
                 var fallback = await _tencent.TranslateAsync(
-                    text,
-                    sourceLanguage,
-                    profile,
-                    credentials,
-                    streamingText,
-                    cancellationToken).ConfigureAwait(false);
+                    text, sourceLanguage, profile, credentials, streamingText, cancellationToken).ConfigureAwait(false);
                 return fallback with
                 {
                     UsedFallback = true,
+                    FallbackProvider = TranslationProviderKind.Tencent,
                     PrimaryFailure = $"AI 自然翻译：{GetFriendlyMessage(primaryException)}"
                 };
             }
@@ -149,41 +179,19 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             catch (Exception exception) when (IsExpectedProviderFailure(exception))
             {
                 tencentException = exception;
+                trace.Record(TranslationProviderKind.Tencent, exception);
             }
         }
 
         if (profile.EnableMyMemoryFallback)
         {
-            try
+            var failure = $"AI 自然翻译：{GetFriendlyMessage(primaryException)}";
+            if (tencentException is not null)
             {
-                var fallback = await _myMemory.TranslateAsync(
-                    text,
-                    sourceLanguage,
-                    profile,
-                    credentials,
-                    streamingText,
-                    cancellationToken).ConfigureAwait(false);
-                var failure = $"AI 自然翻译：{GetFriendlyMessage(primaryException)}";
-                if (tencentException is not null)
-                {
-                    failure += $"；腾讯机器翻译：{GetFriendlyMessage(tencentException)}";
-                }
-                return fallback with
-                {
-                    UsedFallback = true,
-                    PrimaryFailure = failure
-                };
+                failure += $"；腾讯机器翻译：{GetFriendlyMessage(tencentException)}";
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception fallbackException)
-            {
-                throw new InvalidOperationException(
-                    $"AI 自然翻译失败：{GetFriendlyMessage(primaryException)}；保底翻译也失败：{GetFriendlyMessage(fallbackException)}",
-                    fallbackException);
-            }
+            return await FallbackToFreeProvidersAsync(
+                text, sourceLanguage, profile, credentials, streamingText, failure, cancellationToken, trace).ConfigureAwait(false);
         }
 
         if (tencentException is not null)
@@ -204,23 +212,18 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         TranslationProfile profile,
         TranslationCredentials credentials,
         IProgress<string>? streamingText,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TranslationFailureTrace trace)
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(credentials.TencentSecretId)
-                || string.IsNullOrWhiteSpace(credentials.TencentSecretKey))
+            if (!HasTencentCredentials(credentials))
             {
                 throw new InvalidOperationException("尚未配置腾讯云 SecretId 和 SecretKey");
             }
 
             return await _tencent.TranslateAsync(
-                text,
-                sourceLanguage,
-                profile,
-                credentials,
-                streamingText,
-                cancellationToken).ConfigureAwait(false);
+                text, sourceLanguage, profile, credentials, streamingText, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -229,32 +232,825 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         catch (Exception primaryException) when (
             profile.EnableMyMemoryFallback && IsExpectedProviderFailure(primaryException))
         {
+            trace.Record(TranslationProviderKind.Tencent, primaryException);
+            return await FallbackToFreeProvidersAsync(
+                text, sourceLanguage, profile, credentials, streamingText,
+                GetFriendlyMessage(primaryException), cancellationToken, trace).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<TranslationResult> FallbackToFreeProvidersAsync(
+        string text,
+        string sourceLanguage,
+        TranslationProfile profile,
+        TranslationCredentials credentials,
+        IProgress<string>? streamingText,
+        string? primaryFailureSummary,
+        CancellationToken cancellationToken,
+        TranslationFailureTrace trace)
+    {
+        Exception edgeException;
+        try
+        {
+            var edgeFallback = await _edge.TranslateAsync(
+                text, sourceLanguage, profile, credentials, streamingText, cancellationToken).ConfigureAwait(false);
+            return edgeFallback with
+            {
+                UsedFallback = primaryFailureSummary is not null,
+                FallbackProvider = primaryFailureSummary is null ? null : TranslationProviderKind.Edge,
+                PrimaryFailure = primaryFailureSummary
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (profile.EnableMyMemoryFallback && IsExpectedProviderFailure(exception))
+        {
+            trace.Record(TranslationProviderKind.Edge, exception);
+            edgeException = exception;
+        }
+
+        var failureSummary = AppendEdgeFailure(primaryFailureSummary, edgeException);
+        try
+        {
+            var myMemoryFallback = await _myMemory.TranslateAsync(
+                text, sourceLanguage, profile, credentials, streamingText, cancellationToken).ConfigureAwait(false);
+            return myMemoryFallback with
+            {
+                UsedFallback = true,
+                FallbackProvider = TranslationProviderKind.MyMemory,
+                PrimaryFailure = failureSummary
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception fallbackException)
+        {
+            trace.Record(TranslationProviderKind.MyMemory, fallbackException);
+            throw new InvalidOperationException(
+                $"{failureSummary}；MyMemory 也失败：{GetFriendlyMessage(fallbackException)}",
+                fallbackException);
+        }
+    }
+
+    private static string AppendEdgeFailure(string? previousFailure, Exception edgeException) =>
+        (previousFailure is null ? "" : previousFailure + "；") + $"免费在线翻译：{GetFriendlyMessage(edgeException)}";
+
+    /// <summary>
+    /// 分片执行 AI 原位批量翻译（支持已开启的第二 AI 竞速与超时快速回退腾讯）：
+    /// 格式错乱时仅对当前失败分片降级逐区；401/403/429 等服务错误绝不放大为逐区请求，且保留已完成分片再回退剩余区域。
+    /// </summary>
+    private async Task<BatchTranslationResult> TranslateBatchNaturallyWithFallbackAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        TranslationProfile profile,
+        TranslationCredentials credentials,
+        IProgress<int>? completedCount,
+        CancellationToken cancellationToken,
+        TranslationFailureTrace trace)
+    {
+        var outputs = new string[texts.Count];
+        var completed = 0;
+        var providerName = $"AI 自然翻译（{profile.Model}）";
+        var slices = OpenAiTranslationProvider.BuildBatchSlices(texts);
+        var failedSliceIndex = -1;
+        Exception? primaryException = null;
+        var tencentAlreadyAttempted = false;
+        Exception? tencentException = null;
+        var usedFastFallback = false;
+        var usedPartialTencent = false;
+        string? fastFallbackReason = null;
+
+        if (string.IsNullOrWhiteSpace(credentials.ApiKey))
+        {
+            failedSliceIndex = 0;
+            primaryException = new InvalidOperationException("尚未配置 AI 自然翻译 API Key");
+        }
+        else
+        {
+            var hasAiRacing = HasAiRacing(profile, credentials);
+            var hasFastTmt = profile.EnableFastFallbackRace && HasTencentCredentials(credentials);
+
+            for (var sliceIndex = 0; sliceIndex < slices.Count; sliceIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var slice = slices[sliceIndex];
+                if (usedFastFallback)
+                {
+                    // 前序分片已触发超时快退腾讯，剩余分片直接继续走腾讯避免再次死等超时。
+                    var remainingIndices = CollectRemainingIndices(slices, sliceIndex);
+                    var remainingSliceTexts = remainingIndices.Select(index => texts[index]).ToArray();
+                    var remainder = await TranslateBatchWithTencentFallbackAsync(
+                        remainingSliceTexts, sourceLanguage, profile, credentials,
+                        OffsetProgress(completedCount, completed), cancellationToken, trace, fastFallbackReason).ConfigureAwait(false);
+                    MergeIntoOutputs(outputs, remainingIndices, remainder.Texts);
+                    return remainder with { Texts = outputs };
+                }
+
+                tencentAlreadyAttempted = false;
+                tencentException = null;
+                try
+                {
+                    if (hasAiRacing || hasFastTmt)
+                    {
+                        var outcome = await RaceBatchSliceAsync(
+                            slice.Texts,
+                            sourceLanguage,
+                            profile,
+                            credentials,
+                            hasAiRacing,
+                            hasFastTmt,
+                            cancellationToken, trace).ConfigureAwait(false);
+                        if (outcome.Texts is not null)
+                        {
+                            providerName = outcome.ProviderName;
+                            usedFastFallback |= outcome.UsedFastFallback;
+                            fastFallbackReason ??= outcome.FastFallbackReason;
+                            for (var index = 0; index < slice.Indices.Count; index++)
+                            {
+                                outputs[slice.Indices[index]] = outcome.Texts[index];
+                            }
+                            completed += slice.Indices.Count;
+                            completedCount?.Report(completed);
+                            continue;
+                        }
+
+                        tencentAlreadyAttempted = outcome.TencentAttempted;
+                        tencentException = outcome.TencentError;
+                        if (outcome.PartialTencentTexts is { } partial)
+                        {
+                            var added = MergeCompletedRegions(outputs, slice.Indices, partial);
+                            if (added > 0)
+                            {
+                                completed += added;
+                                usedPartialTencent = true;
+                                completedCount?.Report(completed);
+                            }
+                        }
+                        if (outcome.FormatFailedOnly)
+                        {
+                            throw outcome.PrimaryError ?? new BatchTranslationFormatException("AI 竞速批量翻译格式校验失败。");
+                        }
+                        failedSliceIndex = sliceIndex;
+                        primaryException = outcome.PrimaryError ?? new HttpRequestException("AI 批量翻译失败。");
+                        break;
+                    }
+
+                    var translated = await TranslateBatchSliceWithRetryAsync(
+                        slice.Texts, profile, credentials.ApiKey!, cancellationToken).ConfigureAwait(false);
+                    providerName = $"AI 自然翻译（{profile.Model}）";
+                    for (var index = 0; index < slice.Indices.Count; index++)
+                    {
+                        outputs[slice.Indices[index]] = translated[index];
+                    }
+                    completed += slice.Indices.Count;
+                    completedCount?.Report(completed);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (BatchTranslationFormatException exception)
+                {
+                    trace.Record(TranslationProviderKind.OpenAiCompatible, exception);
+                    // 仅对当前格式错乱的分片降级逐区，绝不重发前面已经成功的分片。
+                    var missing = slice.Indices.Where(index => outputs[index] is null).ToArray();
+                    var individualOutputs = new string[missing.Length];
+                    try
+                    {
+                        await TranslateRegionsIndividuallyAsync(
+                            missing.Select(index => texts[index]).ToArray(), sourceLanguage, profile, credentials,
+                            _openAi, providerName, maxConcurrency: 3, OffsetProgress(completedCount, completed),
+                            cancellationToken, individualOutputs).ConfigureAwait(false);
+                    }
+                    catch (Exception individualError) when (IsExpectedProviderFailure(individualError))
+                    {
+                        failedSliceIndex = sliceIndex;
+                        primaryException = individualError;
+                        break;
+                    }
+                    finally
+                    {
+                        completed += MergeCompletedRegions(outputs, missing, individualOutputs);
+                    }
+                }
+                catch (Exception exception) when (IsExpectedProviderFailure(exception))
+                {
+                    failedSliceIndex = sliceIndex;
+                    primaryException = exception;
+                    break;
+                }
+            }
+        }
+
+        if (primaryException is null)
+        {
+            return new BatchTranslationResult(
+                outputs,
+                providerName,
+                UsedFallback: usedFastFallback || usedPartialTencent,
+                PrimaryFailure: fastFallbackReason ?? (usedPartialTencent ? "部分区域已回退腾讯机器翻译" : null))
+            {
+                FallbackProvider = usedFastFallback || usedPartialTencent ? TranslationProviderKind.Tencent : null
+            };
+        }
+
+        trace.Record(TranslationProviderKind.OpenAiCompatible, primaryException);
+        var remainingIndicesAfterFailure = CollectRemainingIndices(slices, Math.Max(0, failedSliceIndex))
+            .Where(index => outputs[index] is null).ToArray();
+        var remainingTexts = remainingIndicesAfterFailure.Select(index => texts[index]).ToArray();
+        var remainingProgress = OffsetProgress(completedCount, completed);
+
+        if (!tencentAlreadyAttempted && HasTencentCredentials(credentials))
+        {
+            var result = await TranslateBatchWithTencentFallbackAsync(
+                remainingTexts, sourceLanguage, profile, credentials, remainingProgress, cancellationToken, trace,
+                $"AI 自然翻译：{GetFriendlyMessage(primaryException)}").ConfigureAwait(false);
+            MergeIntoOutputs(outputs, remainingIndicesAfterFailure, result.Texts);
+            return result with { Texts = outputs };
+        }
+
+        if (profile.EnableMyMemoryFallback)
+        {
+            var summary = $"AI 自然翻译：{GetFriendlyMessage(primaryException)}";
+            if (tencentException is not null)
+            {
+                summary += $"；腾讯机器翻译：{GetFriendlyMessage(tencentException)}";
+            }
+            var freeFallback = await FallbackBatchToFreeProvidersAsync(
+                remainingTexts, sourceLanguage, profile, credentials, remainingProgress, summary, cancellationToken, trace).ConfigureAwait(false);
+            MergeIntoOutputs(outputs, remainingIndicesAfterFailure, freeFallback.Texts);
+            return freeFallback with { Texts = outputs };
+        }
+
+        if (tencentException is not null)
+        {
+            throw new InvalidOperationException(
+                $"AI 自然翻译失败：{GetFriendlyMessage(primaryException)}；腾讯翻译也失败：{GetFriendlyMessage(tencentException)}",
+                tencentException);
+        }
+        throw new InvalidOperationException(
+            $"AI 自然翻译失败：{GetFriendlyMessage(primaryException)}",
+            primaryException);
+    }
+
+    private readonly record struct BatchSliceOutcome(
+        string[]? Texts,
+        string ProviderName,
+        bool UsedFastFallback,
+        string? FastFallbackReason,
+        bool FormatFailedOnly,
+        Exception? PrimaryError,
+        bool TencentAttempted,
+        Exception? TencentError,
+        string[]? PartialTencentTexts = null);
+
+    private async Task<BatchSliceOutcome> RaceBatchSliceAsync(
+        IReadOnlyList<string> sliceTexts,
+        string sourceLanguage,
+        TranslationProfile profile,
+        TranslationCredentials credentials,
+        bool hasAiRacing,
+        bool hasFastTmt,
+        CancellationToken cancellationToken,
+        TranslationFailureTrace trace)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var delayWake = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+        var racingProfile = profile with
+        {
+            BaseAddress = profile.RacingBaseAddress,
+            Model = profile.RacingModel,
+            CredentialName = profile.RacingCredentialName
+        };
+
+        var winnerLocked = 0;
+        var remainingAiCandidates = hasAiRacing ? 2 : 1;
+        Exception? primaryError = null;
+        Exception? racingError = null;
+        var primaryFormatFailed = false;
+        var racingFormatFailed = false;
+        var anyNonFormatFailure = 0;
+        string[]? partialTencentTexts = null;
+        var tencentAttempted = false;
+        Exception? tencentError = null;
+
+        void MarkAiCandidateFailed(bool isFormatError)
+        {
+            if (!isFormatError)
+            {
+                Interlocked.Exchange(ref anyNonFormatFailure, 1);
+            }
+            if (Interlocked.Decrement(ref remainingAiCandidates) == 0
+                && Volatile.Read(ref winnerLocked) == 0)
+            {
+                try
+                {
+                    if (Volatile.Read(ref anyNonFormatFailure) == 0)
+                    {
+                        // 所有 AI 候选均仅因 JSON 格式错乱失败，取消延迟快退并交由外层降级逐区 AI。
+                        linked.Cancel();
+                    }
+                    else
+                    {
+                        delayWake.Cancel();
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
+        }
+
+        async Task<BatchSliceOutcome?> RunCandidateAsync(
+            TranslationProfile candidateProfile,
+            string apiKey,
+            bool isPrimary)
+        {
             try
             {
-                var fallback = await _myMemory.TranslateAsync(
-                    text,
+                var translated = isPrimary
+                    ? await TranslateBatchSliceWithRetryAsync(sliceTexts, candidateProfile, apiKey, linked.Token).ConfigureAwait(false)
+                    : await _openAi.TranslateBatchSliceAsync(sliceTexts, candidateProfile, apiKey, linked.Token).ConfigureAwait(false);
+                Interlocked.Exchange(ref winnerLocked, 1);
+                return new BatchSliceOutcome(
+                    translated,
+                    $"AI 自然翻译（{candidateProfile.Model}）",
+                    UsedFastFallback: false,
+                    FastFallbackReason: null,
+                    FormatFailedOnly: false,
+                    PrimaryError: null,
+                    TencentAttempted: false,
+                    TencentError: null);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                MarkAiCandidateFailed(isFormatError: false);
+                return null;
+            }
+            catch (BatchTranslationFormatException exception)
+            {
+                trace.Record(TranslationProviderKind.OpenAiCompatible, exception, secondaryAi: !isPrimary);
+                if (isPrimary)
+                {
+                    primaryFormatFailed = true;
+                    primaryError = exception;
+                }
+                else
+                {
+                    racingFormatFailed = true;
+                    racingError = exception;
+                }
+                MarkAiCandidateFailed(isFormatError: true);
+                return null;
+            }
+            catch (Exception exception) when (IsExpectedProviderFailure(exception))
+            {
+                trace.Record(TranslationProviderKind.OpenAiCompatible, exception, secondaryAi: !isPrimary);
+                if (isPrimary)
+                {
+                    primaryError = exception;
+                }
+                else
+                {
+                    racingError = exception;
+                }
+                MarkAiCandidateFailed(isFormatError: false);
+                return null;
+            }
+        }
+
+        async Task<BatchSliceOutcome?> RunDelayedTencentSliceAsync(int delaySeconds)
+        {
+            var wokenByAiFailure = false;
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), delayWake.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return null;
+            }
+            catch (OperationCanceledException)
+            {
+                wokenByAiFailure = true;
+            }
+
+            if (linked.IsCancellationRequested || Volatile.Read(ref winnerLocked) != 0)
+            {
+                return null;
+            }
+
+            tencentAttempted = true;
+            partialTencentTexts = new string[sliceTexts.Count];
+            try
+            {
+                var tencentResult = await TranslateRegionsIndividuallyAsync(
+                    sliceTexts,
                     sourceLanguage,
                     profile,
                     credentials,
-                    streamingText,
-                    cancellationToken).ConfigureAwait(false);
-                return fallback with
+                    _tencent,
+                    "腾讯机器翻译",
+                    maxConcurrency: 3,
+                    completedCount: null,
+                    linked.Token, partialTencentTexts).ConfigureAwait(false);
+                Interlocked.Exchange(ref winnerLocked, 1);
+                var nonFormat = PickNonFormatError(primaryError, primaryFormatFailed, racingError, racingFormatFailed);
+                if (!wokenByAiFailure)
                 {
-                    UsedFallback = true,
-                    PrimaryFailure = GetFriendlyMessage(primaryException)
-                };
+                    trace.Record(TranslationProviderKind.OpenAiCompatible, new TimeoutException());
+                }
+                var reason = wokenByAiFailure && nonFormat is not null
+                    ? $"AI 自然翻译：{GetFriendlyMessage(nonFormat)}"
+                    : $"AI 自然翻译超过 {delaySeconds} 秒未完成，已自动切换快速翻译";
+                return new BatchSliceOutcome(
+                    tencentResult.Texts.ToArray(),
+                    tencentResult.ProviderName,
+                    UsedFastFallback: true,
+                    FastFallbackReason: reason,
+                    FormatFailedOnly: false,
+                    PrimaryError: null,
+                    TencentAttempted: true,
+                    TencentError: null);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+            catch (Exception exception) when (IsExpectedProviderFailure(exception))
+            {
+                tencentError = exception;
+                trace.Record(TranslationProviderKind.Tencent, exception);
+                return null;
+            }
+        }
+
+        var candidates = new List<Task<BatchSliceOutcome?>>
+        {
+            RunCandidateAsync(profile, credentials.ApiKey!, isPrimary: true)
+        };
+        if (hasAiRacing)
+        {
+            candidates.Add(RunCandidateAsync(racingProfile, credentials.RacingApiKey!, isPrimary: false));
+        }
+        if (hasFastTmt)
+        {
+            var delaySeconds = Math.Clamp(profile.FastFallbackDelaySeconds, 2, 30);
+            candidates.Add(RunDelayedTencentSliceAsync(delaySeconds));
+        }
+
+        while (candidates.Count > 0)
+        {
+            var finished = await Task.WhenAny(candidates).ConfigureAwait(false);
+            candidates.Remove(finished);
+            var winner = await finished.ConfigureAwait(false);
+            if (winner is not null)
+            {
+                linked.Cancel();
+                return winner.Value;
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var allFormatFailed = hasAiRacing
+            ? primaryFormatFailed && racingFormatFailed
+            : primaryFormatFailed;
+        if (allFormatFailed)
+        {
+            return new BatchSliceOutcome(
+                Texts: null,
+                ProviderName: string.Empty,
+                UsedFastFallback: false,
+                FastFallbackReason: null,
+                FormatFailedOnly: true,
+                PrimaryError: primaryError ?? new BatchTranslationFormatException("AI 批量翻译格式校验失败。"),
+                TencentAttempted: tencentAttempted,
+                TencentError: tencentError,
+                PartialTencentTexts: partialTencentTexts);
+        }
+
+        // 主备异常对称处理：只要任一路报 401/429 等非格式错误，优先返回该非格式异常，绝不漏抛另一路的格式异常触发逐区放大。
+        var nonFormatError = PickNonFormatError(primaryError, primaryFormatFailed, racingError, racingFormatFailed)
+                             ?? new InvalidOperationException(primaryError?.Message ?? racingError?.Message ?? "AI 批量翻译失败。");
+        return new BatchSliceOutcome(
+            Texts: null,
+            ProviderName: string.Empty,
+            UsedFastFallback: false,
+            FastFallbackReason: null,
+            FormatFailedOnly: false,
+            PrimaryError: nonFormatError,
+            TencentAttempted: tencentAttempted,
+            TencentError: tencentError,
+            PartialTencentTexts: partialTencentTexts);
+    }
+
+    private static Exception? PickNonFormatError(
+        Exception? primaryError,
+        bool primaryFormatFailed,
+        Exception? racingError,
+        bool racingFormatFailed)
+    {
+        if (!primaryFormatFailed && primaryError is not null)
+        {
+            return primaryError;
+        }
+        if (!racingFormatFailed && racingError is not null)
+        {
+            return racingError;
+        }
+        return null;
+    }
+
+    private async Task<BatchTranslationResult> TranslateBatchWithTencentFallbackAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        TranslationProfile profile,
+        TranslationCredentials credentials,
+        IProgress<int>? completedCount,
+        CancellationToken cancellationToken,
+        TranslationFailureTrace trace,
+        string? aiFailure = null)
+    {
+        var outputs = new string[texts.Count];
+        try
+        {
+            if (!HasTencentCredentials(credentials))
+            {
+                throw new InvalidOperationException("尚未配置腾讯云 SecretId 和 SecretKey");
+            }
+            var result = await TranslateRegionsIndividuallyAsync(
+                texts, sourceLanguage, profile, credentials, _tencent, "腾讯机器翻译",
+                maxConcurrency: 3, completedCount, cancellationToken, outputs).ConfigureAwait(false);
+            return result with
+            {
+                UsedFallback = aiFailure is not null,
+                PrimaryFailure = aiFailure,
+                FallbackProvider = aiFailure is null ? null : TranslationProviderKind.Tencent
+            };
+        }
+        catch (Exception exception) when (IsExpectedProviderFailure(exception))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            trace.Record(TranslationProviderKind.Tencent, exception);
+            var reason = $"腾讯机器翻译：{GetFriendlyMessage(exception)}";
+            if (aiFailure is not null)
+            {
+                reason = $"{aiFailure}；{reason}";
+            }
+            if (!profile.EnableMyMemoryFallback)
+            {
+                if (aiFailure is null)
+                {
+                    throw;
+                }
+                throw new InvalidOperationException(reason, exception);
+            }
+
+            var missing = Enumerable.Range(0, texts.Count).Where(index => outputs[index] is null).ToArray();
+            var fallback = await FallbackBatchToFreeProvidersAsync(
+                missing.Select(index => texts[index]).ToArray(), sourceLanguage, profile, credentials,
+                OffsetProgress(completedCount, texts.Count - missing.Length), reason, cancellationToken, trace).ConfigureAwait(false);
+            MergeIntoOutputs(outputs, missing, fallback.Texts);
+            return fallback with { Texts = outputs };
+        }
+    }
+
+    private async Task<BatchTranslationResult> FallbackBatchToFreeProvidersAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        TranslationProfile profile,
+        TranslationCredentials credentials,
+        IProgress<int>? completedCount,
+        string? primaryFailureSummary,
+        CancellationToken cancellationToken,
+        TranslationFailureTrace trace)
+    {
+        var outputs = new string[texts.Count];
+        var completed = 0;
+        var targetCode = TranslationLanguageCodes.ToEdge(profile.TargetLanguage);
+        var slices = EdgeTranslationProvider.BuildSlices(texts);
+
+        for (var sliceIndex = 0; sliceIndex < slices.Count; sliceIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var slice = slices[sliceIndex];
+            try
+            {
+                var translated = await _edge.TranslateSliceAsync(
+                    slice.Texts, targetCode, sourceLanguage, profile, credentials, cancellationToken).ConfigureAwait(false);
+                for (var index = 0; index < slice.Indices.Count; index++)
+                {
+                    outputs[slice.Indices[index]] = translated[index];
+                }
+                completed += slice.Indices.Count;
+                completedCount?.Report(completed);
             }
             catch (OperationCanceledException)
             {
                 throw;
             }
-            catch (Exception fallbackException)
+            catch (Exception edgeException) when (profile.EnableMyMemoryFallback && IsExpectedProviderFailure(edgeException))
             {
-                throw new InvalidOperationException(
-                    $"腾讯翻译失败：{GetFriendlyMessage(primaryException)}；MyMemory 也失败：{GetFriendlyMessage(fallbackException)}",
-                    fallbackException);
+                trace.Record(TranslationProviderKind.Edge, edgeException);
+                var failureSummary = AppendEdgeFailure(primaryFailureSummary, edgeException);
+                var remainingIndices = CollectRemainingIndices(slices, sliceIndex);
+                var remainingTexts = remainingIndices.Select(index => texts[index]).ToArray();
+                var baseCompleted = completed;
+                try
+                {
+                    var myMemoryResult = await TranslateRegionsIndividuallyAsync(
+                        remainingTexts,
+                        sourceLanguage,
+                        profile,
+                        credentials,
+                        _myMemory,
+                        "MyMemory 基础翻译",
+                        maxConcurrency: 2,
+                        completedCount is null ? null : new RelayIntProgress(done => completedCount.Report(baseCompleted + done)),
+                        cancellationToken).ConfigureAwait(false);
+                    MergeIntoOutputs(outputs, remainingIndices, myMemoryResult.Texts);
+                    return new BatchTranslationResult(
+                        outputs,
+                        myMemoryResult.ProviderName,
+                        UsedFallback: true,
+                        PrimaryFailure: failureSummary)
+                    { FallbackProvider = TranslationProviderKind.MyMemory };
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception fallbackException)
+                {
+                    trace.Record(TranslationProviderKind.MyMemory, fallbackException);
+                    throw new InvalidOperationException(
+                        $"{failureSummary}；MyMemory 也失败：{GetFriendlyMessage(fallbackException)}",
+                        fallbackException);
+                }
             }
         }
+
+        return new BatchTranslationResult(
+            outputs,
+            "免费在线翻译",
+            UsedFallback: primaryFailureSummary is not null,
+            PrimaryFailure: primaryFailureSummary)
+        {
+            FallbackProvider = primaryFailureSummary is null ? null : TranslationProviderKind.Edge
+        };
+    }
+
+    private async Task<string[]> TranslateBatchSliceWithRetryAsync(
+        IReadOnlyList<string> sliceTexts,
+        TranslationProfile profile,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                return await _openAi.TranslateBatchSliceAsync(
+                    sliceTexts, profile, apiKey, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (HttpRequestException exception) when (attempt == 0 && IsTransientHttpStatus(exception))
+            {
+                lastException = exception;
+                await Task.Delay(TimeSpan.FromSeconds(1.2), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        throw lastException ?? new HttpRequestException("AI 批量翻译失败。");
+    }
+
+    private static List<int> CollectRemainingIndices(
+        IReadOnlyList<(IReadOnlyList<int> Indices, IReadOnlyList<string> Texts)> slices,
+        int fromSliceIndex)
+    {
+        var remaining = new List<int>();
+        for (var sliceIndex = fromSliceIndex; sliceIndex < slices.Count; sliceIndex++)
+        {
+            remaining.AddRange(slices[sliceIndex].Indices);
+        }
+        return remaining;
+    }
+
+    private static void MergeIntoOutputs(string[] outputs, IReadOnlyList<int> indices, IReadOnlyList<string> values)
+    {
+        for (var index = 0; index < indices.Count; index++)
+        {
+            outputs[indices[index]] = values[index];
+        }
+    }
+
+    private static int MergeCompletedRegions(string[] outputs, IReadOnlyList<int> indices, IReadOnlyList<string> partial)
+    {
+        var count = 0;
+        for (var i = 0; i < indices.Count; i++)
+        {
+            // Null means unfinished. An empty string is the valid result of a blank OCR region.
+            if (partial[i] is { } translated)
+            {
+                outputs[indices[i]] = translated;
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static IProgress<int>? OffsetProgress(IProgress<int>? progress, int completed) =>
+        progress is null ? null : new RelayIntProgress(done => progress.Report(completed + done));
+
+    private static bool HasAiRacing(TranslationProfile profile, TranslationCredentials credentials) =>
+        profile.EnableRacing
+        && !string.IsNullOrWhiteSpace(profile.RacingBaseAddress)
+        && !string.IsNullOrWhiteSpace(profile.RacingModel)
+        && !string.IsNullOrWhiteSpace(credentials.RacingApiKey);
+
+    private static bool HasTencentCredentials(TranslationCredentials credentials) =>
+        !string.IsNullOrWhiteSpace(credentials.TencentSecretId)
+        && !string.IsNullOrWhiteSpace(credentials.TencentSecretKey);
+
+    private static async Task<BatchTranslationResult> TranslateRegionsIndividuallyAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        TranslationProfile profile,
+        TranslationCredentials credentials,
+        ITranslationProvider provider,
+        string defaultProviderName,
+        int maxConcurrency,
+        IProgress<int>? completedCount,
+        CancellationToken cancellationToken,
+        string[]? retainedOutputs = null)
+    {
+        using var batch = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var slots = new SemaphoreSlim(maxConcurrency);
+        var outputs = retainedOutputs ?? new string[texts.Count];
+        // After a service failure, stop starting regions. Let requests already on the wire
+        // finish when the caller can preserve their results for fallback.
+        var requestToken = retainedOutputs is null ? batch.Token : cancellationToken;
+        var completed = 0;
+        var providerName = defaultProviderName;
+
+        var tasks = texts.Select(async (text, index) =>
+        {
+            await slots.WaitAsync(batch.Token).ConfigureAwait(false);
+            try
+            {
+                var translated = string.Empty;
+                string? service = null;
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    var result = await provider.TranslateAsync(
+                        text, sourceLanguage, profile, credentials, streamingText: null, requestToken).ConfigureAwait(false);
+                    if (string.IsNullOrWhiteSpace(result.Text))
+                    {
+                        throw new InvalidOperationException("翻译服务返回了空内容，请重试。");
+                    }
+                    translated = result.Text;
+                    service = result.ProviderName;
+                }
+                requestToken.ThrowIfCancellationRequested();
+                lock (outputs)
+                {
+                    outputs[index] = translated;
+                    if (!string.IsNullOrWhiteSpace(service))
+                    {
+                        providerName = service;
+                    }
+                    completedCount?.Report(++completed);
+                }
+            }
+            catch
+            {
+                batch.Cancel();
+                throw;
+            }
+            finally
+            {
+                slots.Release();
+            }
+        });
+
+        try
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException && cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return new BatchTranslationResult(outputs, providerName);
     }
 
     private static string GetFriendlyMessage(Exception exception)
@@ -274,13 +1070,11 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         public void Report(string value) => report(value);
     }
 
-    /// <summary>
-    /// Races the primary AI endpoint (streaming live to the UI) against an
-    /// optional secondary AI endpoint and/or a delayed Tencent quick fallback.
-    /// If every AI candidate fails before the head-start delay expires, the
-    /// delay is cancelled immediately so Tencent runs without dead wait and
-    /// failed providers are never called a second time.
-    /// </summary>
+    private sealed class RelayIntProgress(Action<int> report) : IProgress<int>
+    {
+        public void Report(int value) => report(value);
+    }
+
     private async Task<RaceOutcome> RaceNaturallyAsync(
         string text,
         string sourceLanguage,
@@ -289,7 +1083,8 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         bool hasAiRacing,
         bool hasFastTmt,
         IProgress<string>? streamingText,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TranslationFailureTrace trace)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         using var delayWake = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
@@ -330,12 +1125,7 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             try
             {
                 var result = await TranslateNaturallyWithRetryAsync(
-                    text,
-                    sourceLanguage,
-                    profile,
-                    credentials.ApiKey!,
-                    primaryProgress,
-                    linked.Token).ConfigureAwait(false);
+                    text, sourceLanguage, profile, credentials.ApiKey!, primaryProgress, linked.Token).ConfigureAwait(false);
                 if (!IsPlausibleTranslation(text, result.Text))
                 {
                     throw new InvalidOperationException("AI 自然翻译返回译文过短。");
@@ -350,6 +1140,7 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             }
             catch (Exception exception) when (IsExpectedProviderFailure(exception))
             {
+                trace.Record(TranslationProviderKind.OpenAiCompatible, exception);
                 primaryError = exception;
                 MarkAiCandidateFailed();
                 return null;
@@ -361,12 +1152,7 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             try
             {
                 var result = await _openAi.TranslateAsync(
-                    text,
-                    sourceLanguage,
-                    racingProfile,
-                    new TranslationCredentials(racingKey),
-                    streamingText: null,
-                    linked.Token).ConfigureAwait(false);
+                    text, sourceLanguage, racingProfile, new TranslationCredentials(racingKey), streamingText: null, linked.Token).ConfigureAwait(false);
                 if (!IsPlausibleTranslation(text, result.Text))
                 {
                     throw new InvalidOperationException("AI 竞速翻译返回译文过短。");
@@ -381,6 +1167,7 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             }
             catch (Exception exception) when (IsExpectedProviderFailure(exception))
             {
+                trace.Record(TranslationProviderKind.OpenAiCompatible, exception, secondaryAi: true);
                 Interlocked.CompareExchange(ref primaryError, exception, null);
                 MarkAiCandidateFailed();
                 return null;
@@ -401,7 +1188,6 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             }
             catch (OperationCanceledException)
             {
-                // All AI candidates have already faulted; skip the remaining delay.
                 wokenByAiFailure = true;
             }
 
@@ -409,18 +1195,18 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             try
             {
                 var result = await _tencent.TranslateAsync(
-                    text,
-                    sourceLanguage,
-                    profile,
-                    credentials,
-                    streamingText: null,
-                    linked.Token).ConfigureAwait(false);
+                    text, sourceLanguage, profile, credentials, streamingText: null, linked.Token).ConfigureAwait(false);
+                if (!wokenByAiFailure)
+                {
+                    trace.Record(TranslationProviderKind.OpenAiCompatible, new TimeoutException());
+                }
                 var failureReason = wokenByAiFailure && Volatile.Read(ref primaryError) is { } aiFailure
                     ? $"AI 自然翻译：{GetFriendlyMessage(aiFailure)}"
                     : $"AI 自然翻译超过 {delaySeconds} 秒未完成，已自动切换快速翻译";
                 return result with
                 {
                     UsedFallback = true,
+                    FallbackProvider = TranslationProviderKind.Tencent,
                     PrimaryFailure = failureReason
                 };
             }
@@ -431,6 +1217,7 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             catch (Exception exception) when (IsExpectedProviderFailure(exception))
             {
                 tencentError = exception;
+                trace.Record(TranslationProviderKind.Tencent, exception);
                 return null;
             }
         }
@@ -492,26 +1279,16 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
             try
             {
                 return await _openAi.TranslateAsync(
-                    text,
-                    sourceLanguage,
-                    profile,
-                    singleCredentials,
-                    streamingText,
-                    cancellationToken).ConfigureAwait(false);
+                    text, sourceLanguage, profile, singleCredentials, streamingText, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 throw;
             }
-            catch (HttpRequestException exception) when (
-                attempt < 2 && IsTransientHttpStatus(exception))
+            catch (HttpRequestException exception) when (attempt < 2 && IsTransientHttpStatus(exception))
             {
-                // Free AI endpoints (e.g. GLM) return 429 while under load. A short
-                // wait usually recovers the request; only escalate after the retries
-                // are exhausted so the user keeps the high-quality translation.
                 lastException = exception;
-                await Task.Delay(TimeSpan.FromSeconds(1.5 * (attempt + 1)), cancellationToken)
-                    .ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(1.5 * (attempt + 1)), cancellationToken).ConfigureAwait(false);
             }
         }
         throw lastException ?? new HttpRequestException("AI 自然翻译失败。");
@@ -532,360 +1309,4 @@ public sealed class OnlineTranslationProvider : ITranslationProvider
         JsonException or
         InvalidOperationException or
         ArgumentException;
-}
-
-/// <summary>
-/// Sends the non-streaming translation requests (Tencent TMT, MyMemory) with
-/// a per-request deadline: the shared client's 90 s timeout would otherwise
-/// leave the card stuck on "正在翻译…" with no path to the fallback chain.  A
-/// deadline expiry surfaces as TimeoutException so providers classify it as
-/// an expected, transient failure instead of caller cancellation.
-/// </summary>
-internal static class TranslationHttp
-{
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
-
-    internal static async Task<(int Status, string Reason, string Body)> SendAsync(
-        HttpClient httpClient,
-        HttpRequestMessage request,
-        string timeoutMessage,
-        CancellationToken cancellationToken)
-    {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(RequestTimeout);
-        try
-        {
-            using var response = await httpClient.SendAsync(request, deadline.Token).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(deadline.Token).ConfigureAwait(false);
-            return ((int)response.StatusCode, response.ReasonPhrase ?? string.Empty, body);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(timeoutMessage);
-        }
-    }
-}
-
-public sealed class TencentTranslationProvider(HttpClient httpClient) : ITranslationProvider
-{
-    private const string Host = "tmt.tencentcloudapi.com";
-    private const string Service = "tmt";
-    private const string Version = "2018-03-21";
-    private const string Action = "TextTranslate";
-    private const string ContentType = "application/json; charset=utf-8";
-
-    public async Task<TranslationResult> TranslateAsync(
-        string text,
-        string sourceLanguage,
-        TranslationProfile profile,
-        TranslationCredentials credentials,
-        IProgress<string>? streamingText = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        ArgumentException.ThrowIfNullOrWhiteSpace(credentials.TencentSecretId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(credentials.TencentSecretKey);
-
-        var normalizedText = TranslationTextProtector.NormalizeLikelyOcrArtifacts(text);
-        var protectedText = TranslationTextProtector.Protect(normalizedText);
-        var translated = new StringBuilder();
-        foreach (var chunk in TranslationTextChunker.SplitByCharacters(protectedText.Text, 1900))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var chunkResult = await TranslateChunkAsync(
-                chunk,
-                profile,
-                credentials.TencentSecretId!,
-                credentials.TencentSecretKey!,
-                cancellationToken).ConfigureAwait(false);
-            translated.Append(chunkResult);
-            streamingText?.Report(protectedText.Restore(translated.ToString()));
-        }
-
-        return new TranslationResult(protectedText.Restore(translated.ToString()), "腾讯机器翻译");
-    }
-
-    private async Task<string> TranslateChunkAsync(
-        string text,
-        TranslationProfile profile,
-        string secretId,
-        string secretKey,
-        CancellationToken cancellationToken)
-    {
-        var payload = JsonSerializer.Serialize(new
-        {
-            SourceText = text,
-            Source = "auto",
-            Target = TranslationLanguageCodes.ToTencent(profile.TargetLanguage),
-            ProjectId = 0
-        });
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var authorization = CreateAuthorization(secretId, secretKey, payload, timestamp, Host, Service, ContentType);
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"https://{Host}/")
-        {
-            Content = new StringContent(payload, Encoding.UTF8, "application/json")
-        };
-        request.Headers.Host = Host;
-        request.Headers.TryAddWithoutValidation("Authorization", authorization);
-        request.Headers.TryAddWithoutValidation("X-TC-Action", Action);
-        request.Headers.TryAddWithoutValidation("X-TC-Version", Version);
-        request.Headers.TryAddWithoutValidation("X-TC-Timestamp", timestamp.ToString(CultureInfo.InvariantCulture));
-        request.Headers.TryAddWithoutValidation("X-TC-Region", profile.TencentRegion);
-
-        var (status, reason, responseBody) = await TranslationHttp.SendAsync(
-            httpClient, request, "腾讯翻译请求超时（30 秒）。", cancellationToken).ConfigureAwait(false);
-        if (status < 200 || status >= 300)
-        {
-            throw new HttpRequestException($"HTTP {status} {reason}".Trim());
-        }
-
-        using var document = JsonDocument.Parse(responseBody);
-        if (!document.RootElement.TryGetProperty("Response", out var responseObject))
-        {
-            throw new InvalidOperationException("腾讯翻译返回了无法识别的数据");
-        }
-        if (responseObject.TryGetProperty("Error", out var error))
-        {
-            var code = error.TryGetProperty("Code", out var codeValue) ? codeValue.GetString() : null;
-            var message = error.TryGetProperty("Message", out var messageValue) ? messageValue.GetString() : null;
-            throw new InvalidOperationException(string.Join("：", new[] { code, message }.Where(value => !string.IsNullOrWhiteSpace(value))));
-        }
-        if (!responseObject.TryGetProperty("TargetText", out var targetText)
-            || targetText.ValueKind != JsonValueKind.String)
-        {
-            throw new InvalidOperationException("腾讯翻译没有返回译文");
-        }
-        return targetText.GetString() ?? string.Empty;
-    }
-
-    internal static string CreateAuthorization(
-        string secretId,
-        string secretKey,
-        string payload,
-        long timestamp,
-        string host = Host,
-        string service = Service,
-        string contentType = ContentType) =>
-        TencentCloudApiSigner.CreateAuthorization(
-            secretId,
-            secretKey,
-            payload,
-            timestamp,
-            host,
-            service,
-            contentType);
-}
-
-public sealed class MyMemoryTranslationProvider(HttpClient httpClient) : ITranslationProvider
-{
-    public async Task<TranslationResult> TranslateAsync(
-        string text,
-        string sourceLanguage,
-        TranslationProfile profile,
-        TranslationCredentials credentials,
-        IProgress<string>? streamingText = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        var source = TranslationLanguageCodes.ToMyMemorySource(sourceLanguage, text);
-        var target = TranslationLanguageCodes.ToMyMemoryTarget(profile.TargetLanguage);
-        var normalizedText = TranslationTextProtector.NormalizeLikelyOcrArtifacts(text);
-        var protectedText = TranslationTextProtector.Protect(normalizedText);
-        var translated = new StringBuilder();
-
-        foreach (var chunk in TranslationTextChunker.SplitByUtf8Bytes(protectedText.Text, 450))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var endpoint = "https://api.mymemory.translated.net/get?q="
-                           + Uri.EscapeDataString(chunk)
-                           + "&langpair=" + Uri.EscapeDataString($"{source}|{target}")
-                           + "&mt=1"
-                           + (string.IsNullOrWhiteSpace(profile.MyMemoryContactEmail)
-                               ? string.Empty
-                               : "&de=" + Uri.EscapeDataString(profile.MyMemoryContactEmail.Trim()));
-            using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
-            var (statusCode, reasonPhrase, responseBody) = await TranslationHttp.SendAsync(
-                httpClient, request, "MyMemory 请求超时（30 秒）。", cancellationToken).ConfigureAwait(false);
-            if (statusCode < 200 || statusCode >= 300)
-            {
-                var detail = TryReadMyMemoryError(responseBody);
-                var httpStatus = $"HTTP {statusCode} {reasonPhrase}".Trim();
-                throw new HttpRequestException(string.IsNullOrWhiteSpace(detail) ? httpStatus : $"{httpStatus}：{detail}");
-            }
-
-            using var document = JsonDocument.Parse(responseBody);
-            if (document.RootElement.TryGetProperty("responseStatus", out var status)
-                && status.ToString() is { } statusText
-                && statusText != "200")
-            {
-                var detail = document.RootElement.TryGetProperty("responseDetails", out var details)
-                    ? details.ToString()
-                    : "服务返回错误";
-                throw new InvalidOperationException(detail);
-            }
-            if (!document.RootElement.TryGetProperty("responseData", out var data)
-                || !data.TryGetProperty("translatedText", out var translatedText)
-                || translatedText.ValueKind != JsonValueKind.String)
-            {
-                throw new InvalidOperationException("MyMemory 没有返回译文");
-            }
-            var chunkResult = WebUtility.HtmlDecode(translatedText.GetString() ?? string.Empty);
-            translated.Append(chunkResult);
-            streamingText?.Report(protectedText.Restore(translated.ToString()));
-        }
-
-        return new TranslationResult(protectedText.Restore(translated.ToString()), "MyMemory 基础翻译");
-    }
-
-    private static string TryReadMyMemoryError(string responseBody)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(responseBody);
-            if (document.RootElement.TryGetProperty("responseDetails", out var detail))
-            {
-                return detail.ToString();
-            }
-        }
-        catch (JsonException)
-        {
-        }
-        return string.Empty;
-    }
-}
-
-internal static class TranslationLanguageCodes
-{
-    public static string ToTencent(string language) => language switch
-    {
-        "简体中文" => "zh",
-        "繁體中文" => "zh-TW",
-        "English" => "en",
-        "日本語" => "ja",
-        "한국어" => "ko",
-        "Français" => "fr",
-        "Español" => "es",
-        "Português" => "pt",
-        "Deutsch" => "de",
-        _ => "zh"
-    };
-
-    public static string ToMyMemoryTarget(string language) => language switch
-    {
-        "简体中文" => "zh-CN",
-        "繁體中文" => "zh-TW",
-        "English" => "en",
-        "日本語" => "ja",
-        "한국어" => "ko",
-        "Français" => "fr",
-        "Español" => "es",
-        "Português" => "pt",
-        "Deutsch" => "de",
-        _ => "zh-CN"
-    };
-
-    public static string ToMyMemorySource(string sourceLanguage, string text)
-    {
-        if (sourceLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
-            return "zh-CN";
-        if (sourceLanguage.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
-            return "ja";
-        if (sourceLanguage.StartsWith("ko", StringComparison.OrdinalIgnoreCase))
-            return "ko";
-        if (sourceLanguage.StartsWith("en", StringComparison.OrdinalIgnoreCase))
-            return "en";
-        if (sourceLanguage.StartsWith("fr", StringComparison.OrdinalIgnoreCase))
-            return "fr";
-        if (sourceLanguage.StartsWith("es", StringComparison.OrdinalIgnoreCase))
-            return "es";
-        if (sourceLanguage.StartsWith("pt", StringComparison.OrdinalIgnoreCase))
-            return "pt";
-        if (sourceLanguage.StartsWith("de", StringComparison.OrdinalIgnoreCase))
-            return "de";
-        return text.Any(character => character is >= '\u4e00' and <= '\u9fff') ? "zh-CN" : "en";
-    }
-}
-
-internal static class TranslationTextChunker
-{
-    public static IReadOnlyList<string> SplitByCharacters(string text, int maximumCharacters) =>
-        Split(text, rune => rune.Utf16SequenceLength, maximumCharacters);
-
-    public static IReadOnlyList<string> SplitByUtf8Bytes(string text, int maximumBytes) =>
-        Split(text, rune => rune.Utf8SequenceLength, maximumBytes);
-
-    private static IReadOnlyList<string> Split(string text, Func<Rune, int> measure, int maximum)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximum);
-        if (text.Length == 0)
-        {
-            return [text];
-        }
-
-        var chunks = new List<string>();
-        var start = 0;
-        while (start < text.Length)
-        {
-            var end = start;
-            var lastBreak = -1;
-            var size = 0;
-            while (end < text.Length)
-            {
-                var rune = Rune.GetRuneAt(text, end);
-                var runeSize = measure(rune);
-                if (size + runeSize > maximum)
-                {
-                    if (end == start)
-                    {
-                        throw new ArgumentOutOfRangeException(nameof(maximum), "The limit must fit a complete Unicode character.");
-                    }
-                    break;
-                }
-                var next = end + rune.Utf16SequenceLength;
-                if (rune.Value is '\n' or '\r' or '。' or '！' or '？' or '.' or '!' or '?' or ' ')
-                {
-                    lastBreak = next;
-                }
-                size += runeSize;
-                end = next;
-            }
-            if (end == text.Length)
-            {
-                chunks.Add(text[start..]);
-                break;
-            }
-            var splitAt = lastBreak > start ? lastBreak : end;
-            splitAt = KeepProtectionMarkerWhole(text, start, splitAt);
-            chunks.Add(text[start..splitAt]);
-            start = splitAt;
-        }
-        return chunks;
-    }
-
-    private static int KeepProtectionMarkerWhole(string text, int chunkStart, int splitAt)
-    {
-        const string markerStartText = "QZXKEEP";
-        const string markerEndText = "WZXQ";
-        var markerStart = -1;
-        var candidate = text.IndexOf(markerStartText, chunkStart, StringComparison.Ordinal);
-        while (candidate >= chunkStart && candidate < splitAt)
-        {
-            markerStart = candidate;
-            candidate = text.IndexOf(
-                markerStartText,
-                candidate + markerStartText.Length,
-                StringComparison.Ordinal);
-        }
-        if (markerStart < 0)
-        {
-            return splitAt;
-        }
-        var markerEnd = text.IndexOf(markerEndText, markerStart + markerStartText.Length, StringComparison.Ordinal);
-        if (markerEnd < 0 || markerEnd + markerEndText.Length <= splitAt)
-        {
-            return splitAt;
-        }
-        return markerStart > chunkStart ? markerStart : markerEnd + markerEndText.Length;
-    }
 }

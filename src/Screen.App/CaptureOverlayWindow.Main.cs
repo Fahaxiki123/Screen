@@ -37,7 +37,7 @@ internal sealed partial class CaptureOverlayWindow : Window
     private readonly IScreenCaptureService _captureService;
     private readonly IOcrEngine _ocrEngine;
     private readonly ITranslationProvider _translationProvider;
-    private readonly CredentialService _credentialService;
+    private readonly ICredentialStore _credentialService;
     private readonly CaptureSurface _surface;
     private readonly Canvas _root;
     private readonly SquircleGlassBorder _modeBar;
@@ -84,7 +84,7 @@ internal sealed partial class CaptureOverlayWindow : Window
         PinWindowManager pinManager,
         IOcrEngine ocrEngine,
         ITranslationProvider translationProvider,
-        CredentialService credentialService,
+        ICredentialStore credentialService,
         JsonSettingsStore settingsStore,
         bool recordingMode = false)
     {
@@ -139,23 +139,39 @@ internal sealed partial class CaptureOverlayWindow : Window
         Panel.SetZIndex(_toolbar, 20);
         Panel.SetZIndex(_stylePanel, 21);
 
-        _ocrCard = new OcrCard(ocrEngine, _surface.RenderSelection, TryExtractDirectTextAsync)
+        _ocrCard = new OcrCard(ocrEngine, _surface.RenderSelection, TryExtractDirectTextAsync, () => _textCache.Revision)
         {
             Visibility = Visibility.Collapsed
         };
+        _ocrCard.RecognitionCompleted += (_, args) => OnOcrCardRecognitionCompleted(args);
+        _ocrCard.EditCommitted += (revision, text, isDirectText) =>
+            _textCache.TryStoreCardSource(revision, text, OcrQualityEvaluator.DetectLanguage(text), "已编辑文本",
+                cloudSatisfied: false, isEdited: true, isDirectText: isDirectText);
+        _ocrCard.TranslateRequested += async (_, request) => await TranslateFromOcrCardAsync(request);
         _root.Children.Add(_ocrCard);
         _translationCard = new TranslationCard { Visibility = Visibility.Collapsed };
-        _translationCard.RetranslateRequested += (_, _) => TranslateWithCurrentLanguage(this, new RoutedEventArgs());
+        _translationCard.RetranslateRequested += async (_, _) => await RetranslateCurrentCardAsync();
         _translationCard.TargetLanguageChanged += async (_, language) =>
         {
             try
             {
                 _settingsStore.Update(latest => latest.Translation = latest.Translation with { TargetLanguage = language });
-                await TranslateSelectionAsync(language);
+                await RetranslateCurrentCardAsync(language);
             }
             catch (Exception exception)
             {
                 _translationCard.SetError(exception.Message);
+            }
+        };
+        _translationCard.SwitchToInPlaceRequested += async (_, _) =>
+        {
+            try
+            {
+                await TranslateSelectionAsync(_translationCard.TargetLanguage, displayModeOverride: TranslationDisplayMode.InPlace);
+            }
+            catch (Exception exception)
+            {
+                SetInPlaceStatus($"翻译失败：{exception.Message}");
             }
         };
         _root.Children.Add(_translationCard);

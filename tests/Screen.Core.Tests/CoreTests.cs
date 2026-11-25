@@ -695,11 +695,11 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public void NewSettingsDefaultToTencentWithMyMemoryFallback()
+    public void NewSettingsDefaultToEdgeFreeTranslationWithFallback()
     {
         var settings = new AppSettings();
 
-        Assert.AreEqual(TranslationProviderKind.Tencent, settings.Translation.Provider);
+        Assert.AreEqual(TranslationProviderKind.Edge, settings.Translation.Provider);
         Assert.IsTrue(settings.Translation.EnableMyMemoryFallback);
         Assert.AreEqual("ap-guangzhou", settings.Translation.TencentRegion);
     }
@@ -878,28 +878,37 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task MissingTencentCredentialsFallsBackToMyMemory()
+    public async Task MissingTencentCredentialsFallsBackToFreeProviders()
     {
+        var hosts = new List<string>();
         using var client = new HttpClient(new StubHttpHandler((request, _) =>
         {
-            Assert.AreEqual("api.mymemory.translated.net", request.RequestUri?.Host);
+            var host = request.RequestUri!.Host;
+            hosts.Add(host);
+            if (host == "edge.microsoft.com")
+            {
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+            }
+            Assert.AreEqual("api.mymemory.translated.net", host);
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
                 Content = new StringContent("{\"responseData\":{\"translatedText\":\"你好 &amp; 欢迎\"},\"responseStatus\":200}")
             });
         }));
         var provider = new OnlineTranslationProvider(client);
+        var profile = new AppSettings().Translation with { Provider = TranslationProviderKind.Tencent };
 
         var result = await provider.TranslateAsync(
             "Hello and welcome",
             "en-US",
-            new AppSettings().Translation,
+            profile,
             new TranslationCredentials());
 
         Assert.AreEqual("你好 & 欢迎", result.Text);
         Assert.IsTrue(result.UsedFallback);
         Assert.AreEqual("MyMemory 基础翻译", result.ProviderName);
         StringAssert.Contains(result.PrimaryFailure, "SecretId");
+        CollectionAssert.AreEqual(new[] { "edge.microsoft.com", "edge.microsoft.com", "api.mymemory.translated.net" }, hosts);
     }
 
     [TestMethod]

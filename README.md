@@ -10,18 +10,19 @@
 
 **[获取最新稳定版](https://github.com/Fahaxiki123/Screen/releases/latest)** · [全部版本](https://github.com/Fahaxiki123/Screen/releases)
 
-截至 **2026-11-23** 最新发布版本：**2.0.0**。以下程序包、校验文件和源码均对应 `v2.0.0`；后续升级使用上方最新稳定版入口。
+截至 **2026-11-25** 最新发布版本：**2.0.2**。以下程序包、校验文件和源码均对应 `v2.0.2`；后续升级使用上方最新稳定版入口。
 
-**[下载 2.0.0 Windows x64 安装包（.exe，推荐）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/Flick-2.0.0-win-x64-Setup.exe)** · **[绿色便携版（.zip）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/Flick-2.0.0-win-x64-Portable.zip)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.0) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.0/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v2.0.0)
+**[下载 2.0.2 Windows x64 安装包（.exe，推荐）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.2/Flick-2.0.2-win-x64-Setup.exe)** · **[绿色便携版（.zip）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.2/Flick-2.0.2-win-x64-Portable.zip)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.2) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.2/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v2.0.2)
 
 安装包与绿色便携版均支持 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64，已完整自包含 .NET Desktop Runtime、Visual C++ 运行库、本地 PaddleOCR 模型与 FFmpeg，无需管理员权限。原有 `%LOCALAPPDATA%\Screen` 设置与 Windows 凭据管理器中的 API 密钥完全保留兼容。更新前请完成截图或录屏并从托盘退出旧版程序。
 
-### 2.0.0 主要更新
+### 2.0.2 主要更新
 
-- **全新品牌名称与高定图标**：正式定名 **Flick**，启用全新 Apple Liquid Glass 质感虚线选区 + 立体十字准星图标，覆盖窗口、任务栏、16px 系统托盘、设置窗头部与安装器。
-- **全面重构浅色磨砂 × 液态玻璃 UI**：引入 Apple G2 连续曲率（Squircle）容器、纯净矢量图标、圆形光学放大镜、顶部模式切换条、编排弹出主工具栏与跟随样式栏、完成对勾轻提示与录屏灵动岛。
-- **设置界面重塑（无缝分栏 + 融合动效）**：移除冗余悬浮托板与多层重阴影，改为左右无缝分栏与极细发丝边纯白卡片；实现同分组内白卡平滑平移、跨分组原地淡入淡出及同组鼠标悬停淡灰磁吸追踪；通用页新增「运行状态与版本」概览。
-- **支持 MP4 / GIF 双格式录屏导出**：录屏准备栏一键切换 MP4 与 GIF，GIF 模式自动禁用音轨并联动录后预览与裁切导出。
+- **开箱即用的免费在线翻译主通道**：默认启用免配置的免费在线翻译（自动识别源语种、原生支持原位批量翻译与中英混排），旧版未配置腾讯密钥的用户升级后自动平滑迁移，安装后零配置即可获得流畅稳定的翻译体验。
+- **更可靠的 AI 自然翻译与增量回退**：内置智谱、DeepSeek、通义千问、硅基流动、OpenAI 5 组最新官方模型预设，切换地址自动隔离密钥；新增 AI 原位结构化批量翻译、流式有效译文进度超时保护、分片/区域级增量保留与多跳失败回退。
+- **OCR 与翻译交互闭环升级**：新增单次截图选区版本化缓存，避免重复识别；OCR 卡片支持手工改字后直接翻译并保留改稿；翻译卡片新增「原文」折叠编辑与「原位」快捷切换，原位悬浮条新增零请求切回「卡片」。
+- **隐私遮挡与日志安全加固**：选区添加任意标注（马赛克、画笔、矩形、椭圆、线条、箭头、文字、序号）后自动禁用底层窗口直读、按标注后渲染像素执行 OCR，防止被遮挡文字泄漏；翻译失败与回退日志全面改为结构化脱敏诊断，绝不将截图文本或网关回显写入磁盘日志。
+- **设置页合并精简**：将「文字识别」与「翻译接口」合并为「识别与翻译」单页，低频的 OCR 策略、AI 竞速/快退与保底回退收进默认折叠的「高级选项」，修改翻译配置时自动复位连接测试状态并取消在途旧请求。
 
 ## 已实现的功能
 
@@ -29,11 +30,11 @@
 - 矩形、椭圆、线条、箭头、画笔、文字、序号、像素/模糊马赛克，标注新增与修改支持撤销重做。
 - 向下自动/手动滚动截图、结果编辑和裁剪。
 - 桌面贴图、贴图穿透与恢复。
-- 随程序分发的 PaddleOCR 模型、腾讯云 OCR、本地/云端识别策略。
-- 腾讯机器翻译、OpenAI 兼容 AI 自然翻译、MyMemory，支持失败回退和模型竞速。
-- OCR/翻译等待时在选区内上下往返扫光，翻译可在设置的“翻译接口 → 翻译显示”切换浮动卡片与原位覆盖。
-- 原位译文按识别位置覆盖，可对照原文、复制译文，并将当前显示画面复制、保存 PNG 或贴图。
-- 单显示器或跨显示器区域录屏、暂停恢复、系统声/麦克风、点击效果、MP4、录后预览与时长裁切。
+- 随程序分发的 PaddleOCR 模型、腾讯云 OCR、本地/云端识别策略；OCR 卡片支持手工编辑纠错后直接翻译。
+- 默认免配置免费在线翻译，同时支持 OpenAI 兼容 AI 自然翻译（内置多厂商预设）、腾讯机器翻译与 MyMemory 兜底，支持分片/区域级增量保留、失败回退和模型竞速。
+- OCR/翻译等待时在选区内上下往返扫光，翻译可在设置的「识别与翻译」切换浮动卡片与原位覆盖，并在卡片与原位悬浮条间一键互切。
+- 原位译文按识别位置覆盖，可对照原文、复制译文、切回卡片查看，并将当前显示画面复制、保存 PNG 或贴图。
+- 单显示器或跨显示器区域录屏、暂停恢复、系统声/麦克风、点击效果、MP4 / GIF、录后预览与时长裁切。
 - 热键、启动项与保存目录设置。
 
 原位翻译通过局部底色覆盖文字，复杂图片背景可能出现覆盖痕迹，过长译文会缩小字号。单显示器录屏走 DXGI，要求 SDR。跨显示器选区按桌面物理像素采集，显示器布局中的空白区域填黑。当前翻译提供方以上述列表为准，本地 OCR 模型随项目提供。
@@ -47,11 +48,11 @@
 - Git 和 Git LFS，FFmpeg 二进制通过 Git LFS 保存。
 - 构建安装包时另需 PowerShell 7 和 NSIS 3.12。
 
-复现上方 2.0.0 版本时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
+复现上方 2.0.2 版本时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
 
 ```powershell
 git lfs install
-git clone --branch v2.0.0 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
+git clone --branch v2.0.2 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
 Set-Location 开发工程
 git lfs pull
 ```
@@ -112,7 +113,7 @@ dotnet run --project src/Screen.App/Screen.App.csproj -c Release
 ./tools/build-installer.ps1 -CompilerPath 'C:\Tools\NSIS\makensis.exe'
 ```
 
-脚本也会从 `PATH`、常见 NSIS 安装目录及 `artifacts/tooling/nsis-3.12/Bin/makensis.exe` 自动发现编译器。打包使用上一层已有的 `正式版` 目录，应先完成发布与功能检查。构建成功后，`../安装包` 中保留当前版本的 `Screen-<版本>-win-x64-Setup.exe`。
+脚本也会从 `PATH`、常见 NSIS 安装目录及 `artifacts/tooling/nsis-3.12/Bin/makensis.exe` 自动发现编译器。打包使用上一层已有的 `正式版` 目录，应先完成发布与功能检查。构建成功后，`../安装包` 中保留当前版本的 `Flick-<版本>-win-x64-Setup.exe`。
 
 安装器按当前用户安装，可直接使用标准用户权限，包含 .NET、OCR 模型、FFmpeg 和 Visual C++ 运行库。用户作品、个人配置与密钥由各用户自行管理，默认保存目录为使用者自己的图片目录，云服务配置由使用者自行填写。
 
@@ -141,8 +142,8 @@ OCR/翻译文本获得焦点时，复制、换行和撤销交给文本框处理�
 - 日志位于 `%LOCALAPPDATA%/Screen/logs`。
 - 录屏保存失败时，提示会给出恢复素材目录。请保留该目录，直至完成素材恢复。
 - 裁切复制会在原录屏目录生成独立 MP4，关闭预览后仍可使用已复制文件。
-- AI 失败且已配置腾讯密钥时，会尝试腾讯。公共 MyMemory 回退开关控制之后是否向 MyMemory 发送原文。直接选择 MyMemory 时始终使用该服务。
-- OCR 联网行为以文字识别页的策略和说明为准。
+- 默认使用免配置免费在线翻译；切换 AI 自然翻译或腾讯机器翻译时，若已开启保底开关，失败后依次回退免费在线翻译与 MyMemory（AI 失败且已配置腾讯密钥时会先尝试腾讯）。直接选择 MyMemory 时始终使用该服务。
+- OCR 联网行为以「识别与翻译 → 高级选项」中的策略和说明为准；选区添加任意标注后自动按标注后渲染像素识别，避免被遮挡文字从底层窗口泄漏。
 
 ## 验证边界
 
