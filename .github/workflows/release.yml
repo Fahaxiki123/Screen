@@ -1,0 +1,140 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout (LFS objects restored from cache below)
+        uses: actions/checkout@v4
+
+      - name: Compute LFS object key
+        id: lfs-key
+        shell: pwsh
+        run: |
+          $ids = git lfs ls-files --long | Sort-Object
+          $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($ids -join "`n"))))
+          "key=lfs-$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Restore LFS cache
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: ${{ steps.lfs-key.outputs.key }}
+
+      - name: Pull LFS objects
+        run: git lfs pull
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Verify version metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = [xml](Get-Content -LiteralPath 'src\Screen.App\Screen.App.csproj' -Raw)
+          $version = [string]($project.Project.PropertyGroup | Where-Object Version | Select-Object -First 1).Version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Unsupported version: $version" }
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "v$version" }
+          if ($tag -ne "v$version") { throw "Tag '$tag' does not match Screen.App.csproj version '$version'." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Restore, build, test, format check
+        shell: pwsh
+        run: ./verify.ps1
+
+      - name: Publication flow checks
+        shell: pwsh
+        run: ./tools/Test-PublishFlow.ps1
+
+      - name: Install NSIS 3.12 (portable)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedSha = '56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f'
+          $toolingDir = Join-Path $PWD 'artifacts\tooling'
+          $zipPath = Join-Path $toolingDir 'nsis-3.12.zip'
+          New-Item -ItemType Directory -Path $toolingDir -Force | Out-Null
+          curl.exe -fsSL -A 'Wget/1.21' -o $zipPath 'https://sourceforge.net/projects/nsis/files/NSIS%203/3.12/nsis-3.12.zip/download'
+          $actualSha = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha -ne $expectedSha) { throw "NSIS 3.12 SHA-256 mismatch: expected $expectedSha, got $actualSha" }
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $toolingDir -Force
+
+      - name: Publish self-contained app and build NSIS installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.meta.outputs.version }}'
+          $productRoot = Join-Path $env:RUNNER_TEMP 'flick-release'
+          if (Test-Path -LiteralPath $productRoot) { Remove-Item -LiteralPath $productRoot -Recurse -Force }
+          ./rebuild-and-restart.ps1 -NoRestart -ProductRoot $productRoot
+          $result = ./tools/build-installer.ps1 -ProductRoot $productRoot
+          $installer = $result.Installer
+          $installerName = Split-Path -Leaf $installer
+          $sha256 = $result.SHA256.ToLowerInvariant()
+          $sumsPath = Join-Path (Split-Path -Parent $installer) 'SHA256SUMS.txt'
+          [IO.File]::WriteAllText($sumsPath, "$sha256  $installerName`n", [Text.UTF8Encoding]::new($false))
+          Write-Host "Built $installerName ($sha256)"
+
+      - name: Prepare release notes and publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.meta.outputs.version }}'
+          $tag = '${{ steps.meta.outputs.tag }}'
+          $installerDir = Join-Path $env:RUNNER_TEMP 'flick-release\安装包'
+          $installer = Join-Path $installerDir "Flick-$version-win-x64-Setup.exe"
+          $sums = Join-Path $installerDir 'SHA256SUMS.txt'
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+
+          $readme = Get-Content -LiteralPath 'README.md' -Raw
+          $pattern = "(?ms)^###\s+$([regex]::Escape($version))\s+主要更新\r?\n(.*?)(?=^##\s|\z)"
+          if ($readme -match $pattern) {
+              $body = $Matches[1].Trim()
+          }
+          else {
+              $body = "Flick $version Windows x64 离线安装包与 SHA-256 校验文件。"
+          }
+          $notesLines = @(
+              $body,
+              '',
+              '---',
+              '',
+              '### 安装说明',
+              '',
+              '- 支持 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64，完整自包含 .NET 10 Desktop Runtime、Visual C++ 运行库、本地 PaddleOCR 模型与 FFmpeg，无需管理员权限。',
+              '- 更新前请先完成截图或录屏并从托盘退出旧版程序；原有 `%LOCALAPPDATA%\Screen` 配置与 Windows 凭据管理器中的密钥完整保留兼容。'
+          )
+          [IO.File]::WriteAllText($notesPath, (($notesLines -join "`n").Trim() + "`n"), [Text.UTF8Encoding]::new($false))
+
+          $exists = $false
+          & gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) { $exists = $true }
+
+          if ($exists) {
+              gh release edit $tag --title "Flick $version" --notes-file $notesPath
+              gh release upload $tag $installer $sums --clobber
+          }
+          else {
+              gh release create $tag $installer $sums --title "Flick $version" --notes-file $notesPath
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish GitHub Release $tag." }

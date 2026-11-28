@@ -10,6 +10,12 @@ public interface IScreenCaptureService : IDisposable
     /// service recreates its session lazily on the next capture.
     /// </summary>
     void ReleaseSessions() { }
+
+    /// <summary>
+    /// Pre-loads native capture assemblies and graphics driver dependencies so
+    /// the first user-triggered screenshot does not pay a multi-second cold start.
+    /// </summary>
+    Task WarmUpAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
 public interface IOcrEngine
@@ -24,6 +30,12 @@ public interface IOcrEngine
         OcrRecognitionPurpose purpose,
         CancellationToken cancellationToken = default) =>
         RecognizeAsync(image, languageTag, cancellationToken);
+
+    /// <summary>
+    /// Pre-initializes the underlying OCR engine so the upcoming recognition request
+    /// does not wait on model loading.
+    /// </summary>
+    Task WarmUpAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
 public interface ITranslationProvider

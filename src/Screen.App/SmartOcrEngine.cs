@@ -15,6 +15,9 @@ internal sealed class SmartOcrEngine(
 
     public bool IsLanguageAvailable(string languageTag) => true;
 
+    public Task WarmUpAsync(CancellationToken cancellationToken = default) =>
+        local.WarmUpAsync(cancellationToken);
+
     public Task<OcrDocument> RecognizeAsync(
         PixelBuffer image,
         string languageTag,

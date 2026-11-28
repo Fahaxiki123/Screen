@@ -1,6 +1,8 @@
 using System.Drawing;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Threading;
+using Microsoft.Win32;
 using Screen.Core;
 using Forms = System.Windows.Forms;
 
@@ -25,9 +27,11 @@ internal sealed class AppHost : IDisposable
     private SettingsWindow? _settingsWindow;
     private TrayMenuWindow? _trayMenu;
     private readonly Forms.ContextMenuStrip _trayAnchor = new();
+    private readonly CancellationTokenSource _lifetime = new();
     private RecordingController? _recordingController;
     private bool _recordingFlowActive;
     private bool _settingsLoadFailed;
+    private bool _sessionEventsAttached;
     private bool _exiting;
 
     public AppHost()
@@ -51,7 +55,7 @@ internal sealed class AppHost : IDisposable
             SimpleLogger.LogWarning($"Settings load failed, using defaults: {exception.Message}");
         }
         _hotKeyWindow = new HotKeyWindow();
-        _captureService = new HybridScreenCaptureService();
+        _captureService = new HybridScreenCaptureService(deferPrimaryUntilWarmed: true);
         _pinWindowManager = new PinWindowManager();
         _pinWindowManager.ClickThroughEnabled += (_, _) => ShowFirstClickThroughHint();
         _ocrEngine = new SmartOcrEngine(
@@ -95,7 +99,7 @@ internal sealed class AppHost : IDisposable
             }
             if (!RecordingActive())
             {
-                await _coordinator.StartCaptureAsync();
+                await _coordinator.StartCaptureAsync("tray-double-click");
             }
         };
 
@@ -103,12 +107,30 @@ internal sealed class AppHost : IDisposable
         {
             if (!RecordingActive())
             {
-                _ = _coordinator.StartCaptureAsync();
+                _ = _coordinator.StartCaptureAsync("hotkey");
             }
         };
         _hotKeyWindow.ClickThroughRecoveryRequested += (_, _) => RecoverClickThrough(showConfirmation: true);
         _hotKeyWindow.RecordRequested += async (_, _) => await StartRecordingSelectionAsync();
-        RegisterConfiguredShortcuts();
+        var shortcutsRegistered = RegisterConfiguredShortcuts(showBalloonOnFailure: false);
+        if (!shortcutsRegistered)
+        {
+            _ = RetryInitialShortcutRegistrationAsync(_lifetime.Token);
+        }
+        if (!_settingsLoadFailed)
+        {
+            var startWithWindows = _settings.StartWithWindows;
+            _ = Task.Run(() =>
+            {
+                if (!_exiting)
+                {
+                    _startupService.SyncWithSettings(startWithWindows);
+                }
+            });
+        }
+        SystemEvents.SessionSwitch += OnSessionSwitch;
+        _sessionEventsAttached = true;
+        _ = WarmUpAfterStartupAsync(_lifetime.Token);
         _notifyIcon.Text = $"Flick — {_settings.HotKey} 截图";
         // WinForms delivers shell menu requests (including keyboard activation) through Opening.
         _trayAnchor.Opening += (_, e) =>
@@ -141,7 +163,7 @@ internal sealed class AppHost : IDisposable
     {
         if (!RecordingActive())
         {
-            _ = _coordinator.StartCaptureAsync();
+            _ = _coordinator.StartCaptureAsync("single-instance");
         }
     }
 
@@ -306,7 +328,7 @@ internal sealed class AppHost : IDisposable
         menu.AddItem("截图", _settings.HotKey, "rect", async () =>
         {
             if (!RecordingActive())
-                await _coordinator.StartCaptureAsync();
+                await _coordinator.StartCaptureAsync("tray-menu");
         }, capturesDesktop: true);
         menu.AddItem("录屏", _settings.RecordHotKey, "video", StartRecordingSelectionAsync, capturesDesktop: true);
         menu.AddItem("解除全部贴图穿透", _settings.ClickThroughRecoveryHotKey, "cursor", () =>
@@ -422,24 +444,185 @@ internal sealed class AppHost : IDisposable
         _notifyIcon.Text = $"Flick — {_settings.HotKey} 截图";
     }
 
-    private void RegisterConfiguredShortcuts()
+    private bool RegisterConfiguredShortcuts(bool force = false, bool showBalloonOnFailure = true)
     {
+        var allRegistered = true;
         if (!_hotKeyWindow.TrySetPriority(_settings.PreferScreenHotKeys))
         {
-            _notifyIcon.ShowBalloonTip(5000, "Flick 快捷键", "无法启用优先模式，已使用普通快捷键注册。", Forms.ToolTipIcon.Warning);
-        }
-        void RefreshShortcut(string description, string key, Func<string, bool> register)
-        {
-            if (!register(key))
+            allRegistered = false;
+            SimpleLogger.LogWarning($"Unable to enable priority hotkey mode (win32 error: {_hotKeyWindow.LastNativeError}).");
+            if (showBalloonOnFailure)
             {
-                _notifyIcon.ShowBalloonTip(5000, "Flick 快捷键冲突",
-                    $"{description}快捷键 {key} 无法注册，仍可使用托盘菜单。", Forms.ToolTipIcon.Warning);
-                SimpleLogger.LogWarning($"{description} shortcut could not be registered: {key}");
+                _notifyIcon.ShowBalloonTip(5000, "Flick 快捷键", "无法启用优先模式，已使用普通快捷键注册。", Forms.ToolTipIcon.Warning);
+            }
+        }
+        void RefreshShortcut(string description, string key, Func<string, bool, bool> register)
+        {
+            if (!register(key, force))
+            {
+                allRegistered = false;
+                if (showBalloonOnFailure)
+                {
+                    _notifyIcon.ShowBalloonTip(5000, "Flick 快捷键冲突",
+                        $"{description}快捷键 {key} 无法注册，仍可使用托盘菜单。", Forms.ToolTipIcon.Warning);
+                }
+                SimpleLogger.LogWarning(
+                    $"{description} shortcut could not be registered: {key} (win32 error: {_hotKeyWindow.LastNativeError})");
             }
         }
         RefreshShortcut("截图", _settings.HotKey, _hotKeyWindow.RegisterCaptureHotKey);
         RefreshShortcut("恢复贴图", _settings.ClickThroughRecoveryHotKey, _hotKeyWindow.RegisterClickThroughRecoveryHotKey);
         RefreshShortcut("录屏", _settings.RecordHotKey, _hotKeyWindow.RegisterRecordHotKey);
+        if (allRegistered)
+        {
+            SimpleLogger.LogInfo(
+                $"Shortcuts ready (capture: {_settings.HotKey}, recovery: {_settings.ClickThroughRecoveryHotKey}, " +
+                $"record: {_settings.RecordHotKey}, priority: {_settings.PreferScreenHotKeys})");
+        }
+        return allRegistered;
+    }
+
+    private async Task RetryInitialShortcutRegistrationAsync(CancellationToken cancellationToken)
+    {
+        int[] delaysMs = [2000, 5000, 10000];
+        for (var attempt = 0; attempt < delaysMs.Length; attempt++)
+        {
+            try
+            {
+                await Task.Delay(delaysMs[attempt], cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (_exiting || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var isFinalAttempt = attempt == delaysMs.Length - 1;
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher is null || dispatcher.HasShutdownStarted)
+            {
+                return;
+            }
+
+            var succeeded = await dispatcher.InvokeAsync(() =>
+                _exiting || _settingsWindow is not null || RegisterConfiguredShortcuts(force: false, showBalloonOnFailure: isFinalAttempt));
+            if (succeeded)
+            {
+                SimpleLogger.LogInfo($"Shortcuts recovered on startup retry #{attempt + 1}.");
+                return;
+            }
+        }
+    }
+
+    private async Task WarmUpAfterStartupAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Yield briefly so App.OnStartup finishes signaling ready and enters the message loop.
+            await Task.Delay(150, cancellationToken).ConfigureAwait(false);
+            if (_exiting || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            // Stage 0 (instant, signed system assemblies only): warm GDI+ and the real
+            // CaptureOverlayWindow immediately so an F4 press right after Windows boot
+            // renders in ~100 ms without waiting for unsigned DXGI/Vortice cloud verification.
+            await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _ = Forms.Screen.FromPoint(new System.Drawing.Point(0, 0));
+                using var bitmap = new Bitmap(1, 1, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                using var graphics = Graphics.FromImage(bitmap);
+                graphics.Clear(Color.Black);
+            }, cancellationToken).ConfigureAwait(false);
+            if (_exiting || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher is not null && !dispatcher.HasShutdownStarted)
+            {
+                _ = dispatcher.BeginInvoke(
+                    DispatcherPriority.ApplicationIdle,
+                    new Action(() =>
+                    {
+                        if (!_exiting && !cancellationToken.IsCancellationRequested)
+                        {
+                            _coordinator.WarmUpOverlayPipeline();
+                        }
+                    }));
+            }
+
+            // Stage 1: warm OS/AV image caches for unsigned DXGI/Vortice assemblies in an
+            // isolated child process so LdrpLoaderLock never stalls the main UI/hotkey thread,
+            // then enable the live DXGI primary capture path.
+            await AssemblyPreloadWorker.RunStageAsync(
+                AssemblyPreloadWorker.CaptureStage,
+                "DXGI capture",
+                cancellationToken).ConfigureAwait(false);
+            if (_exiting || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            await _captureService.WarmUpAsync(cancellationToken).ConfigureAwait(false);
+            if (_exiting || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            // Stage 2: warm OS/AV image caches for OCR & Settings icon assemblies in an isolated
+            // child process without loading the ~400 MB ONNX models or stalling F4.
+            await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            if (_exiting || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            await AssemblyPreloadWorker.RunStageAsync(
+                AssemblyPreloadWorker.OcrStage,
+                "OCR",
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogWarning($"Startup warm-up skipped: {exception.Message}");
+        }
+    }
+
+    private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
+    {
+        if (_exiting || e.Reason is not (SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect))
+        {
+            return;
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        _ = dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_exiting)
+            {
+                return;
+            }
+            _captureService.ReleaseSessions();
+            _hotKeyWindow.RefreshHookIfNeeded();
+            RegisterConfiguredShortcuts(force: true, showBalloonOnFailure: false);
+            _ = _captureService.WarmUpAsync(_lifetime.Token);
+        }));
     }
 
     private void ShowFirstClickThroughHint()
@@ -472,6 +655,13 @@ internal sealed class AppHost : IDisposable
 
     public void Dispose()
     {
+        _exiting = true;
+        _lifetime.Cancel();
+        if (_sessionEventsAttached)
+        {
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
+            _sessionEventsAttached = false;
+        }
         _recordingController?.Dispose();
         _recordingController = null;
         _trayMenu?.Close();
@@ -485,5 +675,6 @@ internal sealed class AppHost : IDisposable
         _captureService.Dispose();
         _ocrEngine.Dispose();
         _httpClient.Dispose();
+        _lifetime.Dispose();
     }
 }

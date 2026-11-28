@@ -55,6 +55,7 @@ internal sealed partial class CaptureOverlayWindow : Window
     private readonly Dictionary<CaptureTool, Button> _toolButtons = [];
     private readonly Dictionary<CaptureEntryMode, Button> _modeButtons = [];
     private bool _recordingMode;
+    private readonly bool _warmUp;
     private SquircleGlassBorder? _recordingPanel;
     private RecordingExportFormat _recordingFormat;
     private bool _showCursorChoice = true;
@@ -86,7 +87,8 @@ internal sealed partial class CaptureOverlayWindow : Window
         ITranslationProvider translationProvider,
         ICredentialStore credentialService,
         JsonSettingsStore settingsStore,
-        bool recordingMode = false)
+        bool recordingMode = false,
+        bool warmUp = false)
     {
         _frame = frame;
         _captureService = captureService;
@@ -96,6 +98,7 @@ internal sealed partial class CaptureOverlayWindow : Window
         _credentialService = credentialService;
         _settingsStore = settingsStore;
         _recordingMode = recordingMode;
+        _warmUp = warmUp;
         if (recordingMode)
         {
             _entryMode = CaptureEntryMode.Recording;
@@ -103,9 +106,20 @@ internal sealed partial class CaptureOverlayWindow : Window
         Title = recordingMode ? "Flick 录屏" : "Flick 截图";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
-        Topmost = true;
+        Topmost = !warmUp;
         ShowInTaskbar = false;
-        Background = Brushes.Black;
+        ShowActivated = !warmUp;
+        Background = warmUp ? Brushes.Transparent : Brushes.Black;
+        if (warmUp)
+        {
+            AllowsTransparency = true;
+            Opacity = 0;
+            IsHitTestVisible = false;
+            Left = -32000;
+            Top = -32000;
+            Width = 1;
+            Height = 1;
+        }
         Cursor = Cursors.Cross;
 
         _root = new Canvas { ClipToBounds = true };
@@ -224,6 +238,25 @@ internal sealed partial class CaptureOverlayWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
+        if (_warmUp)
+        {
+            if (handle != 0)
+            {
+                var exStyle = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GwlExStyle).ToInt64();
+                exStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate | NativeMethods.WsExTransparent;
+                NativeMethods.SetWindowLongPtr(handle, NativeMethods.GwlExStyle, (nint)exStyle);
+                NativeMethods.SetWindowPos(
+                    handle,
+                    new nint(1), // HWND_BOTTOM
+                    -32000,
+                    -32000,
+                    1,
+                    1,
+                    NativeMethods.SwpNoActivate);
+            }
+            return;
+        }
+
         var dpi = NativeMethods.GetDpiAtPoint(new NativeMethods.NativePoint(
             _frame.ScreenBounds.X + _frame.ScreenBounds.Width / 2,
             _frame.ScreenBounds.Y + _frame.ScreenBounds.Height / 2));

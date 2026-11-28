@@ -41,6 +41,56 @@ internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
 
     public bool IsLanguageAvailable(string languageTag) => !IsDisposed;
 
+    public async Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        if (IsDisposed || IsEngineLoaded)
+        {
+            return;
+        }
+        try
+        {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) when (IsDisposed)
+        {
+            return;
+        }
+        try
+        {
+            if (IsDisposed || _ocr is not null)
+            {
+                return;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            Volatile.Write(ref _lastActiveTimestamp, Stopwatch.GetTimestamp());
+            await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _ocr ??= CreateEngine(_modelRoot);
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            SimpleLogger.LogWarning($"Local OCR warm-up skipped: {exception.Message}");
+        }
+        finally
+        {
+            Volatile.Write(ref _lastActiveTimestamp, Stopwatch.GetTimestamp());
+            ScheduleIdleReleaseIfLoaded();
+            try
+            {
+                _gate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
     public Task<OcrDocument> RecognizeAsync(
         PixelBuffer image,
         string languageTag,
@@ -165,6 +215,7 @@ internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
 
     private static RapidOcr CreateEngine(string modelRoot)
     {
+        var timer = Stopwatch.StartNew();
         var engine = new RapidOcr();
         try
         {
@@ -180,6 +231,7 @@ internal sealed class PaddleOcrEngine : IOcrEngine, IDisposable
                     Path.Combine(modelRoot, "v6", "ppocrv6_small_dict.txt"))
             };
             engine.InitModels(modelSet);
+            SimpleLogger.LogInfo($"Initialized local PP-OCRv6 engine in {timer.Elapsed.TotalMilliseconds:F1} ms");
             return engine;
         }
         catch

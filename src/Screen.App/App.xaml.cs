@@ -16,6 +16,12 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (AssemblyPreloadWorker.TryRunFromArgs(e.Args))
+        {
+            Environment.Exit(0);
+            return;
+        }
+
         base.OnStartup(e);
         SimpleLogger.LogInfo(
             $"Screen started (version: {typeof(App).Assembly.GetName().Version}, " +

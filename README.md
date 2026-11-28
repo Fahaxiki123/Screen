@@ -10,19 +10,20 @@
 
 **[获取最新稳定版](https://github.com/Fahaxiki123/Screen/releases/latest)** · [全部版本](https://github.com/Fahaxiki123/Screen/releases)
 
-截至 **2026-11-25** 最新发布版本：**2.0.3**。以下程序包、校验文件和源码均对应 `v2.0.3`；后续升级使用上方最新稳定版入口。
+截至 **2026-11-28** 最新发布版本：**2.0.4**。以下程序包、校验文件和源码均对应 `v2.0.4`；后续升级使用上方最新稳定版入口。
 
-**[下载 2.0.3 Windows x64 安装包（.exe）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.3/Flick-2.0.3-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.3) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.3/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v2.0.3)
+**[下载 2.0.4 Windows x64 安装包（.exe）](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.4/Flick-2.0.4-win-x64-Setup.exe)** · [版本说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.4) · [SHA-256 校验文件](https://github.com/Fahaxiki123/Screen/releases/download/v2.0.4/SHA256SUMS.txt) · [同版本源码](https://github.com/Fahaxiki123/Screen/tree/v2.0.4)
 
 离线安装包支持 Windows 10 21H2（19044）及更新版本的 Windows 10 / Windows 11 x64，已完整自包含 .NET Desktop Runtime、Visual C++ 运行库、本地 PaddleOCR 模型与 FFmpeg，无需管理员权限。原有 `%LOCALAPPDATA%\Screen` 设置与 Windows 凭据管理器中的 API 密钥完全保留兼容。更新前请完成截图或录屏并从托盘退出旧版程序。
 
-### 2.0.3 主要更新
+### 2.0.4 主要更新
 
-- 翻译服务只保留两项：默认的免费在线翻译，以及可自行配置接口、模型和 API Key 的 AI 自然翻译。
-- 原先选择 MyMemory 或腾讯机器翻译的用户，升级后自动切回免费在线翻译，不用重新设置；已选 AI 的用户保留原配置。
-- 卡片翻译和原位翻译都不再向 MyMemory 或腾讯机器翻译发送请求。AI 翻译失败时仍可按设置回退到免费在线翻译；腾讯云 OCR 识字不受影响。
+- **开机并行自启，不再被其他开机项排队阻塞**：开机自启升级为当前用户任务计划程序登录任务（`Flick-AutoStart-<SID>`，`Normal` 优先级、无 72 小时自动终止限制），自动迁移并清理旧 `HKCU\Run` 启动项，同时尊重任务管理器/任务计划程序的手动禁用设置；卸载时同步清理登录任务。
+- **开机进桌面即可秒按快捷键截图**：移除截图遮罩层对未签名图标程序集的隐式依赖，开机就绪后立即预热微软签名 GDI 截屏通道与真实遮罩窗口；在 Windows 11 智能应用控制评估模式下刚进桌面按快捷键也能直接弹出截图框，后台由独立短生命周期子进程无阻塞分阶段预热 DXGI 后自动切回主通道。
+- **显著加快首次翻译与文字识别**：后台独立子进程预热 OCR 托管程序集（不常驻加载 400 MB 模型，保持低空闲内存），避免加载器锁阻塞主界面与快捷键；点击顶部模式栏「提取文字」或「翻译」时按需提前初始化本地 PP-OCRv6 引擎。
+- **全局快捷键容错与锁屏恢复**：启动注册快捷键失败时自动静默重试，锁屏解锁或切换控制台时自动释放陈旧 DXGI 会话、刷新低级键盘钩子并恢复快捷键，并补充启动、预热与分阶段截图耗时诊断日志。
 
-上一版更新见 [Flick 2.0.2 发布说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.2)。
+上一版更新见 [Flick 2.0.3 发布说明](https://github.com/Fahaxiki123/Screen/releases/tag/v2.0.3)。
 
 ## 已实现的功能
 
@@ -48,11 +49,11 @@
 - Git 和 Git LFS，FFmpeg 二进制通过 Git LFS 保存。
 - 构建安装包时另需 PowerShell 7 和 NSIS 3.12。
 
-复现上方 2.0.3 版本时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
+复现上方 2.0.4 版本时，使用同版本标签检出。在用于存放项目的父目录中执行以下命令；持续开发可另行使用 `main` 分支。
 
 ```powershell
 git lfs install
-git clone --branch v2.0.3 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
+git clone --branch v2.0.4 --single-branch https://github.com/Fahaxiki123/Screen.git 开发工程
 Set-Location 开发工程
 git lfs pull
 ```

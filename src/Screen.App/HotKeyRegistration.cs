@@ -14,13 +14,20 @@ internal sealed class HotKeyRegistration(
     private uint _modifiers;
     private uint _virtualKey;
 
+    public bool IsRegistered => _activeId is not null;
+
     public bool IsActiveId(int id) => _activeId == id;
 
-    public bool TryRegister(uint modifiers, uint virtualKey)
+    public bool TryRegister(uint modifiers, uint virtualKey, bool force = false)
     {
-        if (_activeId is not null && _modifiers == modifiers && _virtualKey == virtualKey)
+        if (!force && _activeId is not null && _modifiers == modifiers && _virtualKey == virtualKey)
         {
             return true;
+        }
+        if (force && _activeId is { } existingId && _modifiers == modifiers && _virtualKey == virtualKey)
+        {
+            unregister(existingId);
+            _activeId = null;
         }
         var candidateId = _activeId == firstId ? secondId : firstId;
         if (!register(candidateId, modifiers, virtualKey))

@@ -173,6 +173,33 @@ public sealed class InteractionRegressionTests
     }
 
     [TestMethod]
+    public void ForcedHotKeyReRegistrationRefreshesSameChordAndClearsActiveIdOnFailure()
+    {
+        var shouldSucceed = true;
+        var calls = new List<string>();
+        using var registration = new HotKeyRegistration(10, 11,
+            (id, _, key) =>
+            {
+                calls.Add($"register:{id}:{key}");
+                return shouldSucceed;
+            },
+            id => calls.Add($"unregister:{id}"));
+
+        Assert.IsTrue(registration.TryRegister(0, 0x73));
+        Assert.IsTrue(registration.IsRegistered);
+        Assert.IsTrue(registration.TryRegister(0, 0x73, force: true));
+        CollectionAssert.AreEqual(new[] { "register:10:115", "unregister:10", "register:10:115" }, calls);
+        Assert.IsTrue(registration.IsRegistered);
+
+        shouldSucceed = false;
+        Assert.IsFalse(registration.TryRegister(0, 0x73, force: true));
+        Assert.IsFalse(registration.IsRegistered);
+        CollectionAssert.AreEqual(
+            new[] { "register:10:115", "unregister:10", "register:10:115", "unregister:10", "register:10:115" },
+            calls);
+    }
+
+    [TestMethod]
     public void MovingEarlierAnnotationUndoesWholeGestureWithoutDeletingNewerAnnotation() => OnSta(() =>
     {
         var surface = CreateSurface();

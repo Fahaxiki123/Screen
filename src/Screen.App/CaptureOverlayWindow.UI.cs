@@ -36,6 +36,10 @@ internal sealed partial class CaptureOverlayWindow
             {
                 _entryMode = mode;
                 UpdateModeButtons();
+                if (mode is CaptureEntryMode.Ocr or CaptureEntryMode.Translation)
+                {
+                    _ = _ocrEngine.WarmUpAsync();
+                }
             };
             _modeButtons.Add(mode, button);
             row.Children.Add(button);

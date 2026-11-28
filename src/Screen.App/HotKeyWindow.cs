@@ -42,9 +42,31 @@ internal sealed class HotKeyWindow : IDisposable
 
     public Func<Key, ModifierKeys, bool>? TryCaptureInEditor { get; set; }
 
-    public bool RegisterCaptureHotKey(string hotKey) => Register(_bindings[0], hotKey);
-    public bool RegisterClickThroughRecoveryHotKey(string hotKey) => Register(_bindings[1], hotKey);
-    public bool RegisterRecordHotKey(string hotKey) => Register(_bindings[2], hotKey);
+    public int LastNativeError { get; private set; }
+
+    public bool RegisterCaptureHotKey(string hotKey) => Register(_bindings[0], hotKey, force: false);
+    public bool RegisterClickThroughRecoveryHotKey(string hotKey) => Register(_bindings[1], hotKey, force: false);
+    public bool RegisterRecordHotKey(string hotKey) => Register(_bindings[2], hotKey, force: false);
+
+    internal bool RegisterCaptureHotKey(string hotKey, bool force) => Register(_bindings[0], hotKey, force);
+    internal bool RegisterClickThroughRecoveryHotKey(string hotKey, bool force) => Register(_bindings[1], hotKey, force);
+    internal bool RegisterRecordHotKey(string hotKey, bool force) => Register(_bindings[2], hotKey, force);
+
+    /// <summary>
+    /// Reinstalls the low-level keyboard hook when priority mode or F12 is active,
+    /// recovering cleanly if Windows silently unhooked it after a CPU spike or lock/unlock.
+    /// </summary>
+    public bool RefreshHookIfNeeded()
+    {
+        if (!_preferScreen && !_bindings.Any(binding => binding.Chord?.Key == VkF12))
+        {
+            return true;
+        }
+
+        _consumedKeys.Clear();
+        RemoveHook();
+        return EnsureHook();
+    }
 
     public bool TrySetPriority(bool preferScreen)
     {
@@ -78,8 +100,9 @@ internal sealed class HotKeyWindow : IDisposable
         return true;
     }
 
-    private bool Register(Binding binding, string text)
+    private bool Register(Binding binding, string text, bool force)
     {
+        LastNativeError = 0;
         if (!TryParseHotKey(text, out var modifiers, out var key))
         {
             return false;
@@ -101,8 +124,9 @@ internal sealed class HotKeyWindow : IDisposable
             if (binding.Chord != chord && NativeMethods.GetAsyncKeyState((int)chord.Key) < 0)
                 _heldWhenRegistered.Add(chord.Key);
         }
-        else if (!binding.Native.TryRegister(modifiers | NativeMethods.ModNoRepeat, chord.Key))
+        else if (!binding.Native.TryRegister(modifiers | NativeMethods.ModNoRepeat, chord.Key, force))
         {
+            LastNativeError = Marshal.GetLastWin32Error();
             return false;
         }
         binding.Chord = chord;
@@ -119,6 +143,10 @@ internal sealed class HotKeyWindow : IDisposable
         {
             _hook = NativeMethods.SetWindowsHookExW(
                 NativeMethods.WhKeyboardLl, _callback, NativeMethods.GetModuleHandle(null), 0);
+            if (_hook == 0)
+            {
+                LastNativeError = Marshal.GetLastWin32Error();
+            }
         }
         return _hook != 0;
     }

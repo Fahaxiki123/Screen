@@ -10,23 +10,28 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
     private readonly IScreenCaptureService _dxgi;
     private readonly IScreenCaptureService _gdi;
     private readonly Action _resetPrimary;
+    private readonly Func<CancellationToken, bool>? _warmUpPrimary;
     private readonly TimeSpan _idleTimeout;
     private readonly Timer _idleTimer;
     private long _lastActiveTimestamp;
     private int _activeCaptures;
+    private int _primaryReady;
+    private int _warmedUp;
     private int _disposed;
 
-    public HybridScreenCaptureService()
-        : this(DefaultIdleTimeout)
+    public HybridScreenCaptureService(bool deferPrimaryUntilWarmed = false)
+        : this(DefaultIdleTimeout, deferPrimaryUntilWarmed)
     {
     }
 
-    internal HybridScreenCaptureService(TimeSpan idleTimeout)
+    internal HybridScreenCaptureService(TimeSpan idleTimeout, bool deferPrimaryUntilWarmed = false)
     {
         var dxgi = new DxgiScreenCaptureService();
         _dxgi = dxgi;
         _gdi = new GdiScreenCaptureService();
         _resetPrimary = dxgi.Reset;
+        _warmUpPrimary = dxgi.WarmUp;
+        _primaryReady = deferPrimaryUntilWarmed ? 0 : 1;
         _idleTimeout = idleTimeout > TimeSpan.Zero ? idleTimeout : Timeout.InfiniteTimeSpan;
         _idleTimer = new Timer(OnIdleTimerTick, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
@@ -35,11 +40,15 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
         IScreenCaptureService primary,
         IScreenCaptureService fallback,
         Action resetPrimary,
-        TimeSpan idleTimeout)
+        TimeSpan idleTimeout,
+        Func<CancellationToken, bool>? warmUpPrimary = null,
+        bool deferPrimaryUntilWarmed = false)
     {
         _dxgi = primary;
         _gdi = fallback;
         _resetPrimary = resetPrimary;
+        _warmUpPrimary = warmUpPrimary;
+        _primaryReady = deferPrimaryUntilWarmed ? 0 : 1;
         _idleTimeout = idleTimeout > TimeSpan.Zero ? idleTimeout : Timeout.InfiniteTimeSpan;
         _idleTimer = new Timer(OnIdleTimerTick, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
@@ -51,6 +60,14 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
         Volatile.Write(ref _lastActiveTimestamp, Stopwatch.GetTimestamp());
         try
         {
+            if (Volatile.Read(ref _primaryReady) == 0)
+            {
+                // While DXGI/Vortice assemblies are still being pre-warmed out-of-process right
+                // after boot, serve the screenshot immediately via signed GDI instead of blocking
+                // seconds on cold native/cloud DLL verification.
+                return await _gdi.CaptureAtAsync(screenPoint, cancellationToken).ConfigureAwait(false);
+            }
+
             var frame = await _dxgi.CaptureAtAsync(screenPoint, cancellationToken).ConfigureAwait(false);
             if (frame.MayContainSystemCursor || frame.ColorSpace != CaptureColorSpace.Srgb)
             {
@@ -98,6 +115,58 @@ internal sealed class HybridScreenCaptureService : IScreenCaptureService
     }
 
     public void ReleaseSessions() => _resetPrimary();
+
+    public Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return Task.CompletedTask;
+        }
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
+        if (Interlocked.Exchange(ref _warmedUp, 1) != 0)
+        {
+            return Task.CompletedTask;
+        }
+        return Task.Run(() =>
+        {
+            var timer = Stopwatch.StartNew();
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var sessionReady = _warmUpPrimary?.Invoke(cancellationToken) ?? true;
+                _ = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point(0, 0));
+                using var bitmap = new System.Drawing.Bitmap(1, 1, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+                graphics.Clear(System.Drawing.Color.Black);
+                if (sessionReady)
+                {
+                    Volatile.Write(ref _lastActiveTimestamp, Stopwatch.GetTimestamp());
+                    ScheduleIdleRelease();
+                }
+                else
+                {
+                    // Allow a later SessionUnlock/ConsoleConnect event to establish the live DXGI session.
+                    Interlocked.Exchange(ref _warmedUp, 0);
+                }
+                Interlocked.Exchange(ref _primaryReady, 1);
+                SimpleLogger.LogInfo(
+                    $"Capture pipeline warmed up in {timer.Elapsed.TotalMilliseconds:F1} ms (dxgi session: {sessionReady})");
+            }
+            catch (OperationCanceledException)
+            {
+                Interlocked.Exchange(ref _warmedUp, 0);
+                throw;
+            }
+            catch (Exception exception)
+            {
+                Interlocked.Exchange(ref _primaryReady, 1);
+                SimpleLogger.LogWarning($"Capture pipeline warm-up skipped: {exception.Message}");
+            }
+        });
+    }
 
     public void Dispose()
     {

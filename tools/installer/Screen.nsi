@@ -346,6 +346,10 @@ Section "Uninstall"
   ${If} $0 == '$\"$INSTDIR\Screen.exe$\" --startup'
     DeleteRegValue HKCU "${RUN_KEY}" "Screen"
   ${EndIf}
+  ; Remove current-user parallel logon task if registered by StartupService.
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -Command "try { $$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $$s = New-Object -ComObject Schedule.Service; $$s.Connect(); $$f = $$s.GetFolder([string][char]92); foreach ($$n in @(\"Flick-AutoStart-$$sid\", \"Flick-AutoStart\")) { try { $$f.DeleteTask($$n, 0) } catch {} } } catch {}"'
+  Pop $0
+  Pop $1
   ${If} $OwnsRegistration == 1
     Delete "$SMPROGRAMS\Flick\Flick.lnk"
     Delete "$SMPROGRAMS\Flick\卸载 Flick.lnk"

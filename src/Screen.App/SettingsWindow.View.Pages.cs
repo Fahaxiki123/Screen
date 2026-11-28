@@ -13,7 +13,7 @@ public partial class SettingsWindow
         var page = new StackPanel();
         AddGroup(page, "启动", out var startup);
         AddSettingRow(startup, LucideIconKind.Settings2, "登录 Windows 后自动启动",
-            "通过当前用户启动项运行，可随时在任务管理器中关闭",
+            "登录时并行启动到系统托盘，避免被其他开机项排队阻塞",
             CreateBoundToggle(nameof(SettingsViewModel.StartWithWindows)));
 
         AddGroup(page, "运行状态与版本", out var status);

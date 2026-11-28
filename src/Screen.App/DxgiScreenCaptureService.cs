@@ -35,6 +35,13 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
             {
                 throw;
             }
+            catch (TimeoutException)
+            {
+                // A static desktop returns WAIT_TIMEOUT on a brand-new duplication session;
+                // rebuilding D3D11/DXGI a second time only adds another timeout delay before
+                // HybridScreenCaptureService falls back to GDI.
+                throw;
+            }
             catch
             {
                 ResetSession();
@@ -114,6 +121,86 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
         lock (_gate)
         {
             ResetSession();
+        }
+    }
+
+    /// <summary>
+    /// Pre-loads Vortice/DXGI/D3D11/Mathematics assemblies and establishes a live
+    /// Desktop Duplication session for the active monitor (falling back to D3D11
+    /// device initialization when desktop duplication is temporarily unavailable,
+    /// such as on the Windows lock screen).
+    /// </summary>
+    internal bool WarmUp(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        NativeMethods.TryGetPhysicalCursorPosition(out var cursor);
+        var point = new PixelPoint(cursor.X, cursor.Y);
+
+        lock (_gate)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_session is not null)
+            {
+                return true;
+            }
+
+            try
+            {
+                var session = CreateSession(point);
+                _session = session;
+                try
+                {
+                    _ = session.Capture(cancellationToken);
+                }
+                catch (TimeoutException)
+                {
+                    // Static desktop during startup: the duplication session is already created and cached.
+                }
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                ResetSession();
+                SimpleLogger.LogInfo($"DXGI session warm-up deferred ({exception.Message}); warming up D3D11 device only.");
+                WarmUpDeviceOnly(cancellationToken);
+                return false;
+            }
+        }
+    }
+
+    private static void WarmUpDeviceOnly(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var factory = CreateDXGIFactory1<IDXGIFactory1>();
+        if (factory.EnumAdapters1(0, out var adapter).Failure)
+        {
+            return;
+        }
+        using (adapter)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var featureLevels = new[]
+            {
+                FeatureLevel.Level_11_1,
+                FeatureLevel.Level_11_0,
+                FeatureLevel.Level_10_1,
+                FeatureLevel.Level_10_0
+            };
+            if (D3D11CreateDevice(
+                    adapter,
+                    DriverType.Unknown,
+                    DeviceCreationFlags.BgraSupport,
+                    featureLevels,
+                    out ID3D11Device? device,
+                    out ID3D11DeviceContext? context).Success)
+            {
+                context?.Dispose();
+                device?.Dispose();
+            }
         }
     }
 
@@ -214,9 +301,13 @@ internal sealed class DxgiScreenCaptureService : IScreenCaptureService
             var acquire = _duplication.AcquireNextFrame(120, out var frameInfo, out var desktopResource);
             if (acquire.Failure)
             {
-                if (acquire == Vortice.DXGI.ResultCode.WaitTimeout && _lastFrame is not null)
+                if (acquire == Vortice.DXGI.ResultCode.WaitTimeout)
                 {
-                    return _lastFrame with { CapturedAt = DateTimeOffset.UtcNow };
+                    if (_lastFrame is not null)
+                    {
+                        return _lastFrame with { CapturedAt = DateTimeOffset.UtcNow };
+                    }
+                    throw new TimeoutException("DXGI output duplication timed out waiting for the initial desktop frame.");
                 }
                 acquire.CheckError();
             }
